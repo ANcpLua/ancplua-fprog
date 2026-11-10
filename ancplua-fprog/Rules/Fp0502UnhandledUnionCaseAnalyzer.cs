@@ -12,7 +12,8 @@ namespace ancplua_fprog.Rules;
 /// FP0502: a <c>switch</c> expression over a union value has a case that no arm without a <c>when</c>
 /// clause names with a type test for the case's own type (<see cref="UnionSwitchCoverage.CasesNotNamed"/>).
 /// A case reached only through a catch-all, a base type or an arm with a <c>when</c> clause counts as
-/// not handled. Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
+/// not handled, and so does a case that the code at the switch cannot name (a private nested case seen
+/// from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
 /// statements are not checked.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -44,15 +45,22 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     {
         var switchExpression = (ISwitchExpressionOperation)context.Operation;
         if (switchExpression.Syntax is not SwitchExpressionSyntax syntax
-            || !model.TryGetCoverage(switchExpression, out var coverage)
-            || coverage.CasesNotNamed.IsEmpty)
+            || !model.TryGetCoverage(switchExpression, out var coverage))
             return;
 
-        var missing = string.Join(", ", coverage.CasesNotNamed.Select(static @case => @case.Name));
+        // A case that the code at the switch cannot name (a private nested case seen from outside the
+        // union) is in none of the coverage lists, yet no arm handles it. GetCases still has it.
+        var nameable = coverage.Cases;
+        var missing = coverage.CasesNotNamed.AddRange(
+            model.GetCases(switchExpression.Value.Type)
+                .RemoveAll(@case => nameable.Contains(@case, SymbolEqualityComparer.Default)));
+        if (missing.IsEmpty)
+            return;
+
         context.ReportDiagnostic(Diagnostic.Create(
             Rule,
             syntax.SwitchKeyword.GetLocation(),
             coverage.Union.Name,
-            missing));
+            string.Join(", ", missing.Select(static @case => @case.Name))));
     }
 }
