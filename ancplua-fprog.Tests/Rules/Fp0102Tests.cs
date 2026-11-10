@@ -154,13 +154,68 @@ public sealed class Fp0102Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0102_TargetTypedNewRandomReportsAtNewKeyword_Reports() => VerifyAsync("""
+    public Task FP0102_TargetTypedNewRandom_NoReport() => VerifyAsync("""
         using System;
 
         [Fprog.FunctionalCore]
         public static class Dice
         {
-            public static Random Create() => {|FP0102:new|}(7);
+            public static Random Create() => new(7);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0102_TargetTypedNewRandomHasNoCatalogSpan_Reports() => VerifyAsync("""
+        using System;
+
+        [Fprog.FunctionalCore]
+        public static class Dice
+        {
+            private static readonly Random Rng = new();
+
+            public static int Roll() => Rng.{|FP0102:Next|}(1, 7);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0102_TargetTypedNewRandomInLocalsArgumentsAndDynamicSeed_NoReport() => VerifyAsync("""
+        using System;
+
+        [Fprog.FunctionalCore]
+        public static class Dice
+        {
+            public static Random Seeded(dynamic seed) => new(seed);
+
+            public static Random[] Pair() => [new(1), new()];
+
+            public static Random Pass(Random random) => random;
+
+            public static Random Argument() => Pass(new());
+
+            public static Random Local()
+            {
+                Random random = new(3);
+                return random;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0102_ExplicitNewRandomInStaticFieldAndLocal_Reports() => VerifyAsync("""
+        using System;
+
+        [Fprog.FunctionalCore]
+        public static class Dice
+        {
+            private static readonly Random Rng = new {|FP0102:Random|}();
+
+            private static readonly Random Seeded = new System.{|FP0102:Random|}(7);
+
+            public static Random Local()
+            {
+                Random random = new {|FP0102:Random|}(3);
+                return random;
+            }
         }
         """);
 

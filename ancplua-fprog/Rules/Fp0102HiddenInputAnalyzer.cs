@@ -14,7 +14,8 @@ namespace ancplua_fprog.Rules;
 /// <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
 /// static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
 /// defers binding to run time. Reported at the member's name token (inside any parentheses), or at
-/// <c>Random</c> in the object creation (the <c>new</c> keyword for a target-typed <c>new(...)</c>).
+/// <c>Random</c> in the object creation. A target-typed <c>new(...)</c> has no <c>Random</c> token
+/// and is not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
@@ -46,7 +47,10 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
     private static void Analyze(OperationAnalysisContext context)
     {
         var operation = context.Operation;
-        if (!IsHiddenInput(operation, context.CancellationToken)
+
+        // A target-typed new(...) has no Random token, so the row names no span for it.
+        if (operation.Syntax is ImplicitObjectCreationExpressionSyntax
+            || !IsHiddenInput(operation, context.CancellationToken)
             || IsInsideNameOf(operation)
             || !CoreScope.IsInCore(context.ContainingSymbol))
         {
@@ -152,7 +156,6 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
         MemberAccessExpressionSyntax memberAccess => ReportLocation(memberAccess.Name),
         MemberBindingExpressionSyntax memberBinding => ReportLocation(memberBinding.Name),
         ObjectCreationExpressionSyntax creation => ReportLocation(creation.Type),
-        ImplicitObjectCreationExpressionSyntax creation => creation.NewKeyword.GetLocation(),
         QualifiedNameSyntax qualified => ReportLocation(qualified.Right),
         AliasQualifiedNameSyntax aliasQualified => ReportLocation(aliasQualified.Name),
         SimpleNameSyntax name => name.Identifier.GetLocation(),
