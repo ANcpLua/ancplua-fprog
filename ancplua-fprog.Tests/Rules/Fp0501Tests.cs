@@ -675,6 +675,633 @@ public sealed class Fp0501Tests(TestContext testContext)
         }
         """ + Shape);
 
+    // Second pass: other places a switch can live.
+
+    [TestMethod]
+    public Task FP0501_FieldAndPropertyInitializersWithPrimaryConstructor_Reports() => VerifyAsync("""
+        public sealed class Holder(Shape shape)
+        {
+            private static readonly System.Func<Shape, int> Measure = value => value switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:Shape|} => 0
+            };
+
+            private readonly int _tag = shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:_|} => 0
+            };
+
+            public int Tag { get; } = shape switch
+            {
+                Shape.Square => 2,
+                {|FP0501:var other|} => other.GetHashCode()
+            };
+
+            public int Sum => _tag + Tag + Measure(shape);
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_ConstructorIndexerOperatorAndBlockAccessor_Reports() => VerifyAsync("""
+        public readonly record struct Measure
+        {
+            public Measure(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle:
+                        Value = 1;
+                        break;
+                    {|FP0501:default|}:
+                        Value = 0;
+                        break;
+                }
+            }
+
+            public int Value { get; }
+
+            public int this[Shape shape] => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:{ }|} => 0
+            };
+
+            public static int operator +(Measure measure, Shape shape) => measure.Value + (shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:not null|} => 0,
+                null => -1
+            });
+
+            public static int Block(Shape shape)
+            {
+                return shape switch
+                {
+                    Shape.Circle => 1,
+                    {|FP0501:Shape other|} => other.GetHashCode()
+                };
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_PartialMethodInterfaceMemberAndGenericType_Reports() => VerifyAsync("""
+        public static partial class Area
+        {
+            public static partial int Of(Shape shape);
+
+            public static partial int Of(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:_|} => 0
+            };
+        }
+
+        public interface IMeasure
+        {
+            static int Of(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:object|} => 0
+            };
+        }
+
+        public sealed class Box<T>
+        {
+            public static int Of(Shape shape, T value) => shape switch
+            {
+                Shape.Circle => value!.GetHashCode(),
+                {|FP0501:_|} => 0
+            };
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_AsyncIteratorAndQueryExpression_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+        using System.Linq;
+        using System.Threading.Tasks;
+
+        public static class Area
+        {
+            public static async Task<int> OfAsync(Shape shape)
+            {
+                await Task.Yield();
+                return shape switch
+                {
+                    Shape.Circle => 1,
+                    {|FP0501:_|} => 0
+                };
+            }
+
+            public static IEnumerable<int> Each(IEnumerable<Shape> shapes)
+            {
+                foreach (var shape in shapes)
+                {
+                    yield return shape switch
+                    {
+                        Shape.Circle => 1,
+                        {|FP0501:var other|} => other.GetHashCode()
+                    };
+                }
+            }
+
+            public static IEnumerable<int> Query(IEnumerable<Shape> shapes)
+                => from shape in shapes
+                   let tag = shape switch { Shape.Circle => 1, {|FP0501:{ }|} => 0 }
+                   select tag;
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_InterpolationObjectInitializerAndCollectionExpression_Reports() => VerifyAsync("""
+        using System.Collections.Immutable;
+
+        public sealed class Label
+        {
+            public string Text { get; init; } = "";
+
+            public static string Of(Shape shape) => $"{(shape switch { Shape.Circle => "c", {|FP0501:_|} => "?" })}";
+
+            public static Label Make(Shape shape) => new()
+            {
+                Text = shape switch { Shape.Square => "s", {|FP0501:Shape other|} => other.ToString() }
+            };
+
+            public static ImmutableArray<int> Tags(Shape shape) => [shape switch { Shape.Circle => 1, {|FP0501:not null|} => 0, null => -1 }];
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_ExtensionBlockMembers_Reports() => VerifyAsync("""
+        public static class ShapeExtensions
+        {
+            extension(Shape shape)
+            {
+                public int Tag => shape switch
+                {
+                    Shape.Circle => 1,
+                    {|FP0501:_|} => 0
+                };
+
+                public int Rank()
+                {
+                    switch (shape)
+                    {
+                        case Shape.Square:
+                            return 2;
+                        {|FP0501:default|}:
+                            return 0;
+                    }
+                }
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_SwitchOverThisInsideUnion_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Light
+        {
+            private Light() { }
+
+            public int Tag => this switch
+            {
+                Red => 1,
+                {|FP0501:_|} => 0
+            };
+
+            public int Rank()
+            {
+                switch (this)
+                {
+                    case Green:
+                        return 2;
+                    case {|FP0501:Light|}:
+                        return 0;
+                }
+
+                return -1;
+            }
+
+            public sealed record Red : Light;
+
+            public sealed record Green : Light;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0501_ClassUnionNestedInGenericType_Reports() => VerifyAsync("""
+        public static class Outer<T>
+        {
+            [Fprog.Union]
+            public abstract class Option
+            {
+                private Option() { }
+
+                public sealed class Some(T value) : Option
+                {
+                    public T Value { get; } = value;
+                }
+
+                public sealed class None : Option;
+            }
+
+            public static int Of(Option option) => option switch
+            {
+                Option.Some => 1,
+                {|FP0501:Outer<T>.Option other|} => other.GetHashCode()
+            };
+
+            public static int Closed(Outer<int>.Option option) => option switch
+            {
+                Outer<int>.Option.Some some => some.Value,
+                {|FP0501:_|} => 0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0501_NestedUnionValueAgainstOuterUnionType_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Node
+        {
+            private Node() { }
+
+            public sealed record Leaf : Node;
+
+            [Fprog.Union]
+            public abstract record Branch : Node
+            {
+                private Branch() { }
+
+                public sealed record Pair : Branch;
+
+                public sealed record Triple : Branch;
+            }
+        }
+
+        public static class Walk
+        {
+            public static int Of(Node.Branch branch) => branch switch
+            {
+                Node.Branch.Pair => 2,
+                {|FP0501:Node other|} => other.GetHashCode()
+            };
+        }
+        """);
+
+    // Second pass: spans.
+
+    [TestMethod]
+    public Task FP0501_QualifiedAliasedAndCommentedPatterns_Reports() => VerifyAsync("""
+        using S = Shape;
+        using O = System.Object;
+
+        public static class Area
+        {
+            public static int Global(Shape shape) => shape switch
+            {
+                global::Shape.Circle => 1,
+                {|FP0501:global::Shape other|} => other.GetHashCode()
+            };
+
+            public static int Alias(Shape shape) => shape switch
+            {
+                S.Circle => 1,
+                {|FP0501:S|} => 0
+            };
+
+            public static int AliasObject(Shape shape) => shape switch
+            {
+                S.Circle => 1,
+                {|FP0501:O other|} => other.GetHashCode()
+            };
+
+            public static int Qualified(Shape shape) => shape switch
+            {
+                S.Circle => 1,
+                {|FP0501:global::System.Object|} => 0
+            };
+
+            public static int Commented(Shape shape) => shape switch
+            {
+                S.Circle => 1,
+                {|FP0501:var /* the rest */
+                    other|} => other.GetHashCode()
+            };
+
+            public static int Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case S.Circle:
+                        return 1;
+                    case {|FP0501:global::Shape|}:
+                        return 0;
+                }
+
+                return -1;
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_ParenthesizedPatternsReportInnerPattern_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Mixed(Shape shape) => shape switch
+            {
+                (Shape.Circle or {|FP0501:_|}) and ({|FP0501:{ }|}) => 1
+            };
+
+            public static int Arm(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                (({|FP0501:Shape|})) => 0
+            };
+
+            public static int Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle:
+                        return 1;
+                    case ({|FP0501:Shape|}):
+                        return 0;
+                }
+
+                return -1;
+            }
+
+            public static int Object(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle:
+                        return 1;
+                    case (({|FP0501:object|})) when shape.GetHashCode() > 0:
+                        return 0;
+                }
+
+                return -1;
+            }
+
+            public static int Var(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle:
+                        return 1;
+                    case ({|FP0501:var other|}):
+                        return other.GetHashCode();
+                }
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_NotNullWrittenWithParenthesesOrTypedDefault_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Parenthesized(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:not (null)|} => 0,
+                null => -1
+            };
+
+            public static int Typed(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:not default(Shape)|} => 0,
+                null => -1
+            };
+        }
+        """ + Shape);
+
+    // Second pass: shapes of the switched value.
+
+    [TestMethod]
+    public Task FP0501_ConditionalAccessAndCastValue_Reports() => VerifyAsync("""
+        #nullable enable
+        public sealed record Holder(Shape Shape);
+
+        public static class Area
+        {
+            public static int Conditional(Holder? holder) => holder?.Shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:_|} => 0
+            };
+
+            public static int Cast(Entity entity) => ((Shape)entity) switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:Entity other|} => other.GetHashCode()
+            };
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_ChainedTypeParameterAndImplementedInterfaces_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Chained<T, TBase>(T value) where T : TBase where TBase : Shape => value switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:TBase other|} => other.GetHashCode()
+            };
+
+            public static int Interface<T>(T value) where T : Shape => value switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:IShape|} => 0
+            };
+
+            public static int Equatable(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:System.IEquatable<Shape> other|} => other.GetHashCode()
+            };
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_DefaultLabelBesideOnlyNullCase_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Of(Shape shape)
+            {
+                switch (shape)
+                {
+                    case null:
+                        return -1;
+                    {|FP0501:default|}:
+                        return 0;
+                }
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_UnsafeExternAbstractAndEmptySwitch_Reports() => VerifyAsync("""
+        public abstract unsafe class Native
+        {
+            [System.Runtime.InteropServices.DllImport("native")]
+            public static extern int Measure(int* value);
+
+            public abstract int Of(Shape shape);
+
+            public static int Read(Shape shape, int* value) => shape switch
+            {
+                Shape.Circle => *value,
+                {|FP0501:_|} => 0
+            };
+
+            public static int Empty(Shape shape)
+            {
+                switch (shape)
+                {
+                }
+
+                return 0;
+            }
+        }
+        """ + Shape);
+
+    // Second pass: correct code that looks similar.
+
+    [TestMethod]
+    public Task FP0501_CaseTypesWithEmptyPropertyPatternOrDiscardDesignation_NoReport() => VerifyAsync("""
+        public static class Area
+        {
+            public static double Of(Shape shape) => shape switch
+            {
+                Shape.Circle { } c => c.Radius,
+                Shape.Square _ => 0,
+                null => -1
+            };
+
+            public static int Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle { }:
+                        return 1;
+                    case Shape.Square and { Side: > 0 }:
+                        return 2;
+                }
+
+                return -1;
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_PositionalPatternOverUnionWithVarOrDiscardComponents_NoReport() => VerifyAsync("""
+        public static class Area
+        {
+            public static double Of(Pair pair) => pair switch
+            {
+                Pair.One => 1,
+                (var left, var right) => left + right
+            };
+
+            public static double Discards(Pair pair) => pair switch
+            {
+                Pair.Two => 2,
+                (_, _) => 0
+            };
+        }
+
+        [Fprog.Union]
+        public abstract record Pair
+        {
+            private Pair() { }
+
+            public void Deconstruct(out double left, out double right) => (left, right) = (1, 2);
+
+            public sealed record One : Pair;
+
+            public sealed record Two : Pair;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0501_SwitchOverBoxedValueOrTupleOfUnions_NoReport() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Boxed(Shape shape) => ((object)shape) switch
+            {
+                Shape.Circle => 1,
+                _ => 0
+            };
+
+            public static int Both(Shape left, Shape right) => (left, right) switch
+            {
+                (Shape.Circle, _) => 1,
+                (_, Shape.Circle) => 2,
+                _ => 0
+            };
+
+            public static int Statement(Shape left, Shape right)
+            {
+                switch (left, right)
+                {
+                    case (Shape.Square, var other):
+                        return other.GetHashCode();
+                    default:
+                        return 0;
+                }
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_FunctionalCoreWithLinqAndLocalMutation_NoReport() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Geometry
+        {
+            public static double Total(ImmutableArray<Shape> shapes)
+            {
+                var total = 0.0;
+                foreach (var shape in shapes)
+                    total += Area(shape);
+
+                return total;
+            }
+
+            public static double Area(Shape shape) => shape switch
+            {
+                Shape.Circle { Radius: > 0 and var r } => r * r * 3.14,
+                Shape.Circle => 0,
+                Shape.Square(var side) => side * side,
+                null => 0
+            };
+
+            public static ImmutableArray<string> Names(ImmutableArray<Shape> shapes)
+                => [.. shapes.Select(shape => shape switch
+                {
+                    Shape.Circle c when c.Radius is var r && r > 1 => "big circle",
+                    Shape.Circle => "circle",
+                    Shape.Square { Side: _ } => "square",
+                    null => "none"
+                })];
+
+            public static int Nested(int day, Shape shape) => day switch
+            {
+                0 => Area(shape) switch { > 1 => 1, _ => 0 },
+                _ => shape switch { Shape.Circle => 2, Shape.Square => 3, null => 4 }
+            };
+        }
+        """ + Shape);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);
 }

@@ -91,7 +91,6 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
 
     private static bool IsCatchAll(Compilation compilation, IPatternOperation pattern, ITypeSymbol valueType)
     {
-
         switch (pattern)
         {
             case IDiscardPatternOperation:
@@ -119,15 +118,27 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// The pattern as written. Observed with Roslyn 5.9.0: the operation of <c>var _</c> and of
-    /// <c>var (a, b)</c> has the designation as its syntax, so the enclosing <c>var</c> pattern is used.
+    /// The pattern as written, without its parentheses. Observed with Roslyn 5.9.0: the operation of
+    /// <c>var _</c> and of <c>var (a, b)</c> has the designation as its syntax, so the enclosing
+    /// <c>var</c> pattern is used; in a <c>case (Shape):</c> label and in a <c>((Shape)) =&gt;</c> arm the
+    /// type pattern's syntax is a parenthesized expression (inside a constant pattern), not a
+    /// parenthesized pattern. A constant pattern has the span of its expression, so it is unwrapped too.
     /// </summary>
     private static SyntaxNode GetPatternSyntax(IPatternOperation pattern)
     {
         var syntax = pattern.Syntax;
-        while (syntax is ParenthesizedPatternSyntax parenthesized)
-            syntax = parenthesized.Pattern;
+        while (Unparenthesize(syntax) is { } inner)
+            syntax = inner;
 
         return syntax is VariableDesignationSyntax { Parent: VarPatternSyntax varPattern } ? varPattern : syntax;
     }
+
+    private static SyntaxNode? Unparenthesize(SyntaxNode syntax)
+        => syntax switch
+        {
+            ParenthesizedPatternSyntax parenthesized => parenthesized.Pattern,
+            ParenthesizedExpressionSyntax parenthesized => parenthesized.Expression,
+            ConstantPatternSyntax constant => constant.Expression,
+            _ => null
+        };
 }
