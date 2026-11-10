@@ -16,3 +16,4 @@ FP0202 | Functional | Warning | Do not declare set accessors in the functional c
 FP0302 | Functional | Warning | Do not call partial members in the functional core
 FP0303 | Functional | Warning | Do not return null or default in the functional core
 FP0401 | Functional | Warning | A union must be abstract
+FP0402 | Functional | Warning | Union constructors must be private
