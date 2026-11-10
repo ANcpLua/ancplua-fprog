@@ -496,7 +496,7 @@ public sealed class UnionModelTests
     }
 
     [TestMethod]
-    public void TypeParametersWithCyclicConstraints_AreNotAUnionValue()
+    public void CyclicConstraints_AreBrokenByRoslynAndGiveNoUnionValue()
     {
         var compilation = TestCompilation.CreateWithError("""
             namespace Uses
@@ -507,8 +507,15 @@ public sealed class UnionModelTests
                 }
             }
             """, "CS0454");
+        var first = ParameterType(compilation, "Cyclic") as ITypeParameterSymbol;
 
-        Assert.IsNull(UnionModel.GetUnionType(ParameterType(compilation, "Cyclic")));
+        // Roslyn drops the constraint that closes the cycle, so the cycle guard of GetUnionType has
+        // nothing to stop here. This pins that, and that the answer is null and not a hang.
+        Assert.IsNotNull(first);
+        var second = Assert.IsInstanceOfType<ITypeParameterSymbol>(Assert.ContainsSingle(first.ConstraintTypes));
+        Assert.IsEmpty(second.ConstraintTypes);
+        Assert.IsNull(UnionModel.GetUnionType(first));
+        Assert.IsNull(UnionModel.GetUnionType(second));
     }
 
     [TestMethod]
@@ -615,7 +622,7 @@ public sealed class UnionModelTests
     {
         var first = $"Many.Union{index}<T>.First";
         var second = $"Many.Union{index}<T>.Second";
-        return $"definition: {first}, {second}, Many.Third{index}; value: {first}, {second}; without own arm: {second}; unhandled: ";
+        return $"definition: {first}, {second}, Many.Third{index}; value: {first}, {second}; not named: {second}; without own arm: {second}; unhandled: ";
     }
 
     private static string Answers(UnionModel model, Compilation compilation, int index)
@@ -624,6 +631,7 @@ public sealed class UnionModelTests
         Assert.IsTrue(model.TryGetCoverage(switchExpression, out var coverage));
         return $"definition: {Names(model.GetCases(compilation.GetNamedType($"Many.Union{index}`1")))}"
                + $"; value: {Names(coverage.Cases)}"
+               + $"; not named: {Names(coverage.CasesNotNamed)}"
                + $"; without own arm: {Names(coverage.CasesWithoutOwnArm)}"
                + $"; unhandled: {Names(coverage.UnhandledCases)}";
     }

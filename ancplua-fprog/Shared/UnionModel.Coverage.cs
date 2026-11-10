@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
@@ -16,35 +17,54 @@ namespace ancplua_fprog.Shared;
 //   as first parameter; a member of an extension block without it), null for a tuple, and the type ITuple
 //   when the positional pattern is a length test at run time.
 // - In { A.B: p } the pattern of A is an implicit recursive pattern with the subpattern B: p.
+// - The members a pattern reads belong to the type the arm names: Result<string>.Ok(string v) reads
+//   Result<string>.Ok.Deconstruct(out string), also when the switched value is a Result<string?>.
+// - A generic extension member is constructed without nullable annotations: Box<string?>.Full(string item)
+//   reads Deconstruct<string>(this Box<string>.Full, out string) for Deconstruct<T>(this Box<T>.Full, out T).
 internal sealed partial class UnionModel
 {
-    /// <summary>How the pattern of one arm relates to one case. The order matters: a later value is stronger.</summary>
+    /// <summary>A type test that names the case and therefore matches every non-null value of it.</summary>
+    private const ArmMatch OwnArm = ArmMatch.Named | ArmMatch.Covered | ArmMatch.Own;
+
+    /// <summary>What the pattern of one arm does with one case. The patterns of several arms combine with "or".</summary>
+    [Flags]
     private enum ArmMatch
     {
-        /// <summary>Some non-null value of the case does not match.</summary>
-        Partial,
+        None = 0,
 
-        /// <summary>Every non-null value of the case matches, but no type test names the case.</summary>
-        CatchAll,
+        /// <summary>A type test names the case; the pattern may still reject some values of the case.</summary>
+        Named = 1,
+
+        /// <summary>Every non-null value of the case matches.</summary>
+        Covered = 2,
 
         /// <summary>Every non-null value of the case matches, and that rests on a type test that names the case.</summary>
-        Own
+        Own = 4
     }
 
     /// <summary>
-    /// Says which cases the arms of <paramref name="switchExpression"/> handle. Returns
+    /// Says which cases the arms of <paramref name="switchExpression"/> name and handle. Returns
     /// <see langword="false"/> when the switched value is not a union value (<see cref="GetUnionType"/>
     /// of its static type); <paramref name="coverage"/> is then empty.
     /// <para>
-    /// This is the one definition of "handles every case" for FP0502 and FPS001. An arm handles a case
-    /// when it has no <c>when</c> clause, tests for the case's own type with the type arguments the
-    /// value has, and matches every non-null value of the case: <c>Circle</c>, <c>Circle c</c>,
-    /// <c>Circle { }</c>, <c>Circle(var r)</c>, <c>Circle { Radius: var r }</c>, <c>Circle or Square</c>,
-    /// <c>Circle and var c</c>; not <c>Circle { Radius: > 0 }</c>, and not <c>Result&lt;int&gt;.Ok</c> on a
-    /// <c>Result&lt;T&gt;</c>. A subpattern is judged against the declared type of its input:
-    /// <c>Leaf(string name)</c> handles <c>Leaf</c> when the component is a <c>string</c>, not when it is
-    /// a <c>string?</c>; a type parameter without <c>?</c> counts as not null. Two arms that are partial
-    /// are never combined, and <c>not Circle</c> handles nothing.
+    /// An arm with a <c>when</c> clause never counts. An arm names a case when a type test in it tests
+    /// for the case's own type with the type arguments the value has, alone or as a side of <c>or</c> or
+    /// <c>and</c>: <c>Circle</c>, <c>Circle c</c>, <c>Circle { Radius: > 0 }</c>, <c>Circle or Square</c>;
+    /// not <c>Result&lt;int&gt;.Ok</c> on a <c>Result&lt;T&gt;</c>, not <c>not Circle</c>, not a catch-all.
+    /// An arm is the case's own arm when it names the case and matches every non-null value of it:
+    /// <c>Circle</c>, <c>Circle c</c>, <c>Circle { }</c>, <c>Circle(var r)</c>, <c>Circle { Radius: var r }</c>,
+    /// <c>Circle and var c</c>; not <c>Circle { Radius: > 0 }</c>. Arms are never combined: two arms that
+    /// each reject some value of a case are not its own arm together.
+    /// </para>
+    /// <para>
+    /// A subpattern is judged against the declared type of its input as the value sees it:
+    /// <c>Leaf(string name)</c> matches every <c>Leaf</c> when the component is a <c>string</c>, not when
+    /// it is a <c>string?</c>; and <c>Result&lt;string&gt;.Ok(string v)</c> does not match every <c>Ok</c>
+    /// of a <c>Result&lt;string?&gt;</c>. A type parameter without <c>?</c> and a type from code without
+    /// nullable annotations count as not null. A reference-typed input that a generic extension member
+    /// supplies for one of its type parameters (<c>out T item</c> of an extension
+    /// <c>Deconstruct&lt;T&gt;</c>) counts as nullable: Roslyn constructs such a member without the
+    /// <c>?</c> of the value.
     /// </para>
     /// </summary>
     public bool TryGetCoverage(ISwitchExpressionOperation switchExpression, out UnionSwitchCoverage coverage)
@@ -56,35 +76,49 @@ internal sealed partial class UnionModel
         }
 
         var cases = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
+        var casesNotNamed = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
         var casesWithoutOwnArm = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
         var unhandledCases = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
+        var armsCanNameEveryValue = true;
         foreach (var definition in GetAllCases(unionType.OriginalDefinition))
         {
-            if (!TryBind(definition, unionType, out var bindings) || !CanBeNamedAt(switchExpression, definition))
+            if (!TryBind(definition, unionType, out var bindings))
                 continue;
+
+            if (!CanBeNamedAt(switchExpression, definition))
+            {
+                // No arm can be asked for, but a value of this case reaches none.
+                armsCanNameEveryValue = false;
+                continue;
+            }
 
             cases.Add(definition);
-            var match = GetStrongestMatch(switchExpression, new CaseOfValue(valueType, definition, bindings));
-            if (match == ArmMatch.Own)
-                continue;
+            armsCanNameEveryValue &= BindsEveryTypeParameter(definition, bindings);
+            var match = Classify(switchExpression, new CaseOfValue(valueType, definition, bindings));
+            if ((match & ArmMatch.Named) == 0)
+                casesNotNamed.Add(definition);
 
-            casesWithoutOwnArm.Add(definition);
-            if (match == ArmMatch.Partial)
+            if ((match & ArmMatch.Own) == 0)
+                casesWithoutOwnArm.Add(definition);
+
+            if ((match & ArmMatch.Covered) == 0)
                 unhandledCases.Add(definition);
         }
 
         coverage = new UnionSwitchCoverage(
             unionType.OriginalDefinition,
             cases.ToImmutable(),
+            casesNotNamed.ToImmutable(),
             casesWithoutOwnArm.ToImmutable(),
-            unhandledCases.ToImmutable());
+            unhandledCases.ToImmutable(),
+            armsCanNameEveryValue);
         return true;
     }
 
     /// <summary>
     /// False when the code at the switch cannot name the case: a private nested case seen from outside,
-    /// an internal case of another assembly, or a file-local case of another file (which
-    /// <see cref="SemanticModel.IsAccessible"/> calls accessible).
+    /// an internal case of another assembly, or a case that is, or is nested in, a file-local type of
+    /// another file (which <see cref="SemanticModel.IsAccessible"/> calls accessible).
     /// </summary>
     private static bool CanBeNamedAt(ISwitchExpressionOperation switchExpression, INamedTypeSymbol definition)
     {
@@ -95,32 +129,38 @@ internal sealed partial class UnionModel
         if (!semanticModel.IsAccessible(syntax.SpanStart, definition))
             return false;
 
-        if (!definition.IsFileLocal)
-            return true;
-
-        foreach (var reference in definition.DeclaringSyntaxReferences)
+        for (var type = definition; type is not null; type = type.ContainingType)
         {
-            if (reference.SyntaxTree == syntax.SyntaxTree)
+            if (type.IsFileLocal && !IsDeclaredIn(type, syntax.SyntaxTree))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsDeclaredIn(INamedTypeSymbol type, SyntaxTree tree)
+    {
+        foreach (var reference in type.DeclaringSyntaxReferences)
+        {
+            if (reference.SyntaxTree == tree)
                 return true;
         }
 
         return false;
     }
 
-    /// <summary>The strongest match of an arm without a <c>when</c> clause. An arm with one never counts.</summary>
-    private ArmMatch GetStrongestMatch(ISwitchExpressionOperation switchExpression, CaseOfValue target)
+    /// <summary>What the arms without a <c>when</c> clause do with the case. An arm with one never counts.</summary>
+    private ArmMatch Classify(ISwitchExpressionOperation switchExpression, CaseOfValue target)
     {
-        var strongest = ArmMatch.Partial;
+        var match = ArmMatch.None;
         foreach (var arm in switchExpression.Arms)
         {
             if (arm.Guard is null)
-                strongest = Stronger(strongest, Classify(arm.Pattern, target));
+                match |= Classify(arm.Pattern, target);
         }
 
-        return strongest;
+        return match;
     }
-
-    private static ArmMatch Stronger(ArmMatch left, ArmMatch right) => left > right ? left : right;
 
     private ArmMatch Classify(IPatternOperation pattern, CaseOfValue target)
     {
@@ -128,24 +168,32 @@ internal sealed partial class UnionModel
         {
             case IDiscardPatternOperation:
             case IDeclarationPatternOperation { MatchesNull: true }: // var x
-                return ArmMatch.CatchAll;
+                return ArmMatch.Covered;
             case IDeclarationPatternOperation { MatchedType: { } declaredType }:
                 return ClassifyTypeTest(declaredType, target);
             case ITypePatternOperation typePattern:
                 return ClassifyTypeTest(typePattern.MatchedType, target);
             case IRecursivePatternOperation recursive:
+                // With a subpattern that can reject a value, the pattern still names the case.
                 var typeTest = ClassifyTypeTest(recursive.MatchedType, target);
-                return typeTest != ArmMatch.Partial && HasIrrefutableSubpatterns(recursive) ? typeTest : ArmMatch.Partial;
+                return (typeTest & ArmMatch.Covered) == 0 || HasIrrefutableSubpatterns(recursive, GetInput(recursive, target))
+                    ? typeTest
+                    : typeTest & ArmMatch.Named;
             case INegatedPatternOperation negated:
-                return IsNullConstant(negated.Pattern) ? ArmMatch.CatchAll : ArmMatch.Partial;
+                return IsNullConstant(negated.Pattern) || IsTestForAnotherCase(negated.Pattern, target)
+                    ? ArmMatch.Covered
+                    : ArmMatch.None;
             case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.Or } either:
-                return Stronger(Classify(either.LeftPattern, target), Classify(either.RightPattern, target));
+                return Classify(either.LeftPattern, target) | Classify(either.RightPattern, target);
             case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } both:
                 var left = Classify(both.LeftPattern, target);
                 var right = Classify(both.RightPattern, target);
-                return left == ArmMatch.Partial || right == ArmMatch.Partial ? ArmMatch.Partial : Stronger(left, right);
+                var named = (left | right) & ArmMatch.Named;
+                return (left & right & ArmMatch.Covered) == 0
+                    ? named
+                    : named | ArmMatch.Covered | ((left | right) & ArmMatch.Own);
             default: // constant, relational, list and slice patterns
-                return ArmMatch.Partial;
+                return ArmMatch.None;
         }
     }
 
@@ -154,43 +202,67 @@ internal sealed partial class UnionModel
     {
         var definition = target.Definition;
         if (SymbolEqualityComparer.Default.Equals(testedType.OriginalDefinition, definition))
-            return Agrees(definition, testedType, target.Bindings) ? ArmMatch.Own : ArmMatch.Partial;
+            return Agrees(definition, testedType, target.Bindings) ? OwnArm : ArmMatch.None;
 
         // The union type itself, object, a base class or an interface of the union, the type parameter of the value.
         if (AlwaysConvertsTo(target.ValueType, testedType))
-            return ArmMatch.CatchAll;
+            return ArmMatch.Covered;
 
+        // A base type or interface built from a type parameter that the value leaves open stands for many
+        // types (ITag<TTag> of Tagged<TTag> : Open<int>), and the tested type is one of them at most.
+        var determined = BindsEveryTypeParameter(definition, target.Bindings);
         for (var baseType = definition.BaseType; baseType is not null; baseType = baseType.BaseType)
         {
-            if (Agrees(baseType, testedType, target.Bindings))
-                return ArmMatch.CatchAll;
+            if ((determined || !MentionsTypeParameter(baseType)) && Agrees(baseType, testedType, target.Bindings))
+                return ArmMatch.Covered;
         }
 
         foreach (var implemented in definition.AllInterfaces)
         {
-            if (Agrees(implemented, testedType, target.Bindings))
-                return ArmMatch.CatchAll;
+            if ((determined || !MentionsTypeParameter(implemented)) && Agrees(implemented, testedType, target.Bindings))
+                return ArmMatch.Covered;
         }
 
-        return ArmMatch.Partial;
+        return ArmMatch.None;
+    }
+
+    /// <summary>
+    /// True when <paramref name="pattern"/> is a type test for another case of the same union. No value
+    /// of this case passes it, whatever the type arguments, so its negation matches all of them:
+    /// <c>not Circle</c> matches every <c>Square</c>.
+    /// </summary>
+    private static bool IsTestForAnotherCase(IPatternOperation pattern, CaseOfValue target)
+        => pattern is ITypePatternOperation { MatchedType: var testedType }
+           && !SymbolEqualityComparer.Default.Equals(testedType.OriginalDefinition, target.Definition)
+           && SymbolEqualityComparer.Default.Equals(GetUnionOfCase(testedType), GetUnionOfCase(target.Definition));
+
+    /// <summary>
+    /// The input of a pattern of an arm that matches every value of the case: a value of the case as
+    /// the switched value constructs it. The arm may name a construction that lacks a <c>?</c> of it.
+    /// </summary>
+    private static DeclaredInput GetInput(IRecursivePatternOperation pattern, CaseOfValue target)
+    {
+        var caseOfValue = ConstructForValue(target.Definition, target.Bindings);
+        var named = FindConstruction(caseOfValue, pattern.MatchedType.OriginalDefinition);
+        return new DeclaredInput(caseOfValue, false, named is not null && LacksAnnotation(pattern.MatchedType, named));
     }
 
     /// <summary>
     /// True when every positional and every property subpattern of <paramref name="pattern"/> matches
-    /// every value its input can hold.
+    /// every value its input can hold. <paramref name="input"/> is the input of <paramref name="pattern"/> itself.
     /// </summary>
-    private bool HasIrrefutableSubpatterns(IRecursivePatternOperation pattern)
+    private bool HasIrrefutableSubpatterns(IRecursivePatternOperation pattern, DeclaredInput input)
     {
         var positional = pattern.DeconstructionSubpatterns;
         for (var index = 0; index < positional.Length; index++)
         {
-            if (GetPositionalInputType(pattern, index) is not { } inputType || !IsIrrefutable(positional[index], inputType))
+            if (GetPositionalInput(pattern, input, index) is not { } component || !IsIrrefutable(positional[index], component))
                 return false;
         }
 
         foreach (var subpattern in pattern.PropertySubpatterns)
         {
-            if (!IsIrrefutable(subpattern.Pattern, GetMemberInputType(subpattern)))
+            if (!IsIrrefutable(subpattern.Pattern, GetMemberInput(subpattern, input)))
                 return false;
         }
 
@@ -198,12 +270,11 @@ internal sealed partial class UnionModel
     }
 
     /// <summary>
-    /// The declared type of the input of the positional subpattern at <paramref name="index"/>:
-    /// the type of the matching <c>Deconstruct</c> parameter or tuple element (the tuple type of a
-    /// pattern keeps the annotations of its elements). <see langword="null"/> when the pattern
-    /// deconstructs neither way (<c>ITuple</c> at run time, or erroneous code).
+    /// The input of the positional subpattern at <paramref name="index"/>: the matching <c>Deconstruct</c>
+    /// parameter or tuple element. <see langword="null"/> when the pattern deconstructs neither way
+    /// (<c>ITuple</c> at run time, or erroneous code).
     /// </summary>
-    private static ITypeSymbol? GetPositionalInputType(IRecursivePatternOperation pattern, int index)
+    private static DeclaredInput? GetPositionalInput(IRecursivePatternOperation pattern, DeclaredInput input, int index)
     {
         var subpatterns = pattern.DeconstructionSubpatterns;
         switch (pattern.DeconstructSymbol)
@@ -212,30 +283,75 @@ internal sealed partial class UnionModel
                 // An extension method Deconstruct(this Circle circle, out double radius) has the receiver first.
                 var parameters = deconstruct.Parameters;
                 var receivers = parameters.Length - subpatterns.Length;
-                return receivers is 0 or 1 ? parameters[index + receivers].Type : subpatterns[index].InputType;
-            case null when pattern.MatchedType is INamedTypeSymbol { IsTupleType: true, TupleElements: var elements }
-                           && elements.Length == subpatterns.Length:
-                return elements[index].Type;
+                if (receivers is not (0 or 1))
+                    return input.WithoutMember(subpatterns[index].InputType, true);
+
+                if (FindMember(input.Type, deconstruct) is { } seen && seen.Parameters.Length == parameters.Length)
+                    return input.WithMember(seen.Parameters[index + receivers].Type);
+
+                var declaredParameters = deconstruct.OriginalDefinition.Parameters;
+                return input.WithoutMember(
+                    parameters[index + receivers].Type,
+                    declaredParameters.Length != parameters.Length
+                    || MentionsTypeParameter(declaredParameters[index + receivers].Type));
+            case null when GetTupleElements(input.Type, subpatterns.Length) is { } declared:
+                return input.WithMember(declared[index].Type);
+            case null when GetTupleElements(pattern.MatchedType, subpatterns.Length) is { } matched:
+                return input.WithoutMember(matched[index].Type, false);
             default:
                 return null;
         }
     }
 
-    /// <summary>The declared type of the property or field that <paramref name="subpattern"/> reads.</summary>
-    private static ITypeSymbol GetMemberInputType(IPropertySubpatternOperation subpattern)
-        => subpattern.Member switch
+    private static ImmutableArray<IFieldSymbol>? GetTupleElements(ITypeSymbol type, int count)
+        => type is INamedTypeSymbol { IsTupleType: true, TupleElements: var elements } && elements.Length == count
+            ? elements
+            : null;
+
+    /// <summary>The input of a property subpattern: the property or field that it reads.</summary>
+    private static DeclaredInput GetMemberInput(IPropertySubpatternOperation subpattern, DeclaredInput input)
+    {
+        switch (subpattern.Member)
         {
-            IPropertyReferenceOperation property => property.Property.Type,
-            IFieldReferenceOperation field => field.Field.Type,
-            _ => subpattern.Pattern.InputType
-        };
+            case IPropertyReferenceOperation { Property: var property }:
+                return FindMember(input.Type, property) is { } seenProperty
+                    ? input.WithMember(seenProperty.Type)
+                    : input.WithoutMember(property.Type, MentionsTypeParameter(property.OriginalDefinition.Type));
+            case IFieldReferenceOperation { Field: var field }:
+                return FindMember(input.Type, field) is { } seenField
+                    ? input.WithMember(seenField.Type)
+                    : input.WithoutMember(field.Type, MentionsTypeParameter(field.OriginalDefinition.Type));
+            default:
+                return input.WithoutMember(subpattern.Pattern.InputType, true);
+        }
+    }
 
     /// <summary>
-    /// True when <paramref name="pattern"/> matches every value that an input declared as
-    /// <paramref name="declaredInput"/> can hold. The declared type is needed because
-    /// <see cref="IPatternOperation.InputType"/> does not tell <c>string</c> from <c>string?</c>.
+    /// <paramref name="member"/> as <paramref name="type"/> declares it: the member with the same
+    /// definition in the construction of its containing type that <paramref name="type"/> is, derives
+    /// from or implements. <see langword="null"/> when there is none, as for an extension method.
     /// </summary>
-    private bool IsIrrefutable(IPatternOperation pattern, ITypeSymbol declaredInput)
+    private static TMember? FindMember<TMember>(ITypeSymbol type, TMember member)
+        where TMember : class, ISymbol
+    {
+        if (member.ContainingType is not { } owner || FindConstruction(type, owner.OriginalDefinition) is not { } construction)
+            return null;
+
+        foreach (var candidate in construction.GetMembers(member.Name))
+        {
+            if (SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, member.OriginalDefinition))
+                return candidate as TMember;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="pattern"/> matches every value that <paramref name="input"/> can hold.
+    /// The declared type is needed because <see cref="IPatternOperation.InputType"/> does not tell
+    /// <c>string</c> from <c>string?</c>.
+    /// </summary>
+    private bool IsIrrefutable(IPatternOperation pattern, DeclaredInput input)
     {
         switch (pattern)
         {
@@ -243,28 +359,25 @@ internal sealed partial class UnionModel
             case IDeclarationPatternOperation { MatchesNull: true }: // var x
                 return true;
             case IDeclarationPatternOperation { MatchedType: { } declaredType }:
-                return AlwaysMatches(declaredInput, declaredType);
+                return AlwaysMatches(input, declaredType);
             case ITypePatternOperation typePattern:
-                return AlwaysMatches(declaredInput, typePattern.MatchedType);
+                return AlwaysMatches(input, typePattern.MatchedType);
             case IRecursivePatternOperation recursive:
-                return AlwaysMatches(declaredInput, recursive.MatchedType) && HasIrrefutableSubpatterns(recursive);
+                return AlwaysMatches(input, recursive.MatchedType) && HasIrrefutableSubpatterns(recursive, input);
             case INegatedPatternOperation negated:
-                return IsNullConstant(negated.Pattern) && CannotBeNull(declaredInput);
+                return IsNullConstant(negated.Pattern) && CannotBeNull(input);
             case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.Or } either:
-                return IsIrrefutable(either.LeftPattern, declaredInput) || IsIrrefutable(either.RightPattern, declaredInput);
+                return IsIrrefutable(either.LeftPattern, input) || IsIrrefutable(either.RightPattern, input);
             case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } both:
-                return IsIrrefutable(both.LeftPattern, declaredInput) && IsIrrefutable(both.RightPattern, declaredInput);
+                return IsIrrefutable(both.LeftPattern, input) && IsIrrefutable(both.RightPattern, input);
             default: // constant, relational, list and slice patterns
                 return false;
         }
     }
 
-    /// <summary>
-    /// True when a test for <paramref name="testedType"/> matches every value of an input declared as
-    /// <paramref name="declaredInput"/>.
-    /// </summary>
-    private bool AlwaysMatches(ITypeSymbol declaredInput, ITypeSymbol testedType)
-        => CannotBeNull(declaredInput) && AlwaysConvertsTo(declaredInput, testedType);
+    /// <summary>True when a test for <paramref name="testedType"/> matches every value of <paramref name="input"/>.</summary>
+    private bool AlwaysMatches(DeclaredInput input, ITypeSymbol testedType)
+        => CannotBeNull(input) && AlwaysConvertsTo(input.Type, testedType);
 
     /// <summary>
     /// True when every non-null value of <paramref name="source"/> is a <paramref name="destination"/>:
@@ -277,12 +390,17 @@ internal sealed partial class UnionModel
     }
 
     /// <summary>
-    /// True unless the type is annotated <c>?</c> or is a <c>Nullable&lt;T&gt;</c>. A declared <c>int?</c>
-    /// is annotated too; one that arrives as an <see cref="IPatternOperation.InputType"/> is not.
+    /// True unless the declared type is annotated <c>?</c> or is a <c>Nullable&lt;T&gt;</c>, or cannot be
+    /// trusted and is not a value type. A declared <c>int?</c> is annotated too; one that arrives as an
+    /// <see cref="IPatternOperation.InputType"/> is not.
     /// </summary>
-    private static bool CannotBeNull(ITypeSymbol declaredType)
-        => declaredType.NullableAnnotation != NullableAnnotation.Annotated
-           && declaredType.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T;
+    private static bool CannotBeNull(DeclaredInput input)
+    {
+        var type = input.Type;
+        return type.NullableAnnotation != NullableAnnotation.Annotated
+               && type.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T
+               && (type.IsValueType || !input.MayHideNull);
+    }
 
     private static bool IsNullConstant(IPatternOperation pattern)
         => pattern is IConstantPatternOperation { Value.ConstantValue: { HasValue: true, Value: null } };
@@ -301,5 +419,34 @@ internal sealed partial class UnionModel
         public INamedTypeSymbol Definition { get; } = definition;
 
         public Dictionary<ITypeParameterSymbol, ITypeSymbol>? Bindings { get; } = bindings;
+    }
+
+    /// <summary>
+    /// The declared type of the input of a pattern. It is read from the case as the switched value
+    /// constructs it (<c>string?</c> for <c>Ok.Value</c> of a <c>Result&lt;string?&gt;</c>), member by
+    /// member. Where a member cannot be found there (an extension <c>Deconstruct</c> or an extension
+    /// property), the type is the one the arm's own construction declares.
+    /// </summary>
+    private readonly struct DeclaredInput(ITypeSymbol type, bool mayHideNull, bool armLacksAnnotation)
+    {
+        public ITypeSymbol Type { get; } = type;
+
+        /// <summary>
+        /// True when <see cref="Type"/>, or the type it was read from, is only known as the arm declares
+        /// it and that can lack a <c>?</c> of the value: a reference type may then hold null all the same.
+        /// </summary>
+        public bool MayHideNull { get; } = mayHideNull;
+
+        /// <summary>The input of a subpattern whose member was found in <see cref="Type"/>.</summary>
+        public DeclaredInput WithMember(ITypeSymbol memberType) => new(memberType, MayHideNull, armLacksAnnotation);
+
+        /// <summary>
+        /// The input of a subpattern whose member is only known as the arm declares it. That type can
+        /// lack a <c>?</c> of the value when the arm names a type that lacks one, and when the member is
+        /// generic (<paramref name="genericInDefinition"/>): Roslyn constructs
+        /// <c>Deconstruct&lt;string&gt;</c> for a <c>Box&lt;string?&gt;</c>.
+        /// </summary>
+        public DeclaredInput WithoutMember(ITypeSymbol memberTypeOfArm, bool genericInDefinition)
+            => new(memberTypeOfArm, MayHideNull || armLacksAnnotation || genericInDefinition, armLacksAnnotation);
     }
 }

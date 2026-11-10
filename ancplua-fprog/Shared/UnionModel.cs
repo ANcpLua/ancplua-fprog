@@ -20,8 +20,8 @@ namespace ancplua_fprog.Shared;
 /// <para>
 /// Create one instance per compilation (in <c>RegisterCompilationStartAction</c>, or in
 /// <c>ReportSuppressions</c>) and share it between callbacks. It is thread-safe, finds cases lazily
-/// by walking the namespaces of the compilation's source assembly and of the union's own assembly,
-/// and gives the same answers whatever order callbacks arrive in. The static members need no instance.
+/// by walking the namespaces of the assemblies that can declare one (<see cref="GetCases"/>), and
+/// gives the same answers whatever order callbacks arrive in. The static members need no instance.
 /// </para>
 /// </summary>
 internal sealed partial class UnionModel(Compilation compilation)
@@ -33,6 +33,10 @@ internal sealed partial class UnionModel(Compilation compilation)
     // walk of an assembly each build the same index, and one of them is kept.
     private readonly ConcurrentDictionary<IAssemblySymbol, Dictionary<INamedTypeSymbol, ImmutableArray<INamedTypeSymbol>>>
         _casesByAssembly = new(SymbolEqualityComparer.Default);
+
+    // For the assembly of a union that is not the source assembly: the assemblies that can declare a case of it.
+    private readonly ConcurrentDictionary<IAssemblySymbol, ImmutableArray<IAssemblySymbol>>
+        _caseAssembliesByHome = new(SymbolEqualityComparer.Default);
 
     /// <summary>How <see cref="Matches"/> treats type parameters.</summary>
     private enum TypeMatching
@@ -53,7 +57,13 @@ internal sealed partial class UnionModel(Compilation compilation)
         Agree,
 
         /// <summary>No type parameter is special: both sides are the same type.</summary>
-        Same
+        Same,
+
+        /// <summary>
+        /// Like <see cref="Same"/>, and the right side nowhere lacks a <c>?</c> that the left side has:
+        /// <c>Result&lt;string&gt;</c> on the right lacks one of <c>Result&lt;string?&gt;</c>.
+        /// </summary>
+        SameKeepingAnnotations
     }
 
     /// <summary>True when <paramref name="type"/> is a class or record annotated <c>[Fprog.Union]</c>.</summary>
@@ -90,9 +100,10 @@ internal sealed partial class UnionModel(Compilation compilation)
     public static INamedTypeSymbol? GetUnionOfCase(ITypeSymbol? type) => GetUnion(type?.BaseType);
 
     /// <summary>
-    /// The case definitions that a value whose static type is <paramref name="type"/> can be, declared
-    /// in the union's own assembly or in this compilation; empty when that is not a union value
-    /// (<see cref="GetUnionType"/>). The union definition <c>Result&lt;T&gt;</c> and a
+    /// The case definitions that a value whose static type is <paramref name="type"/> can be; empty
+    /// when that is not a union value (<see cref="GetUnionType"/>). Cases are found in the union's own
+    /// assembly, then in every referenced assembly that references that assembly, then in this
+    /// compilation. The union definition <c>Result&lt;T&gt;</c> and a
     /// <c>Result&lt;TValue&gt;</c> inside a generic method get every case, <c>Result&lt;string&gt;</c>
     /// gets neither <c>IntOk : Result&lt;int&gt;</c> nor <c>ListOk&lt;T&gt; : Result&lt;List&lt;T&gt;&gt;</c>.
     /// </summary>
@@ -113,7 +124,8 @@ internal sealed partial class UnionModel(Compilation compilation)
                 case INamedTypeSymbol named when IsUnion(named):
                     return named;
                 case ITypeParameterSymbol other:
-                    // Erroneous code can declare a cycle: where T : U where U : T.
+                    // Roslyn 5.9.0 breaks a constraint cycle (where T : U where U : T) itself by dropping one
+                    // of the constraints. The set only guards against a symbol for which it does not.
                     visited ??= new HashSet<ITypeParameterSymbol>(SymbolEqualityComparer.Default) { parameter };
                     if (visited.Add(other) && GetUnionOfConstraints(other, visited) is { } union)
                         return union;
@@ -129,11 +141,51 @@ internal sealed partial class UnionModel(Compilation compilation)
     private ImmutableArray<INamedTypeSymbol> GetAllCases(INamedTypeSymbol union)
     {
         var sourceAssembly = _compilation.Assembly;
-        var casesInSource = CasesIn(sourceAssembly, union);
         var home = union.ContainingAssembly;
-        return home is null || SymbolEqualityComparer.Default.Equals(home, sourceAssembly)
-            ? casesInSource
-            : CasesIn(home, union).AddRange(casesInSource);
+        if (home is null || SymbolEqualityComparer.Default.Equals(home, sourceAssembly))
+            return CasesIn(sourceAssembly, union);
+
+        var cases = ImmutableArray<INamedTypeSymbol>.Empty;
+        foreach (var assembly in GetCaseAssemblies(home))
+            cases = cases.AddRange(CasesIn(assembly, union));
+
+        return cases;
+    }
+
+    /// <summary>
+    /// The assemblies that can declare a case of a union from <paramref name="home"/>, which is not the
+    /// source assembly: <paramref name="home"/> itself, the referenced assemblies that reference it (in
+    /// the order of the references of the compilation), and the source assembly.
+    /// </summary>
+    private ImmutableArray<IAssemblySymbol> GetCaseAssemblies(IAssemblySymbol home)
+    {
+        if (_caseAssembliesByHome.TryGetValue(home, out var known))
+            return known;
+
+        var assemblies = ImmutableArray.CreateBuilder<IAssemblySymbol>();
+        assemblies.Add(home);
+        foreach (var referenced in _compilation.SourceModule.ReferencedAssemblySymbols)
+        {
+            if (!SymbolEqualityComparer.Default.Equals(referenced, home) && References(referenced, home))
+                assemblies.Add(referenced);
+        }
+
+        assemblies.Add(_compilation.Assembly);
+        return _caseAssembliesByHome.GetOrAdd(home, assemblies.ToImmutable());
+    }
+
+    private static bool References(IAssemblySymbol assembly, IAssemblySymbol referenced)
+    {
+        foreach (var module in assembly.Modules)
+        {
+            foreach (var candidate in module.ReferencedAssemblySymbols)
+            {
+                if (SymbolEqualityComparer.Default.Equals(candidate, referenced))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private ImmutableArray<INamedTypeSymbol> CasesIn(IAssemblySymbol assembly, INamedTypeSymbol union)
@@ -189,10 +241,110 @@ internal sealed partial class UnionModel(Compilation compilation)
         => Matches(caseSide, patternType, TypeMatching.Agree, ref bindings);
 
     /// <summary>
+    /// True when the union type of the value determines every type parameter of the case and of the
+    /// types that contain it. It does not for <c>IntLit : Expr&lt;int&gt;</c> nested in <c>Expr&lt;T&gt;</c>
+    /// (an <c>Expr&lt;string&gt;.IntLit</c> is an <c>Expr&lt;int&gt;</c> too) or <c>Tagged&lt;TTag&gt; : Result&lt;int&gt;</c>.
+    /// </summary>
+    private static bool BindsEveryTypeParameter(INamedTypeSymbol caseDefinition, Dictionary<ITypeParameterSymbol, ITypeSymbol>? bindings)
+    {
+        var typeParameters = 0;
+        for (var type = caseDefinition; type is not null; type = type.ContainingType)
+            typeParameters += type.TypeParameters.Length;
+
+        return typeParameters == (bindings?.Count ?? 0);
+    }
+
+    /// <summary>
+    /// The case as a value sees it: <paramref name="definition"/> with every bound type parameter
+    /// replaced by what <see cref="TryBind"/> bound it to (<c>Result&lt;string?&gt;.Ok</c> for
+    /// <c>Result&lt;T&gt;.Ok</c> and a <c>Result&lt;string?&gt;</c>). An unbound type parameter stays.
+    /// </summary>
+    private static INamedTypeSymbol ConstructForValue(INamedTypeSymbol definition, Dictionary<ITypeParameterSymbol, ITypeSymbol>? bindings)
+    {
+        if (bindings is null)
+            return definition;
+
+        var type = definition;
+        if (definition.ContainingType is { } outer)
+        {
+            // The nested type as a member of its constructed containing type.
+            foreach (var member in ConstructForValue(outer, bindings).GetTypeMembers(definition.Name, definition.Arity))
+            {
+                if (SymbolEqualityComparer.Default.Equals(member.OriginalDefinition, definition))
+                    type = member;
+            }
+        }
+
+        var parameters = definition.TypeParameters;
+        if (parameters.IsEmpty || !SymbolEqualityComparer.Default.Equals(type, type.ConstructedFrom))
+            return type;
+
+        var arguments = new ITypeSymbol[parameters.Length];
+        for (var index = 0; index < parameters.Length; index++)
+            arguments[index] = bindings.TryGetValue(parameters[index], out var bound) ? bound : type.TypeParameters[index];
+
+        return type.Construct(arguments);
+    }
+
+    /// <summary>
+    /// The construction of <paramref name="definition"/> that <paramref name="type"/> is, derives from
+    /// or implements; <see langword="null"/> when there is none.
+    /// </summary>
+    private static INamedTypeSymbol? FindConstruction(ITypeSymbol type, ITypeSymbol definition)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, definition))
+                return current;
+        }
+
+        foreach (var implemented in type.AllInterfaces)
+        {
+            if (SymbolEqualityComparer.Default.Equals(implemented.OriginalDefinition, definition))
+                return implemented;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="patternType"/>, the same type as <paramref name="valueType"/> otherwise,
+    /// lacks a <c>?</c> that <paramref name="valueType"/> has somewhere.
+    /// </summary>
+    private static bool LacksAnnotation(ITypeSymbol patternType, ITypeSymbol valueType)
+    {
+        Dictionary<ITypeParameterSymbol, ITypeSymbol>? unused = null;
+        return !Matches(valueType, patternType, TypeMatching.SameKeepingAnnotations, ref unused);
+    }
+
+    /// <summary>True when <paramref name="type"/> is a type parameter or is built from one (<c>List&lt;T&gt;</c>, <c>T[]</c>).</summary>
+    private static bool MentionsTypeParameter(ITypeSymbol type)
+    {
+        switch (type)
+        {
+            case ITypeParameterSymbol:
+                return true;
+            case IArrayTypeSymbol array:
+                return MentionsTypeParameter(array.ElementType);
+            case INamedTypeSymbol named:
+                foreach (var argument in named.TypeArguments)
+                {
+                    if (MentionsTypeParameter(argument))
+                        return true;
+                }
+
+                return named.ContainingType is { } outer && MentionsTypeParameter(outer);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
     /// Compares two types by structure. Named types match when their definitions are equal and their
     /// type arguments match, including those carried by containing types (<c>Outer&lt;T&gt;.Result</c>);
-    /// so tuple element names and nullable annotations do not matter. Arrays match by rank and element
-    /// type. <c>object</c> and <c>dynamic</c> are the same type. Everything else must be equal.
+    /// so tuple element names do not matter, and nullable annotations only for
+    /// <see cref="TypeMatching.SameKeepingAnnotations"/>. Arrays match by rank and element type.
+    /// <c>object</c> and <c>dynamic</c> are the same type. Everything else must be equal.
     /// </summary>
     private static bool Matches(
         ITypeSymbol left,
@@ -216,6 +368,9 @@ internal sealed partial class UnionModel(Compilation compilation)
                        || Matches(expected, right, TypeMatching.Same, ref bindings);
             case TypeMatching.Bind or TypeMatching.Overlap when left is ITypeParameterSymbol || right is ITypeParameterSymbol:
                 return true;
+            case TypeMatching.SameKeepingAnnotations
+                when left.NullableAnnotation == NullableAnnotation.Annotated && right.NullableAnnotation != NullableAnnotation.Annotated:
+                return false;
         }
 
         switch (left)

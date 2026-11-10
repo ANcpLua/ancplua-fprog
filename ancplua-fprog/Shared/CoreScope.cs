@@ -29,9 +29,13 @@ internal static class CoreScope
     }
 
     /// <summary>
-    /// True when <paramref name="symbol"/> is written in the source of this compilation; false when the
-    /// compiler synthesized it or it comes from a referenced assembly (AGENTS.md, "Scope": only members
-    /// declared in source count).
+    /// True when <paramref name="symbol"/> is written in source; false when the compiler synthesized it
+    /// or it was read from a compiled assembly (AGENTS.md, "Scope": only members declared in source count).
+    /// <para>
+    /// "In source" includes the source of a referenced project that this compilation sees as a
+    /// compilation and not as a DLL (in an IDE, or in a test with several projects). To ask for this
+    /// compilation only, also compare <c>symbol.ContainingAssembly</c> with <c>compilation.Assembly</c>.
+    /// </para>
     /// <para>
     /// Observed with Roslyn 5.9.0 on <c>record Circle(double Radius)</c>. Declared: the positional
     /// property <c>Radius</c> (its declaring syntax is the parameter) and the primary constructor with
@@ -45,12 +49,27 @@ internal static class CoreScope
     /// <para>
     /// <see cref="ISymbol.IsImplicitlyDeclared"/> alone is not enough. It is false for the parameters of
     /// synthesized members (the <c>out</c> parameters of a record's <c>Deconstruct</c>), which have no
-    /// declaring syntax; for the entry point <c>&lt;Main&gt;$</c> that holds top-level statements; and
-    /// for every symbol from a referenced assembly.
+    /// declaring syntax; for the class <c>Program</c> and the entry point <c>&lt;Main&gt;$</c> that hold
+    /// top-level statements, whose only declaring syntax is the whole file (a <c>partial class Program</c>
+    /// that is written out is declared); and for every symbol read from a compiled assembly.
+    /// </para>
+    /// <para>
+    /// Not declared either: the <c>value</c> parameter of a setter, and the copy of an indexer parameter
+    /// that the code of an accessor refers to. So do not ask this about a parameter that a body uses.
     /// </para>
     /// </summary>
     public static bool IsDeclaredInSource(ISymbol symbol)
-        => !symbol.IsImplicitlyDeclared
-           && !symbol.DeclaringSyntaxReferences.IsEmpty
-           && symbol is not IMethodSymbol { Name: WellKnownMemberNames.TopLevelStatementsEntryPointMethodName };
+    {
+        if (symbol.IsImplicitlyDeclared)
+            return false;
+
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            // Top-level statements: the whole file is the only syntax of their class and entry point.
+            if (reference.GetSyntax() is not ICompilationUnitSyntax)
+                return true;
+        }
+
+        return false;
+    }
 }

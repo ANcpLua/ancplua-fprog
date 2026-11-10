@@ -580,7 +580,89 @@ public sealed class CoreScopeTests
     }
 
     [TestMethod]
-    public void SymbolFromAReferencedAssembly_IsNotDeclaredInSource()
+    public void TopLevelStatements_TheirClassIsDeclaredInSourceOnlyWhenWrittenOut()
+    {
+        var synthesized = TestCompilation.CreateProgram("System.Console.WriteLine(1);").GetNamedType("Program");
+        var writtenOut = TestCompilation.CreateProgram("""
+            System.Console.WriteLine(Program.Answer);
+
+            public partial class Program
+            {
+                public const int Answer = 42;
+            }
+            """).GetNamedType("Program");
+
+        // Roslyn calls the synthesized class explicitly declared; its syntax is the whole file.
+        Assert.IsFalse(synthesized.IsImplicitlyDeclared);
+        Assert.IsFalse(CoreScope.IsDeclaredInSource(synthesized));
+        Assert.IsTrue(CoreScope.IsDeclaredInSource(writtenOut));
+        Assert.IsTrue(CoreScope.IsDeclaredInSource(writtenOut.GetMembers("Answer").Single()));
+    }
+
+    [TestMethod]
+    public void SetterValueAndIndexerParameterInAnAccessor_AreNotDeclaredInSource()
+    {
+        var compilation = TestCompilation.Create("""
+            namespace Domain
+            {
+                public sealed class Table
+                {
+                    private int _last;
+
+                    public int Last
+                    {
+                        get => _last;
+                        set => _last = value;
+                    }
+
+                    public int this[int index] => index + _last;
+                }
+            }
+            """);
+        var tree = compilation.SyntaxTrees.First();
+        var model = compilation.GetSemanticModel(tree);
+        var table = compilation.GetNamedType("Domain.Table");
+        var indexer = table.GetMembers().OfType<IPropertySymbol>().Single(property => property.IsIndexer);
+        var used = tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Where(name => name.Identifier.Text is "value" or "index")
+            .Select(name => Expect<IParameterSymbol>(model.GetSymbolInfo(name).Symbol, name))
+            .ToArray();
+
+        Assert.HasCount(2, used);
+        foreach (var parameter in used)
+            Assert.IsFalse(CoreScope.IsDeclaredInSource(parameter), parameter.ToDisplayString());
+
+        Assert.IsTrue(CoreScope.IsDeclaredInSource(indexer.Parameters.Single()));
+    }
+
+    [TestMethod]
+    public void SymbolFromAReferencedProject_IsDeclaredInSource()
+    {
+        var library = TestCompilation.Create("""
+            namespace Lib
+            {
+                public sealed class Pricing
+                {
+                    public int Total(int price) => price;
+                }
+            }
+            """, "Library");
+        var compilation = TestCompilation.Create("""
+            namespace App
+            {
+                public sealed class Shell { }
+            }
+            """, "App", library.ToMetadataReference());
+        var pricing = compilation.GetNamedType("Lib.Pricing");
+
+        Assert.IsTrue(CoreScope.IsDeclaredInSource(pricing));
+        Assert.IsTrue(CoreScope.IsDeclaredInSource(pricing.GetMembers("Total").Single()));
+        // A rule that means this compilation only compares the assembly as well.
+        Assert.AreNotEqual(compilation.Assembly, pricing.ContainingAssembly, SymbolEqualityComparer.Default);
+    }
+
+    [TestMethod]
+    public void SymbolFromACompiledAssembly_IsNotDeclaredInSource()
     {
         var library = TestCompilation.Create("""
             namespace Lib
