@@ -22,3 +22,4 @@ FP0501 | Functional | Warning | Do not use a catch-all in a switch over a union
 FP0601 | Functional | Warning | Do not inspect the runtime type of an unconstrained type parameter
 FP0701 | Functional | Warning | Do not capture a variable that is reassigned
 FP0801 | Functional | Warning | Do not reach the imperative shell from the functional core
+FP0802 | Functional | Warning | Do not return a task from the functional core
