@@ -19,3 +19,4 @@ FP0401 | Functional | Warning | A union must be abstract
 FP0402 | Functional | Warning | Union constructors must be private
 FP0403 | Functional | Warning | A union case must be sealed and nested inside its union
 FP0501 | Functional | Warning | Do not use a catch-all in a switch over a union
+FP0601 | Functional | Warning | Do not inspect the runtime type of an unconstrained type parameter
