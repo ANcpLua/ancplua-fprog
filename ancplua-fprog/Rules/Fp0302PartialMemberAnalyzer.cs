@@ -47,17 +47,20 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
         if (invocation.Syntax is not InvocationExpressionSyntax syntax)
             return;
 
-        var name = syntax.Expression switch
-        {
-            MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
-            MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier,
-            SimpleNameSyntax simpleName => simpleName.Identifier,
-            _ => default
-        };
-
+        var name = NameToken(syntax.Expression);
         if (name.IsKind(SyntaxKind.IdentifierToken))
             context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), method.Name));
     }
+
+    /// <summary>The method name token of the invoked expression, also when it is parenthesized: <c>(int.Parse)(s)</c>.</summary>
+    private static SyntaxToken NameToken(ExpressionSyntax expression) => expression switch
+    {
+        ParenthesizedExpressionSyntax parenthesized => NameToken(parenthesized.Expression),
+        MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
+        MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier,
+        SimpleNameSyntax simpleName => simpleName.Identifier,
+        _ => default
+    };
 
     private static void AnalyzePropertyReference(OperationAnalysisContext context)
     {
