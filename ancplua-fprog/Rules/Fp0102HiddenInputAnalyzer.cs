@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Threading;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -11,8 +12,9 @@ namespace ancplua_fprog.Rules;
 /// FP0102: a hidden input inside the functional core. Reports <c>DateTime.Now/UtcNow/Today</c>,
 /// <c>DateTimeOffset.Now/UtcNow</c>, <c>Guid.NewGuid</c>, <c>TimeProvider.System</c>, any member of
 /// <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
-/// static field that is neither <c>readonly</c> nor <c>const</c>. Reported at the member's name token,
-/// or at <c>Random</c> in the object creation (the <c>new</c> keyword for a target-typed <c>new(...)</c>).
+/// static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
+/// defers binding to run time. Reported at the member's name token (inside any parentheses), or at
+/// <c>Random</c> in the object creation (the <c>new</c> keyword for a target-typed <c>new(...)</c>).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
@@ -36,26 +38,34 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
             OperationKind.Invocation,
             OperationKind.MethodReference,
             OperationKind.FieldReference,
-            OperationKind.ObjectCreation);
+            OperationKind.ObjectCreation,
+            OperationKind.DynamicMemberReference,
+            OperationKind.DynamicObjectCreation);
     }
 
     private static void Analyze(OperationAnalysisContext context)
     {
         var operation = context.Operation;
-        if (!IsHiddenInput(operation) || IsInsideNameOf(operation) || !CoreScope.IsInCore(context.ContainingSymbol))
+        if (!IsHiddenInput(operation, context.CancellationToken)
+            || IsInsideNameOf(operation)
+            || !CoreScope.IsInCore(context.ContainingSymbol))
+        {
             return;
+        }
 
         var location = ReportLocation(operation.Syntax);
         context.ReportDiagnostic(Diagnostic.Create(Rule, location, operation.Syntax.ToString()));
     }
 
-    private static bool IsHiddenInput(IOperation operation) => operation switch
+    private static bool IsHiddenInput(IOperation operation, CancellationToken cancellationToken) => operation switch
     {
         IPropertyReferenceOperation reference => IsHiddenProperty(reference.Property),
         IInvocationOperation invocation => IsHiddenMethod(invocation.TargetMethod),
         IMethodReferenceOperation reference => IsHiddenMethod(reference.Method),
         IFieldReferenceOperation reference => IsMutableStaticField(reference.Field),
         IObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
+        IDynamicMemberReferenceOperation reference => HasHiddenCandidate(reference, cancellationToken),
+        IDynamicObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
         _ => false
     };
 
@@ -90,6 +100,29 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
         return false;
     }
 
+    /// <summary>
+    /// A call bound at run time because an argument is <c>dynamic</c>, such as <c>random.Next(d)</c> or
+    /// <c>Environment.GetEnvironmentVariable(d)</c>. The compiler still knows the candidate methods; a
+    /// <c>dynamic</c> receiver has none and is not reported.
+    /// </summary>
+    private static bool HasHiddenCandidate(IOperation reference, CancellationToken cancellationToken)
+    {
+        if (reference.SemanticModel is not { } model)
+            return false;
+
+        var info = model.GetSymbolInfo(reference.Syntax, cancellationToken);
+        if (info.Symbol is IMethodSymbol method)
+            return IsHiddenMethod(method);
+
+        foreach (var candidate in info.CandidateSymbols)
+        {
+            if (candidate is IMethodSymbol candidateMethod && IsHiddenMethod(candidateMethod))
+                return true;
+        }
+
+        return false;
+    }
+
     private static bool IsMutableStaticField(IFieldSymbol field)
         => field is { IsStatic: true, IsConst: false, IsReadOnly: false, IsImplicitlyDeclared: false };
 
@@ -115,6 +148,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
     private static Location ReportLocation(SyntaxNode syntax) => syntax switch
     {
         InvocationExpressionSyntax invocation => ReportLocation(invocation.Expression),
+        ParenthesizedExpressionSyntax parenthesized => ReportLocation(parenthesized.Expression),
         MemberAccessExpressionSyntax memberAccess => ReportLocation(memberAccess.Name),
         MemberBindingExpressionSyntax memberBinding => ReportLocation(memberBinding.Name),
         ObjectCreationExpressionSyntax creation => ReportLocation(creation.Type),
