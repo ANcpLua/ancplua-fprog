@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 
 namespace ancplua_fprog.Rules;
 
@@ -27,10 +29,22 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ThrowStatement, SyntaxKind.ThrowExpression);
+        // Roslyn 5.9.0 runs a syntax node action inside the body of a C# 15 union declaration once per
+        // enclosing declaration (its member, the union, the union's container), so each location is
+        // reported only once per compilation.
+        context.RegisterCompilationStartAction(static start =>
+        {
+            var reported = new ConcurrentDictionary<(SyntaxTree Tree, TextSpan Span), byte>();
+            start.RegisterSyntaxNodeAction(
+                node => Analyze(node, reported),
+                SyntaxKind.ThrowStatement,
+                SyntaxKind.ThrowExpression);
+        });
     }
 
-    private static void Analyze(SyntaxNodeAnalysisContext context)
+    private static void Analyze(
+        SyntaxNodeAnalysisContext context,
+        ConcurrentDictionary<(SyntaxTree Tree, TextSpan Span), byte> reported)
     {
         if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
@@ -42,7 +56,7 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
             _ => default
         };
 
-        if (keyword.IsKind(SyntaxKind.ThrowKeyword))
+        if (keyword.IsKind(SyntaxKind.ThrowKeyword) && reported.TryAdd((context.Node.SyntaxTree, keyword.Span), 0))
             context.ReportDiagnostic(Diagnostic.Create(Rule, keyword.GetLocation()));
     }
 }

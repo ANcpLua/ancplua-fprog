@@ -174,6 +174,135 @@ public sealed class Fp0301Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0301_ThrowInUnionBodyNestedInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static Pet Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInTopLevelUnionBodyUnderAssemblyLevelCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        namespace Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static Pet Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInClassNestedInUnionBody_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static class Helpers
+            {
+                public static int Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_SeveralThrowsInUnionBodyInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static Pet Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+
+                public static string Name(string? name) => name ?? {|FP0301:throw|} new System.ArgumentNullException(nameof(name));
+
+                public static int Retry(System.Func<int> work)
+                {
+                    try
+                    {
+                        return work();
+                    }
+                    catch (System.InvalidOperationException)
+                    {
+                        {|FP0301:throw|};
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInUnionBodyOutsideCore_NoReport() => VerifyAsync("""
+        namespace Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static Pet Fail() => throw new System.InvalidOperationException();
+            }
+
+            public static class Shell
+            {
+                public record Fish;
+                public record Bird;
+
+                public union Animal(Fish, Bird)
+                {
+                    public static Animal Fail() => throw new System.InvalidOperationException();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInCoreClassNestedInUnionOutsideCore_Reports() => VerifyAsync("""
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static Pet Loud() => throw new System.InvalidOperationException();
+
+            [Fprog.FunctionalCore]
+            public static class Rules
+            {
+                public static int Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInPrimaryConstructorBaseArgumentInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Shapes
+        {
+            public abstract record Named(string Name);
+
+            public sealed record Circle(string? Label) : Named(Label ?? {|FP0301:throw|} new System.ArgumentNullException(nameof(Label)));
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0301", source, testContext.CancellationToken);
 }
