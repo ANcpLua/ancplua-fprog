@@ -349,6 +349,455 @@ public sealed class Fp0601Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0601_SwitchStatementConstantAndGuardedCasesOnT_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Codes
+        {
+            public static int Code<T>(T value)
+            {
+                switch (value)
+                {
+                    case null:
+                        return -1;
+                    case {|FP0601:0|}:
+                        return 0;
+                    case {|FP0601:"zero"|}:
+                        return 0;
+                    case {|FP0601:long wide|} when wide > 0:
+                        return 1;
+                    default:
+                        return 2;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_RelationalPatternOnTButNotOnNarrowedInput_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Ranges
+        {
+            public static bool Positive<T>(T value) => value is {|FP0601:> 0|};
+
+            public static bool Small<T>(T value) => value is {|FP0601:int|} and < 10;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_TypePatternInPropertySubpatternOfTypeT_Reports() => VerifyAsync("""
+        public sealed record Pair<T>(T Left, T Right);
+
+        [Fprog.FunctionalCore]
+        public static class Pairs
+        {
+            public static bool LeftIsNumber<T>(Pair<T> pair) => pair is { Left: {|FP0601:int|} };
+
+            public static int Sum<T>(Pair<T> pair) => pair switch
+            {
+                { Left: {|FP0601:int left|}, Right: {|FP0601:int right|} } => left + right,
+                _ => 0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_NullableOfStructConstrainedT_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Nullables
+        {
+            public static T? Narrow<T>(object value) where T : struct => value {|FP0601:as|} T?;
+
+            public static string Name<T>() where T : struct => {|FP0601:typeof(T?)|}.Name;
+
+            public static bool IsNumber<T>(T? value) where T : struct => value {|FP0601:is|} int;
+
+            public static string Runtime<T>(T? value) where T : struct => value.{|FP0601:GetType|}().Name;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_GetTypeNameAcrossThisCommentsAndLineBreaks_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Holder<T>(T value) where T : notnull
+        {
+            public T Value { get; } = value;
+
+            public string Name => this.Value.{|FP0601:GetType|}().Name;
+
+            public string Spread => Value
+                . /* runtime */ {|FP0601:GetType|}
+                ()
+                .Name;
+
+            public string Forgiven => Value!.{|FP0601:GetType|}().FullName ?? "";
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_FieldAndPropertyInitializersOfGenericCoreType_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Cache<T>
+        {
+            public static readonly string Name = {|FP0601:typeof(T)|}.Name;
+
+            public static System.Func<object, bool> Accepts { get; } = candidate => candidate {|FP0601:is|} T;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ConstructorInitializerAndPrimaryConstructorBaseArgument_Reports() => VerifyAsync("""
+        public abstract class Flagged(bool flag)
+        {
+            public bool Flag { get; } = flag;
+        }
+
+        [Fprog.FunctionalCore]
+        public sealed class Derived<T>(T value) : Flagged(value {|FP0601:is|} int)
+        {
+            public T Value { get; } = value;
+        }
+
+        [Fprog.FunctionalCore]
+        public sealed class Chained<T>
+        {
+            public Chained(T value) : this(value {|FP0601:is|} string) { }
+
+            private Chained(bool isText) => IsText = isText;
+
+            public bool IsText { get; }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_OperatorsAccessorsIteratorsAndAsync_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public readonly struct Cell<T>(T content)
+        {
+            public T Content { get; } = content;
+
+            public static bool operator true(Cell<T> cell) => cell.Content {|FP0601:is|} int;
+
+            public static bool operator false(Cell<T> cell) => cell.Content is not {|FP0601:int|};
+
+            public string Kind
+            {
+                get
+                {
+                    return Content?.{|FP0601:GetType|}().Name ?? "none";
+                }
+            }
+
+            public static System.Collections.Generic.IEnumerable<bool> Flags(T item)
+            {
+                yield return item {|FP0601:is|} string;
+            }
+
+            public static async System.Threading.Tasks.Task<bool> Later(T item)
+            {
+                await System.Threading.Tasks.Task.Yield();
+                return item {|FP0601:is|} string;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ExtensionBlockTypeParameter_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Extensions
+        {
+            extension<T>(T source)
+            {
+                public bool IsNumber => source {|FP0601:is|} int;
+
+                public string Name() => {|FP0601:typeof(T)|}.Name;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_InterfaceDefaultMemberNestedInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Holder
+        {
+            public interface IProbe<T>
+            {
+                T Value { get; }
+
+                bool IsText => Value {|FP0601:is|} string;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_QueryExpressionInterpolationAndNestedLambdas_Reports() => VerifyAsync("""
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Queries
+        {
+            public static System.Collections.Generic.IEnumerable<T> Numbers<T>(System.Collections.Generic.IEnumerable<T> items)
+                => from item in items where item {|FP0601:is|} int select item;
+
+            public static string Show<T>(T value) => $"{value {|FP0601:is|} string}";
+
+            public static System.Func<System.Func<T, string>> Deep<T>() => () => item =>
+            {
+                return Inner();
+
+                string Inner() => ((System.Func<string>)(() => {|FP0601:typeof(T)|}.Name))();
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_TypeParameterOfNonCoreOuterTypeUsedInCoreNestedType_Reports() => VerifyAsync("""
+        public static class Shell<T>
+        {
+            [Fprog.FunctionalCore]
+            public static class Core
+            {
+                public static bool IsText(T value) => value {|FP0601:is|} string;
+            }
+
+            public static bool Outside(T value) => value is string;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_PartialMethodInPartialCoreTypeAndAbstractExternMembers_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public abstract partial class Probe
+        {
+            public abstract bool Check<T>(T value);
+
+            public static extern bool Native<T>(T value);
+
+            public static partial bool Partial<T>(T value);
+        }
+
+        public abstract partial class Probe
+        {
+            public static partial bool Partial<T>(T value) => value {|FP0601:is|} int;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_CastOfValueOfTBeforeTypeTest_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Boxed
+        {
+            public static string Runtime<T>(T value) where T : notnull => ((object)value).{|FP0601:GetType|}().Name;
+
+            public static bool IsNumber<T>(T value) => (object?)value {|FP0601:is|} int;
+
+            public static string? AsText<T>(T value) => (object?)value {|FP0601:as|} string;
+
+            public static int Number<T>(T value) => (object?)value is {|FP0601:int number|} ? number : 0;
+
+            public static int Kind<T>(T value) => (object?)value switch
+            {
+                {|FP0601:int number|} => number,
+                null => -1,
+                _ => 0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_IdentityBoxingAndNullableUnwrapAreNullChecks_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Unwrap
+        {
+            public static int Count<T>(T? value) where T : struct => value is T present ? present.GetHashCode() : 0;
+
+            public static int Total<T>(T? value) where T : struct => value switch
+            {
+                T => 1,
+                null => 0
+            };
+
+            public static bool Has<T>(T? value) where T : notnull => value is T present && present is not null;
+
+            public static bool Present<T>(T value) => value is object;
+
+            public static object? Erase<T>(T value) => value as object;
+
+            public static bool Lifted<T>(T value) where T : class => value as T is not null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ConstrainedToBaseClassEnumDelegateOrGenericInterface_NoReport() => VerifyAsync("""
+        public abstract class Shape { }
+
+        public sealed class Square : Shape { }
+
+        [Fprog.FunctionalCore]
+        public static class Constrained
+        {
+            public static bool IsSquare<T>(T shape) where T : Shape => shape is Square;
+
+            public static string Kind<T>(T value) where T : struct, System.Enum => value.GetType().Name;
+
+            public static string Name<T>() where T : System.Delegate => typeof(T).Name;
+
+            public static bool Fits<T>(object value) where T : System.IComparable<T> => value is T;
+
+            public static T? Narrow<T>(object value) where T : Shape => value as T;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_RealisticGenericFunctionalCore_NoReport() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public abstract record Option<T>
+        {
+            private Option() { }
+
+            public sealed record Some(T Value) : Option<T>;
+
+            public sealed record None : Option<T>;
+
+            public TResult Match<TResult>(System.Func<T, TResult> some, System.Func<TResult> none) => this switch
+            {
+                Some found => some(found.Value),
+                _ => none()
+            };
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Pure
+        {
+            public static ImmutableArray<TResult> Map<T, TResult>(ImmutableArray<T> items, System.Func<T, TResult> map)
+                => [.. items.Select(map)];
+
+            public static int CountWhere<T>(ImmutableArray<T> items, System.Func<T, bool> keep)
+            {
+                var count = 0;
+                foreach (var item in items)
+                {
+                    if (keep(item))
+                        count++;
+                }
+
+                return count;
+            }
+
+            public static bool Same<T>(T left, T right) => System.Collections.Generic.EqualityComparer<T>.Default.Equals(left, right);
+
+            public static string Describe<T>(Option<T> option) => option is Option<T>.Some { Value: var inner } ? $"Some {inner}" : "None";
+
+            public static bool Known<T>(Option<T> option) => option is Option<T>.Some { Value: _ };
+
+            public static string Label<T>(T value) => nameof(value.GetType);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_UnsafeSizeofAndPointerTypeof_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static unsafe class Native
+        {
+            public static int Size<T>() where T : unmanaged => sizeof(T);
+
+            public static string Pointer<T>() where T : unmanaged => typeof(T*).Name;
+
+            public static string Array<T>() => typeof(T[]).Name;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_DynamicValueTestedAgainstT_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Dynamic
+        {
+            public static bool Fits<T>(dynamic value) => value {|FP0601:is|} T;
+
+            public static int Pick<T>(dynamic value) => value is {|FP0601:T typed|} ? typed!.GetHashCode() : 0;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_CastValueOfTInSwitchStatementWithConstantCases_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Codes
+        {
+            public static int Code<T>(T value)
+            {
+                switch ((object?)value)
+                {
+                    case null:
+                        return -1;
+                    case {|FP0601:0|}:
+                        return 0;
+                    default:
+                        return 1;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ConstantCasesOverConcreteValueAndNullCaseOverT_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Codes
+        {
+            public static int Code<T>(T value, int count)
+            {
+                switch (count)
+                {
+                    case 0:
+                        return 0;
+                    case > 10:
+                        return 2;
+                }
+
+                switch (value)
+                {
+                    case null:
+                        return -1;
+                    default:
+                        return 1;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_TupleSwitchElementOfT_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Tuples
+        {
+            public static int Kind<TLeft, TRight>(TLeft left, TRight right) => (left, right) switch
+            {
+                ({|FP0601:int number|}, _) => number,
+                (_, {|FP0601:string|}) => 1,
+                (null, _) => -1,
+                _ => 0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_SpanOfQualifiedGenericAndParenthesizedPatterns_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Spans
+        {
+            public static bool Qualified<T>(T value) => value {|FP0601:is|} global::System.Int32;
+
+            public static int Count<T>(T value) => value is ({|FP0601:System.Collections.Generic.List<int> list|}) ? list.Count : 0;
+
+            public static bool Neither<T>(T value) => value is not ({|FP0601:int|} or {|FP0601:string|});
+
+            public static string Name<T>() => {|FP0601:typeof(
+                /* the parameter */ T)|}.Name;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0601", source, testContext.CancellationToken);
 }
