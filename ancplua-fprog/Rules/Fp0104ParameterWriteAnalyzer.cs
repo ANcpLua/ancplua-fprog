@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
@@ -10,10 +12,14 @@ namespace ancplua_fprog.Rules;
 /// <summary>
 /// FP0104: inside the functional core, an assignment, compound assignment, <c>??=</c>, deconstruction
 /// assignment, event subscription, <c>++</c> or <c>--</c> whose target is a field, property, event or
-/// element reached from a parameter that is not known to be a value type (or that is passed by
-/// <c>ref</c>/<c>out</c>). The chain from the parameter to the target may pass through fields,
-/// properties, indexers, array elements, casts, null-conditional access and method calls.
-/// Reported at the whole assignment target expression.
+/// element reached from a parameter, where the written storage is visible to the caller. The chain
+/// from the parameter to the target may pass through fields, properties, indexers, array elements,
+/// casts, null-conditional access and method calls. The storage is visible to the caller when the
+/// chain reads a value that may be a reference (the parameter itself, or any link of it, e.g. a class
+/// field inside a struct parameter), passes through a member that returns by reference (a
+/// <c>Span&lt;T&gt;</c> indexer, a <c>ref</c> field or method), or starts at a <c>ref</c>/<c>out</c>
+/// parameter. Writes into a struct parameter passed by value, or into a boxed copy of one, are not
+/// reported. Reported at the whole assignment target expression, including enclosing parentheses.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
@@ -47,40 +53,58 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
         if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
-        var target = context.Operation switch
+        switch (context.Operation)
         {
-            IDeconstructionAssignmentOperation deconstruction => deconstruction.Target,
-            IAssignmentOperation assignment => assignment.Target,
-            IEventAssignmentOperation eventAssignment => eventAssignment.EventReference,
-            IIncrementOrDecrementOperation increment => increment.Target,
-            _ => null
-        };
-
-        if (target is not null)
-            Check(context, target);
+            case IDeconstructionAssignmentOperation deconstruction:
+                Check(context, deconstruction.Target, rebinds: false);
+                break;
+            case ISimpleAssignmentOperation simple:
+                // `x.F = ref y` rebinds the ref field F; it writes nothing through the storage F referred to.
+                Check(context, simple.Target, simple.IsRef);
+                break;
+            case IAssignmentOperation assignment:
+                Check(context, assignment.Target, rebinds: false);
+                break;
+            case IEventAssignmentOperation eventAssignment:
+                Check(context, eventAssignment.EventReference, rebinds: false);
+                break;
+            case IIncrementOrDecrementOperation increment:
+                Check(context, increment.Target, rebinds: false);
+                break;
+        }
     }
 
-    private static void Check(OperationAnalysisContext context, IOperation target)
+    private static void Check(OperationAnalysisContext context, IOperation target, bool rebinds)
     {
         if (target is ITupleOperation tuple)
         {
             foreach (var element in tuple.Elements)
-                Check(context, element);
+                Check(context, element, rebinds: false);
 
             return;
         }
 
-        var receiver = Receiver(target);
-        if (receiver is null)
-            return;
-
+        var shared = !rebinds && ReturnsByRef(target);
         var start = target.Syntax.SpanStart;
-        while (true)
+        var receiver = Receiver(target);
+        while (receiver is not null)
         {
+            if (receiver is IConversionOperation boxing && IsBoxing(boxing))
+            {
+                // The box is a fresh copy: a write into it reaches the caller only through a reference
+                // read further up the chain.
+                if (!shared)
+                    return;
+
+                receiver = boxing.Operand;
+                continue;
+            }
+
+            shared |= ReturnsByRef(receiver) || MayBeReference(receiver.Type);
             switch (receiver)
             {
-                case IParameterReferenceOperation { Parameter: var parameter }:
-                    if (IsShared(parameter))
+                case IParameterReferenceOperation { Parameter.RefKind: var refKind }:
+                    if (shared || refKind is RefKind.Ref or RefKind.Out)
                         Report(context, target, start);
                     return;
                 case IConditionalAccessInstanceOperation instance:
@@ -93,23 +117,17 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
                 case IConversionOperation conversion:
                     receiver = conversion.Operand;
                     break;
-                case IInvocationOperation invocation:
-                    receiver = invocation.Instance
-                               ?? (invocation.TargetMethod.IsExtensionMethod && invocation.Arguments.Length > 0
-                                   ? invocation.Arguments[0].Value
-                                   : null);
-                    break;
                 default:
                     receiver = Receiver(receiver);
                     break;
             }
-
-            if (receiver is null)
-                return;
         }
     }
 
-    /// <summary>The value a field, property, event or element access is reached from, or null.</summary>
+    /// <summary>
+    /// The value a field, property, event, element or method result is reached from, or null. For an
+    /// extension method that is the argument passed to its <c>this</c> parameter.
+    /// </summary>
     private static IOperation? Receiver(IOperation operation) => operation switch
     {
         IMemberReferenceOperation member => member.Instance,
@@ -118,8 +136,44 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
         IInlineArrayAccessOperation inlineArray => inlineArray.Instance,
         IDynamicMemberReferenceOperation dynamicMember => dynamicMember.Instance,
         IDynamicIndexerAccessOperation dynamicIndexer => dynamicIndexer.Operation,
+        IInvocationOperation invocation => invocation.Instance ?? ExtensionReceiver(invocation),
         _ => null
     };
+
+    private static IOperation? ExtensionReceiver(IInvocationOperation invocation)
+    {
+        if (!invocation.TargetMethod.IsExtensionMethod)
+            return null;
+
+        foreach (var argument in invocation.Arguments)
+        {
+            if (argument.Parameter is { Ordinal: 0 })
+                return argument.Value;
+        }
+
+        return null;
+    }
+
+    /// <summary>True when the operation denotes storage elsewhere: a member that returns by reference.</summary>
+    private static bool ReturnsByRef(IOperation operation) => operation switch
+    {
+        IFieldReferenceOperation field => field.Field.RefKind != RefKind.None,
+        IPropertyReferenceOperation property => property.Property.RefKind != RefKind.None,
+        IInvocationOperation invocation => invocation.TargetMethod.RefKind != RefKind.None,
+        IImplicitIndexerReferenceOperation { IndexerSymbol: IPropertySymbol property } => property.RefKind != RefKind.None,
+        IImplicitIndexerReferenceOperation { IndexerSymbol: IMethodSymbol method } => method.RefKind != RefKind.None,
+        _ => false
+    };
+
+    /// <summary>
+    /// True when a value of <paramref name="type"/> may be a reference to an object: classes, interfaces,
+    /// arrays, delegates, <c>dynamic</c> and type parameters not known to be value types.
+    /// </summary>
+    private static bool MayBeReference(ITypeSymbol? type)
+        => type is { IsValueType: false, TypeKind: not TypeKind.Pointer and not TypeKind.FunctionPointer };
+
+    private static bool IsBoxing(IConversionOperation conversion)
+        => conversion.Operand.Type is { IsValueType: true } && MayBeReference(conversion.Type);
 
     /// <summary>
     /// The conditional access whose <c>WhenNotNull</c> part contains <paramref name="instance"/>; its
@@ -139,19 +193,14 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
-    /// <summary>
-    /// True when a write through <paramref name="parameter"/> is visible to the caller: its type may be
-    /// a reference type (classes, interfaces, arrays, delegates, unconstrained type parameters), or it
-    /// is passed by <c>ref</c> or <c>out</c>.
-    /// </summary>
-    private static bool IsShared(IParameterSymbol parameter)
-        => parameter.RefKind is RefKind.Ref or RefKind.Out
-           || parameter.Type is { IsValueType: false, TypeKind: not TypeKind.Pointer and not TypeKind.FunctionPointer };
-
     private static void Report(OperationAnalysisContext context, IOperation target, int start)
     {
+        // The target expression as written: `(p.X) = 1` is reported at `(p.X)`.
         var syntax = target.Syntax;
-        var location = Location.Create(syntax.SyntaxTree, TextSpan.FromBounds(start, syntax.Span.End));
-        context.ReportDiagnostic(Diagnostic.Create(Rule, location));
+        while (syntax.Parent is ParenthesizedExpressionSyntax parenthesized)
+            syntax = parenthesized;
+
+        var span = TextSpan.FromBounds(Math.Min(start, syntax.SpanStart), syntax.Span.End);
+        context.ReportDiagnostic(Diagnostic.Create(Rule, Location.Create(syntax.SyntaxTree, span)));
     }
 }
