@@ -13,9 +13,11 @@ namespace ancplua_fprog.Rules;
 /// the discard <c>_</c>, a <c>var</c> pattern, <c>default:</c>, an empty property pattern <c>{ }</c>,
 /// <c>not null</c>, or a type pattern (with or without a designation, with or without an empty property
 /// pattern) whose type the switched value always converts to: the union itself, a base type, an
-/// interface of the union, or <c>object</c>. Patterns on either side of a top-level <c>or</c> or
-/// <c>and</c> count; subpatterns of a property or positional pattern do not. Reported at the pattern,
-/// or at the <c>default</c> keyword. Applies inside and outside core.
+/// interface of the union, or <c>object</c>. Patterns on either side of a top-level <c>or</c> count;
+/// patterns on either side of a top-level <c>and</c> count only when both sides are catch-alls, since
+/// beside a case test they catch nothing beyond that case. Subpatterns of a property or positional
+/// pattern do not count. Reported at the pattern, or at the <c>default</c> keyword. Applies inside and
+/// outside core.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
@@ -74,11 +76,17 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     private static ITypeSymbol? GetUnionValueType(IOperation value)
         => value.Type is { } type && UnionModel.GetUnionType(type) is not null ? type : null;
 
-    /// <summary>Reports every catch-all among <paramref name="pattern"/> and the sides of its top-level <c>or</c> and <c>and</c>.</summary>
+    /// <summary>
+    /// Reports every catch-all among <paramref name="pattern"/> and the sides of its top-level <c>or</c>,
+    /// and the sides of its top-level <c>and</c> when the whole <c>and</c> still matches every value.
+    /// </summary>
     private static void ReportCatchAlls(OperationAnalysisContext context, IPatternOperation pattern, ITypeSymbol valueType)
     {
         if (pattern is IBinaryPatternOperation binary)
         {
+            if (binary.OperatorKind == BinaryOperatorKind.And && !MatchesEveryValue(context.Compilation, binary, valueType))
+                return;
+
             ReportCatchAlls(context, binary.LeftPattern, valueType);
             ReportCatchAlls(context, binary.RightPattern, valueType);
             return;
@@ -88,6 +96,22 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
         if (syntax is VarPatternSyntax || IsCatchAll(context.Compilation, pattern, valueType))
             context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.GetLocation()));
     }
+
+    /// <summary>
+    /// True when <paramref name="pattern"/> is a catch-all: a listed form, an <c>and</c> of two catch-alls,
+    /// or an <c>or</c> with a catch-all on either side.
+    /// </summary>
+    private static bool MatchesEveryValue(Compilation compilation, IPatternOperation pattern, ITypeSymbol valueType)
+        => pattern switch
+        {
+            IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } conjunction
+                => MatchesEveryValue(compilation, conjunction.LeftPattern, valueType)
+                   && MatchesEveryValue(compilation, conjunction.RightPattern, valueType),
+            IBinaryPatternOperation disjunction
+                => MatchesEveryValue(compilation, disjunction.LeftPattern, valueType)
+                   || MatchesEveryValue(compilation, disjunction.RightPattern, valueType),
+            _ => GetPatternSyntax(pattern) is VarPatternSyntax || IsCatchAll(compilation, pattern, valueType)
+        };
 
     private static bool IsCatchAll(Compilation compilation, IPatternOperation pattern, ITypeSymbol valueType)
     {

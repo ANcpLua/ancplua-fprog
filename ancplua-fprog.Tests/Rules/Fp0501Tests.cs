@@ -232,21 +232,115 @@ public sealed class Fp0501Tests(TestContext testContext)
         }
         """ + Shape);
 
+    // A listed form beside a case test in an "and" catches nothing beyond that case.
     [TestMethod]
-    public Task FP0501_CatchAllOnOneSideOfTopLevelAnd_Reports() => VerifyAsync("""
+    public Task FP0501_CatchAllOnOneSideOfTopLevelAnd_NoReport() => VerifyAsync("""
         public static class Area
         {
             public static int Of(Shape shape) => shape switch
             {
-                Shape.Circle and {|FP0501:var circle|} => circle.GetHashCode(),
-                {|FP0501:not null|} and Shape.Square => 2
+                Shape.Circle and var circle => circle.GetHashCode(),
+                not null and Shape.Square => 2
             };
 
             public static int Empty(Shape shape) => shape switch
             {
-                Shape.Square and {|FP0501:{ }|} => 3,
+                Shape.Square and { } => 3,
                 Shape.Circle => 1
             };
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_CaseAndVarIsNotACatchAll_NoReport() => VerifyAsync("""
+        public static class Area
+        {
+            public static double Of(Shape shape) => shape switch
+            {
+                Shape.Circle { Radius: > 0 } and var circle => circle.Radius,
+                Shape.Circle => 0,
+                Shape.Square and { Side: var side } => side
+            };
+        }
+        """ + Shape);
+
+    // Both sides of the "and" are catch-alls (an "or" counts as one when either side is), so the arm
+    // still matches every value.
+    [TestMethod]
+    public Task FP0501_AndOfTwoCatchAlls_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int Of(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:not null|} and {|FP0501:var rest|} => rest.GetHashCode(),
+                null => -1
+            };
+
+            public static int Nested(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:Shape other|} and ({|FP0501:{ }|} and {|FP0501:not null|}) => other.GetHashCode()
+            };
+
+            public static int Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle:
+                        return 1;
+                    case (Shape.Square or {|FP0501:_|}) and {|FP0501:var rest|}:
+                        return rest.GetHashCode();
+                }
+
+                return -1;
+            }
+        }
+        """ + Shape);
+
+    // One side of the "and" narrows to a case (or excludes one), so the other side catches nothing more.
+    [TestMethod]
+    public Task FP0501_AndWithNarrowingSide_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Area
+        {
+            public static int Of(Shape shape) => shape switch
+            {
+                (Shape.Circle or Shape.Square) and var known => known.GetHashCode()
+            };
+
+            public static double Named(Shape shape) => shape switch
+            {
+                Shape.Circle and { } circle => circle.Radius,
+                Shape.Square and not null => 0
+            };
+
+            public static int Rest(Shape shape) => shape switch
+            {
+                Shape.Circle => 1,
+                { } rest and not Shape.Circle => rest.GetHashCode()
+            };
+
+            public static int Grouped(Shape shape) => shape switch
+            {
+                (Shape.Circle or _) and Shape.Square => 2,
+                Shape.Circle => 1
+            };
+
+            public static string Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case not null and Shape.Square and var square:
+                        return square.ToString();
+                    case (Shape.Circle or Shape.Square) and var known:
+                        return known.ToString();
+                    case null:
+                        return "none";
+                }
+
+                return "";
+            }
         }
         """ + Shape);
 
