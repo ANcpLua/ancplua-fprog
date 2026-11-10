@@ -516,6 +516,471 @@ public sealed class Fp0801Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0801_FieldWithSeveralDeclaratorsReportsSharedTypeOnce_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Pair
+        {
+            private readonly System.IO.{|FP0801:Stream|} _first = System.IO.{|FP0801:Stream|}.Null, _second = System.IO.{|FP0801:Stream|}.Null;
+
+            public bool Same() => ReferenceEquals(_first, _second);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_PatternsForeachAndQuery_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+        using System.IO;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Shapes
+        {
+            public static int Arm(object value) => value switch
+            {
+                {|FP0801:FileInfo|} => 1,
+                {|FP0801:Stream|} { CanRead: true } s => (int)s.Length,
+                not {|FP0801:TextReader|} => 2,
+                _ => 0
+            };
+
+            public static int Case(object value)
+            {
+                switch (value)
+                {
+                    case {|FP0801:Stream|} s when s.CanSeek:
+                        return 1;
+                    case {|FP0801:FileInfo|}:
+                        return 2;
+                    default:
+                        return 0;
+                }
+            }
+
+            public static int Loop(IEnumerable<object> items)
+            {
+                var count = 0;
+                foreach ({|FP0801:FileInfo|} file in items)
+                    count += file.Name.Length;
+                return count;
+            }
+
+            public static IEnumerable<string> Query(IEnumerable<object> items)
+                => from {|FP0801:FileInfo|} file in items
+                   where file.Exists
+                   select file.Name;
+
+            public static bool Declared(object value) => value is {|FP0801:Stream|} stream && stream.CanRead;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_ConstructorsAccessorsOperatorsAndInitializers_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Members
+        {
+            private readonly int _separator = System.IO.{|FP0801:Path|}.DirectorySeparatorChar;
+
+            public Members() : this(System.IO.{|FP0801:Path|}.PathSeparator)
+            {
+            }
+
+            private Members(char separator) => _separator = separator + System.IO.{|FP0801:Path|}.AltDirectorySeparatorChar;
+
+            ~Members() => System.{|FP0801:Console|}.Beep();
+
+            public bool Exists { get; } = System.IO.{|FP0801:File|}.Exists("a");
+
+            public string Name
+            {
+                get { return System.IO.{|FP0801:Path|}.GetFileName("a/b"); }
+                init { _ = System.IO.{|FP0801:Path|}.GetFileName(value); }
+            }
+
+            public char this[int index] => System.IO.{|FP0801:Path|}.GetInvalidPathChars()[index];
+
+            public static Members operator +(Members left, Members right) => System.IO.{|FP0801:File|}.Exists("b") ? left : right;
+
+            public static explicit operator int(Members value) => value._separator + System.{|FP0801:Console|}.Read();
+
+            public event System.Action? Changed
+            {
+                add => System.{|FP0801:Console|}.WriteLine(value);
+                remove => System.{|FP0801:Console|}.WriteLine(value);
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_DefaultValuesAndAttributeArguments_Reports() => VerifyAsync("""
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+        }
+
+        namespace Core
+        {
+            [Fprog.FunctionalCore]
+            [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+            public static class Defaults
+            {
+                public static int Mode(int mode = (int)System.IO.{|FP0801:FileMode|}.Open) => mode;
+
+                [Shell.Tag(typeof(System.IO.{|FP0801:File|}))]
+                [return: Shell.Tag(typeof(System.{|FP0801:Console|}))]
+                public static int Tagged([Shell.Tag(typeof(System.Threading.{|FP0801:Thread|}))] int value) => value;
+
+                [System.Obsolete(nameof(System.{|FP0801:Console|}))]
+                public static int Old() => 0;
+
+                public static System.Func<int, int> Lambda()
+                    => ([Shell.Tag(typeof(System.Threading.{|FP0801:Monitor|}))] int x) => x;
+
+                public static int Local()
+                {
+                    return Inner();
+
+                    [Shell.Tag(typeof(System.Threading.{|FP0801:Mutex|}))]
+                    static int Inner(int value = (int)System.IO.{|FP0801:SeekOrigin|}.End) => value;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_SpanIsNameTokenInOddSyntax_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+
+        public sealed class Box
+        {
+            public int Value { get; init; }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Spans
+        {
+            public static string Interpolated() => $"{System.IO.{|FP0801:Path|}.PathSeparator}";
+
+            public static List<char> Collection() => new() { System.IO.{|FP0801:Path|}.PathSeparator };
+
+            public static Box Initialized() => new() { Value = System.IO.{|FP0801:Path|}.PathSeparator };
+
+            public static (System.IO.{|FP0801:Stream|}? Source, int Count) Tuple() => (null, 0);
+
+            public static string? Conditional() => System.{|FP0801:Console|}.In?.ReadLine();
+
+            public static object Parenthesized() => (System.{|FP0801:Console|}.Out);
+
+            public static object? Cast(object value) => (System.IO.{|FP0801:Stream|}?)value;
+
+            public static int Verbatim() => System.{|FP0801:@Console|}.Read();
+
+            public static bool Commented() => System.IO. /* the shell */ {|FP0801:File|}.Exists("a");
+
+            public static bool Broken() => System
+                .IO
+                .{|FP0801:File|}
+                .Exists("a");
+
+            public static System.IO.{|FP0801:Stream|}?[] Array() => [];
+
+            public static System.IO.Enumeration.{|FP0801:FileSystemEnumerable|}<int>? Generic() => null;
+
+            public static System.Type Unbound() => typeof(System.IO.Enumeration.{|FP0801:FileSystemEnumerable|}<>);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_RecordStructInterfaceGenericEnumAndDelegate_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public readonly record struct Handle(int Id)
+        {
+            public bool Exists => System.IO.{|FP0801:File|}.Exists(Id.ToString());
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Kinds
+        {
+            public interface IOpener
+            {
+                System.IO.{|FP0801:Stream|} Open();
+
+                bool Ready() => System.IO.{|FP0801:File|}.Exists("ready");
+            }
+
+            public sealed class Holder<T> where T : System.IO.{|FP0801:Stream|}
+            {
+                public System.Collections.Generic.IReadOnlyList<System.IO.{|FP0801:Stream|}> Items { get; init; } = [];
+            }
+
+            public enum Mode
+            {
+                Open = (int)System.IO.{|FP0801:FileMode|}.Open
+            }
+
+            public delegate System.IO.{|FP0801:Stream|} Factory(System.Threading.{|FP0801:Timer|} timer);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_PrimaryConstructorAndPartialPartWithoutAttribute_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed partial class Reader(System.IO.{|FP0801:TextReader|} source)
+        {
+            public string? Line() => source.ReadLine();
+        }
+
+        public sealed partial class Reader
+        {
+            public static string Read() => System.{|FP0801:Console|}.ReadLine() ?? "";
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_ExtensionBlock_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class StreamExtensions
+        {
+            extension(System.IO.{|FP0801:Stream|} stream)
+            {
+                public bool IsEmpty => stream.Length == 0;
+
+                public static System.IO.{|FP0801:Stream|} Empty => System.IO.{|FP0801:Stream|}.Null;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_AsyncIteratorUsingAndNestedLocks_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public sealed class Effects
+        {
+            private readonly object _gate = new();
+
+            private readonly System.Func<int, int> _locked;
+
+            public Effects() => _locked = value =>
+            {
+                {|FP0801:lock|} (_gate)
+                {
+                    return value;
+                }
+            };
+
+            public async Task<string> ReadAsync(string path) => await System.IO.{|FP0801:File|}.ReadAllTextAsync(path);
+
+            public static IEnumerable<int> Keys()
+            {
+                yield return System.{|FP0801:Console|}.Read();
+            }
+
+            public static string? First(string text)
+            {
+                using (var reader = new System.IO.{|FP0801:StringReader|}(text))
+                {
+                    return reader.ReadLine();
+                }
+            }
+
+            public int Count
+            {
+                get
+                {
+                    {|FP0801:lock|} (_gate)
+                    {
+                        return Inner();
+                    }
+
+                    int Inner()
+                    {
+                        {|FP0801:lock|} (this)
+                        {
+                            return _locked(1);
+                        }
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_NamespaceAndTypeAliases_Reports() => VerifyAsync("""
+        using IO = System.IO;
+        using L = System.Threading.Lock;
+
+        [Fprog.FunctionalCore]
+        public static class Aliases
+        {
+            public static bool Dotted() => IO.{|FP0801:File|}.Exists("a");
+
+            public static bool Qualified() => IO::{|FP0801:File|}.Exists("a");
+
+            public static {|FP0801:L|}.{|FP0801:Scope|} Enter({|FP0801:L|} gate) => gate.EnterScope();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_Reports() => VerifyAsync("""
+        using static System.Console;
+
+        [Fprog.FunctionalCore]
+        public static class Imported
+        {
+            public static System.Action<string> Group() => {|FP0801:WriteLine|};
+
+            public static string Name() => nameof({|FP0801:WriteLine|});
+
+            public static int Dynamic(dynamic value)
+            {
+                {|FP0801:WriteLine|}(value);
+                return 0;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_NameofAndDynamicCallOfOwnStaticMembers_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Own
+        {
+            public static int Twice(int value) => value * 2;
+
+            public static int Twice(long value) => (int)value * 2;
+
+            public static string Name() => nameof(Twice);
+
+            public static int Dynamic(dynamic value) => Twice(value);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_StaticMemberInheritedFromForbiddenBaseUnqualified_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public abstract class Wrapped : System.IO.{|FP0801:TextWriter|}
+        {
+            public static System.IO.{|FP0801:TextWriter|} Quiet() => {|FP0801:Null|};
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_CoreNestedInShellReportsOnlyInner_Reports() => VerifyAsync("""
+        public static class Shell
+        {
+            public static int Read() => System.Console.Read();
+
+            [Fprog.FunctionalCore]
+            public static class Core
+            {
+                public static int Read() => System.{|FP0801:Console|}.Read();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_AbstractExternAndUnsafe_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public abstract unsafe class Odd
+        {
+            public abstract System.IO.{|FP0801:Stream|} Open();
+
+            [System.Runtime.InteropServices.DllImport("native")]
+            public static extern int Close(System.IntPtr handle, System.IO.{|FP0801:FileAccess|} access);
+
+            public static int Call(delegate*<System.IO.{|FP0801:FileMode|}, int> callback)
+                => callback(System.IO.{|FP0801:FileMode|}.Open);
+
+            public static int Size() => sizeof(System.IO.{|FP0801:FileMode|});
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_FunctionalCoreWithShellLikeMemberNames_NoReport() => VerifyAsync("""
+        using System.Collections.Generic;
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        namespace Domain
+        {
+            [Fprog.FunctionalCore]
+            public sealed record Job(string Process, int Timer, string Console);
+
+            [Fprog.FunctionalCore]
+            public static class Pure
+            {
+                public static int Lock(int value) => value;
+
+                public static string Path(string a, string b) => a + "/" + b;
+
+                public static ImmutableArray<Job> Due(ImmutableArray<Job> jobs, int now)
+                    => [.. jobs.Where(job => job.Timer <= now).OrderBy(job => job.Process)];
+
+                public static int Total(IEnumerable<Job> jobs)
+                {
+                    var total = 0;
+                    foreach (var job in jobs)
+                    {
+                        total += job switch
+                        {
+                            { Timer: > 10, Console: "x" } => Lock(job.Timer),
+                            { Process.Length: 0 } => 0,
+                            _ => 1
+                        };
+                    }
+
+                    return total;
+                }
+
+                public static string Describe(Job job) => $"{job.Process}:{job.Console}:{Path("a", "b")}";
+
+                public static bool Present([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? text)
+                {
+                    System.Diagnostics.Debug.Assert(text is null || text.Length >= 0);
+                    return text is not null;
+                }
+
+                public static System.Lazy<int> Later() => new(() => 1, System.Threading.LazyThreadSafetyMode.None);
+
+                public static System.Threading.CancellationTokenSource? Source() => null;
+
+                public static System.Threading.SpinLock? Spin() => null;
+
+                public static System.Threading.Tasks.ValueTask<int> Ready() => new(1);
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_GeneratedCodeAttribute_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        [System.CodeDom.Compiler.GeneratedCode("tool", "1.0")]
+        public static class Emitted
+        {
+            public static int Read() => System.Console.Read();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_ShellTypeDerivedFromForbiddenTypeNoForbiddenToken_NoReport() => VerifyAsync("""
+        public sealed class ShellBuffer : System.IO.MemoryStream
+        {
+        }
+
+        [Fprog.FunctionalCore]
+        public static class UsesBuffer
+        {
+            public static long Size(ShellBuffer buffer) => buffer.Length;
+
+            public static ShellBuffer Fresh() => new();
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0801", source, testContext.CancellationToken);
 }

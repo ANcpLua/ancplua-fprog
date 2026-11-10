@@ -56,8 +56,28 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var symbol = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol;
-        var type = symbol switch
+        var info = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken);
+
+        // A method group in nameof(...) and a dynamically bound call have no single symbol, only candidates.
+        var candidates = info.Symbol is { } symbol
+            ? [symbol]
+            : info.CandidateReason is CandidateReason.MemberGroup or CandidateReason.LateBound
+                ? info.CandidateSymbols
+                : ImmutableArray<ISymbol>.Empty;
+
+        foreach (var candidate in candidates)
+        {
+            if (ReferencedType(candidate, name) is { } type && IsForbidden(type))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation(), type.Name));
+                return;
+            }
+        }
+    }
+
+    /// <summary>The type that <paramref name="name"/> names, or whose static member it reaches without a qualifier.</summary>
+    private static INamedTypeSymbol? ReferencedType(ISymbol symbol, SimpleNameSyntax name)
+        => symbol switch
         {
             INamedTypeSymbol named => named,
             IMethodSymbol { MethodKind: MethodKind.Constructor } constructor when IsAttributeName(name)
@@ -66,10 +86,6 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
                 => symbol.ContainingType,
             _ => null
         };
-
-        if (type is not null && IsForbidden(type))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation(), type.Name));
-    }
 
     /// <summary>True when <paramref name="name"/> is written without a qualifier on its left.</summary>
     private static bool IsUnqualified(SimpleNameSyntax name)
