@@ -838,6 +838,51 @@ public sealed class UnionSwitchCoverageTests
     }
 
     [TestMethod]
+    [DataRow("IHas<object>, IHas<string?>")]
+    [DataRow("IHas<string?>, IHas<object>")]
+    public void InterfaceImplementedTwice_SubpatternIsJudgedAgainstTheConstructionTheArmNames(string interfaces)
+    {
+        var compilation = TestCompilation.Create($$"""
+            namespace Shapes
+            {
+                public interface IHas<T>
+                {
+                    T Value { get; }
+                }
+
+                [Fprog.Union]
+                public abstract record Shape
+                {
+                    private Shape() { }
+
+                    public sealed record Circle(string? Label) : Shape, {{interfaces}}
+                    {
+                        object IHas<object>.Value => "x";
+
+                        string? IHas<string?>.Value => Label;
+                    }
+
+                    public sealed record Square(double Side) : Shape;
+                }
+
+                public static class Switches
+                {
+                    // A Circle(null) has a null IHas<string?>.Value and reaches no arm.
+                    public static int Nullable(Shape s) => s switch { Shape.Circle and IHas<string?> { Value: object o } => 1, Shape.Square => 2 };
+
+                    public static int NotNull(Shape s) => s switch { Shape.Circle and IHas<object> { Value: object o } => 1, Shape.Square => 2 };
+                }
+            }
+            """);
+        var nullable = Coverage(compilation, "Nullable");
+
+        AssertCoverage(nullable, [Circle, Square], [Circle], [Circle]);
+        Assert.IsEmpty(nullable.CasesNotNamed);
+        Assert.IsFalse(nullable.HandlesEveryCase);
+        AssertCoverage(Coverage(compilation, "NotNull"), [Circle, Square], [], []);
+    }
+
+    [TestMethod]
     public void PrivateNestedCase_IsACaseOnlyWhereItCanBeNamed()
     {
         var compilation = TestCompilation.Create("""
@@ -961,6 +1006,65 @@ public sealed class UnionSwitchCoverageTests
         AssertNames(cases, new UnionModel(compilation).GetCases(compilation.GetNamedType("Lib.Shape")));
         AssertCoverage(run, cases, ["Cases.Star", "App.Square"], ["Cases.Star", "App.Square"]);
         AssertNames(["Cases.Star", "App.Square"], run.CasesNotNamed);
+        Assert.IsFalse(run.HandlesEveryCase);
+        Assert.IsTrue(Coverage(compilation, "All").HandlesEveryCase);
+    }
+
+    [TestMethod]
+    [DataRow("namespace Lib", "Lib.Shape", "Lib.Shape")]
+    [DataRow("public static class Lib", "Lib+Shape", "Lib")] // Only a top-level type can be forwarded.
+    public void CaseCompiledAgainstAnAssemblyThatNowForwardsTheUnion_IsACase(string container, string unionMetadataName, string forwardedType)
+    {
+        var unionSource = $$"""
+            {{container}}
+            {
+                [Fprog.Union]
+                public abstract record Shape
+                {
+                    protected Shape() { }
+
+                    public sealed record Circle : Shape;
+                }
+            }
+            """;
+        var oldLibrary = TestCompilation.Create(unionSource, "OldLibrary");
+        var caseLibrary = TestCompilation.Create("""
+            namespace Cases
+            {
+                public sealed record Star : Lib.Shape;
+            }
+            """, "CaseLibrary", TestCompilation.ToImageReference(oldLibrary));
+        var unionReference = TestCompilation.ToImageReference(TestCompilation.Create(unionSource, "UnionLibrary"));
+
+        // The union moved to UnionLibrary; version 2 of OldLibrary only forwards it there.
+        var forwarder = TestCompilation.Create($$"""
+            [assembly: System.Reflection.AssemblyVersion("2.0.0.0")]
+            [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof({{forwardedType}}))]
+            """, "OldLibrary", unionReference);
+        var compilation = TestCompilation.Create(
+            """
+            namespace App
+            {
+                public static class Switches
+                {
+                    public static int Run(Lib.Shape shape) => shape switch { Lib.Shape.Circle => 1 };
+
+                    public static int All(Lib.Shape shape) => shape switch { Lib.Shape.Circle => 1, Cases.Star => 2 };
+                }
+            }
+            """,
+            "App",
+            unionReference,
+            TestCompilation.ToImageReference(forwarder),
+            TestCompilation.ToImageReference(caseLibrary));
+        var shape = compilation.GetNamedType(unionMetadataName);
+        string[] cases = ["Lib.Shape.Circle", "Cases.Star"];
+        var run = Coverage(compilation, "Run");
+
+        Assert.AreEqual(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Cases.Star")), SymbolEqualityComparer.Default);
+        AssertNames(cases, new UnionModel(compilation).GetCases(shape));
+        AssertCoverage(run, cases, ["Cases.Star"], ["Cases.Star"]);
+        AssertNames(["Cases.Star"], run.CasesNotNamed);
         Assert.IsFalse(run.HandlesEveryCase);
         Assert.IsTrue(Coverage(compilation, "All").HandlesEveryCase);
     }
@@ -1402,6 +1506,75 @@ public sealed class UnionSwitchCoverageTests
         }
 
         foreach (var method in new[] { "Var", "ValueType", "LostAnnotationValueType", "Closed", "PropertyVar", "PropertyValueType", "NestedValueType" })
+            Assert.IsTrue(Coverage(compilation, method).HandlesEveryCase, method);
+    }
+
+    [TestMethod]
+    public void ExtensionMemberWhoseReceiverLacksAnAnnotationOfTheValue_ReferenceTypedInputCountsAsNullable()
+    {
+        var compilation = TestCompilation.Create("""
+            namespace Boxes
+            {
+                [Fprog.Union]
+                public abstract class Box<T>
+                {
+                    private Box() { }
+
+                    public sealed class Full(T item) : Box<T>
+                    {
+                        public T Item { get; } = item;
+                    }
+
+                    public sealed class Empty : Box<T>;
+                }
+
+                public static class BoxExtensions
+                {
+                    public static void Deconstruct(this Box<string>.Full full, out string item, out int size)
+                    {
+                        item = full.Item;
+                        size = 1;
+                    }
+
+                    extension(Box<string>.Full full)
+                    {
+                        public string Thing => full.Item;
+
+                        public int Size => 1;
+                    }
+                }
+
+                public static class Switches
+                {
+                    // The receiver Box<string>.Full lacks the ? of the value: a Box<string?>.Full(null) gives a null item.
+                    public static int Typed(Box<string?> box) => box switch { Box<string?>.Full(string item, _) => 1, Box<string?>.Empty => 2 };
+
+                    public static int PropertyTyped(Box<string?> box) => box switch { Box<string?>.Full { Thing: string thing } => 1, Box<string?>.Empty => 2 };
+
+                    // A value type holds no null, and a receiver lacks nothing of a value without ?.
+                    public static int ValueType(Box<string?> box) => box switch { Box<string?>.Full(_, int size) => 1, Box<string?>.Empty => 2 };
+
+                    public static int PropertyValueType(Box<string?> box) => box switch { Box<string?>.Full { Size: int size } => 1, Box<string?>.Empty => 2 };
+
+                    public static int Closed(Box<string> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
+
+                    public static int PropertyClosed(Box<string> box) => box switch { Box<string>.Full { Thing: string thing } => 1, Box<string>.Empty => 2 };
+                }
+            }
+            """);
+        string[] cases = ["Boxes.Box<T>.Full", "Boxes.Box<T>.Empty"];
+        string[] full = ["Boxes.Box<T>.Full"];
+
+        foreach (var method in new[] { "Typed", "PropertyTyped" })
+        {
+            var coverage = Coverage(compilation, method);
+
+            AssertCoverage(coverage, cases, full, full);
+            Assert.IsEmpty(coverage.CasesNotNamed, method);
+            Assert.IsFalse(coverage.HandlesEveryCase, method);
+        }
+
+        foreach (var method in new[] { "ValueType", "PropertyValueType", "Closed", "PropertyClosed" })
             Assert.IsTrue(Coverage(compilation, method).HandlesEveryCase, method);
     }
 

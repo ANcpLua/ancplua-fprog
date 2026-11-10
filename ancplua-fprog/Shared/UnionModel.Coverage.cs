@@ -64,7 +64,8 @@ internal sealed partial class UnionModel
     /// nullable annotations count as not null. A reference-typed input that a generic extension member
     /// supplies for one of its type parameters (<c>out T item</c> of an extension
     /// <c>Deconstruct&lt;T&gt;</c>) counts as nullable: Roslyn constructs such a member without the
-    /// <c>?</c> of the value.
+    /// <c>?</c> of the value. So does one that an extension member supplies whose receiver type lacks a
+    /// <c>?</c> of the value (<c>this Box&lt;string&gt;.Full</c> on a <c>Box&lt;string?&gt;</c>).
     /// </para>
     /// </summary>
     public bool TryGetCoverage(ISwitchExpressionOperation switchExpression, out UnionSwitchCoverage coverage)
@@ -293,7 +294,8 @@ internal sealed partial class UnionModel
                 return input.WithoutMember(
                     parameters[index + receivers].Type,
                     declaredParameters.Length != parameters.Length
-                    || MentionsTypeParameter(declaredParameters[index + receivers].Type));
+                    || MentionsTypeParameter(declaredParameters[index + receivers].Type)
+                    || ReceiverLacksAnnotation(deconstruct, input.Type));
             case null when GetTupleElements(input.Type, subpatterns.Length) is { } declared:
                 return input.WithMember(declared[index].Type);
             case null when GetTupleElements(pattern.MatchedType, subpatterns.Length) is { } matched:
@@ -316,7 +318,9 @@ internal sealed partial class UnionModel
             case IPropertyReferenceOperation { Property: var property }:
                 return FindMember(input.Type, property) is { } seenProperty
                     ? input.WithMember(seenProperty.Type)
-                    : input.WithoutMember(property.Type, MentionsTypeParameter(property.OriginalDefinition.Type));
+                    : input.WithoutMember(
+                        property.Type,
+                        MentionsTypeParameter(property.OriginalDefinition.Type) || ReceiverLacksAnnotation(property, input.Type));
             case IFieldReferenceOperation { Field: var field }:
                 return FindMember(input.Type, field) is { } seenField
                     ? input.WithMember(seenField.Type)
@@ -329,12 +333,13 @@ internal sealed partial class UnionModel
     /// <summary>
     /// <paramref name="member"/> as <paramref name="type"/> declares it: the member with the same
     /// definition in the construction of its containing type that <paramref name="type"/> is, derives
-    /// from or implements. <see langword="null"/> when there is none, as for an extension method.
+    /// from or implements, with the type arguments of the containing type but for nullable annotations.
+    /// <see langword="null"/> when there is none, as for an extension method.
     /// </summary>
     private static TMember? FindMember<TMember>(ITypeSymbol type, TMember member)
         where TMember : class, ISymbol
     {
-        if (member.ContainingType is not { } owner || FindConstruction(type, owner.OriginalDefinition) is not { } construction)
+        if (member.ContainingType is not { } owner || FindConstruction(type, owner.OriginalDefinition, owner) is not { } construction)
             return null;
 
         foreach (var candidate in construction.GetMembers(member.Name))
@@ -345,6 +350,28 @@ internal sealed partial class UnionModel
 
         return null;
     }
+
+    /// <summary>
+    /// True when <paramref name="member"/> is an extension member whose receiver type lacks a <c>?</c> that
+    /// <paramref name="type"/> has: <c>this Box&lt;string&gt;.Full</c> read from a <c>Box&lt;string?&gt;.Full</c>.
+    /// Roslyn binds such a member all the same, so what it supplies may be null although it says otherwise.
+    /// </summary>
+    private static bool ReceiverLacksAnnotation(ISymbol member, ITypeSymbol type)
+        => GetReceiverType(member) is { } receiver
+           && FindConstruction(type, receiver.OriginalDefinition) is { } seen
+           && LacksAnnotation(receiver, seen);
+
+    /// <summary>
+    /// The receiver type of an extension member: the parameter of its extension block, or the first parameter
+    /// of an extension method in its static form. <see langword="null"/> for any other member.
+    /// </summary>
+    private static ITypeSymbol? GetReceiverType(ISymbol member)
+        => member switch
+        {
+            { ContainingType: { IsExtension: true, ExtensionParameter: { } receiver } } => receiver.Type,
+            IMethodSymbol { IsExtensionMethod: true, Parameters: { IsEmpty: false } parameters } => parameters[0].Type,
+            _ => null
+        };
 
     /// <summary>
     /// True when <paramref name="pattern"/> matches every value that <paramref name="input"/> can hold.
@@ -442,11 +469,11 @@ internal sealed partial class UnionModel
 
         /// <summary>
         /// The input of a subpattern whose member is only known as the arm declares it. That type can
-        /// lack a <c>?</c> of the value when the arm names a type that lacks one, and when the member is
-        /// generic (<paramref name="genericInDefinition"/>): Roslyn constructs
-        /// <c>Deconstruct&lt;string&gt;</c> for a <c>Box&lt;string?&gt;</c>.
+        /// lack a <c>?</c> of the value when the arm names a type that lacks one, and when the member may
+        /// lack one (<paramref name="memberMayLackAnnotation"/>): when it is generic, as Roslyn constructs
+        /// <c>Deconstruct&lt;string&gt;</c> for a <c>Box&lt;string?&gt;</c>, or when its receiver type lacks one.
         /// </summary>
-        public DeclaredInput WithoutMember(ITypeSymbol memberTypeOfArm, bool genericInDefinition)
-            => new(memberTypeOfArm, MayHideNull || armLacksAnnotation || genericInDefinition, armLacksAnnotation);
+        public DeclaredInput WithoutMember(ITypeSymbol memberTypeOfArm, bool memberMayLackAnnotation)
+            => new(memberTypeOfArm, MayHideNull || armLacksAnnotation || memberMayLackAnnotation, armLacksAnnotation);
     }
 }

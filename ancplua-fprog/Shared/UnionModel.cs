@@ -34,9 +34,9 @@ internal sealed partial class UnionModel(Compilation compilation)
     private readonly ConcurrentDictionary<IAssemblySymbol, Dictionary<INamedTypeSymbol, ImmutableArray<INamedTypeSymbol>>>
         _casesByAssembly = new(SymbolEqualityComparer.Default);
 
-    // For the assembly of a union that is not the source assembly: the assemblies that can declare a case of it.
-    private readonly ConcurrentDictionary<IAssemblySymbol, ImmutableArray<IAssemblySymbol>>
-        _caseAssembliesByHome = new(SymbolEqualityComparer.Default);
+    // For a union whose assembly is not the source assembly: the assemblies that can declare a case of it.
+    private readonly ConcurrentDictionary<INamedTypeSymbol, ImmutableArray<IAssemblySymbol>>
+        _caseAssembliesByUnion = new(SymbolEqualityComparer.Default);
 
     /// <summary>How <see cref="Matches"/> treats type parameters.</summary>
     private enum TypeMatching
@@ -102,8 +102,8 @@ internal sealed partial class UnionModel(Compilation compilation)
     /// <summary>
     /// The case definitions that a value whose static type is <paramref name="type"/> can be; empty
     /// when that is not a union value (<see cref="GetUnionType"/>). Cases are found in the union's own
-    /// assembly, then in every referenced assembly that references that assembly, then in this
-    /// compilation. The union definition <c>Result&lt;T&gt;</c> and a
+    /// assembly, then in every referenced assembly that references that assembly or an assembly that
+    /// forwards the union to it, then in this compilation. The union definition <c>Result&lt;T&gt;</c> and a
     /// <c>Result&lt;TValue&gt;</c> inside a generic method get every case, <c>Result&lt;string&gt;</c>
     /// gets neither <c>IntOk : Result&lt;int&gt;</c> nor <c>ListOk&lt;T&gt; : Result&lt;List&lt;T&gt;&gt;</c>.
     /// </summary>
@@ -146,46 +146,69 @@ internal sealed partial class UnionModel(Compilation compilation)
             return CasesIn(sourceAssembly, union);
 
         var cases = ImmutableArray<INamedTypeSymbol>.Empty;
-        foreach (var assembly in GetCaseAssemblies(home))
+        foreach (var assembly in GetCaseAssemblies(union, home))
             cases = cases.AddRange(CasesIn(assembly, union));
 
         return cases;
     }
 
     /// <summary>
-    /// The assemblies that can declare a case of a union from <paramref name="home"/>, which is not the
-    /// source assembly: <paramref name="home"/> itself, the referenced assemblies that reference it (in
-    /// the order of the references of the compilation), and the source assembly.
+    /// The assemblies that can declare a case of <paramref name="union"/> from <paramref name="home"/>,
+    /// which is not the source assembly: <paramref name="home"/> itself, the referenced assemblies that
+    /// reference it or an assembly that forwards the union to it (in the order of the references of the
+    /// compilation), and the source assembly.
     /// </summary>
-    private ImmutableArray<IAssemblySymbol> GetCaseAssemblies(IAssemblySymbol home)
+    private ImmutableArray<IAssemblySymbol> GetCaseAssemblies(INamedTypeSymbol union, IAssemblySymbol home)
     {
-        if (_caseAssembliesByHome.TryGetValue(home, out var known))
+        if (_caseAssembliesByUnion.TryGetValue(union, out var known))
             return known;
 
+        // Only a top-level type can be forwarded; a nested union moves with it.
+        var topLevel = union;
+        while (topLevel.ContainingType is { } outer)
+            topLevel = outer;
+
+        var metadataName = GetFullMetadataName(topLevel);
         var assemblies = ImmutableArray.CreateBuilder<IAssemblySymbol>();
         assemblies.Add(home);
         foreach (var referenced in _compilation.SourceModule.ReferencedAssemblySymbols)
         {
-            if (!SymbolEqualityComparer.Default.Equals(referenced, home) && References(referenced, home))
+            if (!SymbolEqualityComparer.Default.Equals(referenced, home) && References(referenced, home, topLevel, metadataName))
                 assemblies.Add(referenced);
         }
 
         assemblies.Add(_compilation.Assembly);
-        return _caseAssembliesByHome.GetOrAdd(home, assemblies.ToImmutable());
+        return _caseAssembliesByUnion.GetOrAdd(union, assemblies.ToImmutable());
     }
 
-    private static bool References(IAssemblySymbol assembly, IAssemblySymbol referenced)
+    /// <summary>
+    /// True when <paramref name="assembly"/> references <paramref name="home"/>, or references an assembly
+    /// that forwards <paramref name="topLevel"/> (named <paramref name="metadataName"/>) to where it is now:
+    /// a case compiled against the former assembly of a union reaches the union that way.
+    /// </summary>
+    private static bool References(IAssemblySymbol assembly, IAssemblySymbol home, INamedTypeSymbol topLevel, string metadataName)
     {
         foreach (var module in assembly.Modules)
         {
             foreach (var candidate in module.ReferencedAssemblySymbols)
             {
-                if (SymbolEqualityComparer.Default.Equals(candidate, referenced))
+                if (SymbolEqualityComparer.Default.Equals(candidate, home)
+                    || SymbolEqualityComparer.Default.Equals(candidate.ResolveForwardedType(metadataName), topLevel))
                     return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>The name that <see cref="IAssemblySymbol.ResolveForwardedType"/> takes: <c>Lib.Result`1</c>.</summary>
+    private static string GetFullMetadataName(INamedTypeSymbol topLevel)
+    {
+        var name = topLevel.MetadataName;
+        for (var space = topLevel.ContainingNamespace; space is { IsGlobalNamespace: false }; space = space.ContainingNamespace)
+            name = space.MetadataName + "." + name;
+
+        return name;
     }
 
     private ImmutableArray<INamedTypeSymbol> CasesIn(IAssemblySymbol assembly, INamedTypeSymbol union)
@@ -288,23 +311,33 @@ internal sealed partial class UnionModel(Compilation compilation)
 
     /// <summary>
     /// The construction of <paramref name="definition"/> that <paramref name="type"/> is, derives from
-    /// or implements; <see langword="null"/> when there is none.
+    /// or implements; <see langword="null"/> when there is none. A type can implement two constructions
+    /// of one interface (<c>IHas&lt;object&gt;</c> and <c>IHas&lt;string?&gt;</c>): then the first is
+    /// returned, or with <paramref name="sameAs"/> only the one that is <paramref name="sameAs"/> but for
+    /// nullable annotations.
     /// </summary>
-    private static INamedTypeSymbol? FindConstruction(ITypeSymbol type, ITypeSymbol definition)
+    private static INamedTypeSymbol? FindConstruction(ITypeSymbol type, ITypeSymbol definition, INamedTypeSymbol? sameAs = null)
     {
         for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
         {
-            if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, definition))
+            if (IsConstruction(current, definition, sameAs))
                 return current;
         }
 
         foreach (var implemented in type.AllInterfaces)
         {
-            if (SymbolEqualityComparer.Default.Equals(implemented.OriginalDefinition, definition))
+            if (IsConstruction(implemented, definition, sameAs))
                 return implemented;
         }
 
         return null;
+    }
+
+    private static bool IsConstruction(INamedTypeSymbol candidate, ITypeSymbol definition, INamedTypeSymbol? sameAs)
+    {
+        Dictionary<ITypeParameterSymbol, ITypeSymbol>? unused = null;
+        return SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, definition)
+               && (sameAs is null || Matches(candidate, sameAs, TypeMatching.Same, ref unused));
     }
 
     /// <summary>
