@@ -76,12 +76,12 @@ public sealed class Fp0201Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0201_FieldLikeEventHasMutableBackingField_Reports() => VerifyAsync("""
+    public Task FP0201_FieldLikeEventHasMutableBackingField_NoReport() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public sealed class Button
         {
-            public event System.Action? {|FP0201:Clicked|}, {|FP0201:Pressed|};
-            public static event System.EventHandler? {|FP0201:Created|};
+            public event System.Action? Clicked, Pressed;
+            public static event System.EventHandler? Created;
         }
         """);
 
@@ -435,7 +435,7 @@ public sealed class Fp0201Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0201_FieldLikeEventsWithInitializerOverrideAndInInterface_Reports() => VerifyAsync("""
+    public Task FP0201_FieldLikeEventsWithInitializerOverrideAndInInterface_NoReport() => VerifyAsync("""
         public abstract class Notifier
         {
             public abstract event System.Action? Changed;
@@ -444,14 +444,14 @@ public sealed class Fp0201Tests(TestContext testContext)
         [Fprog.FunctionalCore]
         public class Concrete : Notifier
         {
-            public override event System.Action? {|FP0201:Changed|};
-            public virtual event System.Action {|FP0201:Started|} = delegate { };
+            public override event System.Action? Changed;
+            public virtual event System.Action Started = delegate { };
         }
 
         [Fprog.FunctionalCore]
         public struct Signal
         {
-            public event System.Action? {|FP0201:Fired|};
+            public event System.Action? Fired;
         }
 
         [Fprog.FunctionalCore]
@@ -459,8 +459,78 @@ public sealed class Fp0201Tests(TestContext testContext)
         {
             public interface IBus
             {
-                static event System.Action? {|FP0201:Published|};
+                static event System.Action? Published;
             }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldLikeEventIsNotAField_NoReport() => VerifyAsync("""
+        #nullable enable
+        using System;
+
+        [Fprog.FunctionalCore]
+        public sealed class Publisher
+        {
+            private readonly int _id = 1;
+
+            public event EventHandler? Changed;
+
+            public static event Action? Reset;
+
+            public int Id => _id;
+
+            public bool HasSubscribers => Changed is not null || Reset is not null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_DelegateFieldBesideFieldLikeEvent_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Timer
+        {
+            public System.Action? {|FP0201:OnTick|};
+            public static System.EventHandler? {|FP0201:OnReset|}, {|FP0201:OnStop|};
+
+            public event System.Action? Ticked;
+            public static event System.EventHandler? Reset;
+        }
+
+        [Fprog.FunctionalCore]
+        public struct Pulse
+        {
+            public System.Action? {|FP0201:Handler|};
+            public event System.Action? Fired;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_HandwrittenEventBackingField_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Store
+        {
+            private System.EventHandler? {|FP0201:_changed|};
+
+            public event System.EventHandler? Changed
+            {
+                add => _changed += value;
+                remove => _changed -= value;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_ReadonlyDelegateFieldBesideFieldLikeEvent_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Relay
+        {
+            private readonly System.Action _noop = () => { };
+            public static readonly System.EventHandler? Empty = null;
+
+            public event System.Action? Forwarded;
+            public static event System.EventHandler? Closed;
+
+            public void Run() => _noop();
         }
         """);
 
