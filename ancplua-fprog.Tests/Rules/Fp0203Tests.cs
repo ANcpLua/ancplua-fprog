@@ -115,16 +115,16 @@ public sealed class Fp0203Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0203_DecidedForbiddenTypeAsTypeArgumentCounts_Reports() => VerifyAsync("""
+    public Task FP0203_DecidedForbiddenTypeAsTypeArgumentDoesNotCount_NoReport() => VerifyAsync("""
         using System.Collections.Generic;
         using System.Collections.Immutable;
 
         [Fprog.FunctionalCore]
         public sealed record Nested(
-            ImmutableArray<List<int>> {|FP0203:Lists|},
-            ImmutableArray<int[]> {|FP0203:Arrays|},
-            (int Id, List<string> Tags) {|FP0203:Tuple|},
-            System.Func<IEnumerable<int>> {|FP0203:Factory|});
+            ImmutableArray<List<int>> Lists,
+            ImmutableArray<int[]> Arrays,
+            (int Id, List<string> Tags) Tuple,
+            System.Func<IEnumerable<int>> Factory);
         """);
 
     [TestMethod]
@@ -389,14 +389,14 @@ public sealed class Fp0203Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0203_PointerAndFunctionPointerSignatures_Reports() => VerifyAsync("""
+    public Task FP0203_PointerAndFunctionPointerSignatures_NoReport() => VerifyAsync("""
         using System.Collections.Generic;
 
         [Fprog.FunctionalCore]
         public readonly unsafe struct Native
         {
-            public readonly KeyValuePair<int, int>* {|FP0203:Pair|};
-            public readonly delegate*<List<int>, int> {|FP0203:Count|};
+            public readonly KeyValuePair<int, int>* Pair;
+            public readonly delegate*<List<int>, int> Count;
             public readonly delegate*<int, int> Plain;
             public readonly int* Raw;
         }
@@ -485,7 +485,7 @@ public sealed class Fp0203Tests(TestContext testContext)
 
         [Fprog.FunctionalCore]
         public sealed record Wide(
-            (int A, int B, int C, int D, int E, int F, int G, List<int> H) {|FP0203:Tuple|},
+            (int A, int B, int C, int D, int E, int F, int G, List<int> H) Tuple,
             List<int>.Enumerator {|FP0203:Cursor|});
         """);
 
@@ -606,7 +606,7 @@ public sealed class Fp0203Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0203_ForbiddenTypeArgumentOfContainingType_Reports() => VerifyAsync("""
+    public Task FP0203_ForbiddenTypeArgumentOfContainingType_NoReport() => VerifyAsync("""
         using System.Collections.Generic;
 
         public sealed class Outer<T>
@@ -615,7 +615,7 @@ public sealed class Fp0203Tests(TestContext testContext)
         }
 
         [Fprog.FunctionalCore]
-        public sealed record Holder(Outer<List<int>>.Inner {|FP0203:Value|}, Outer<int>.Inner Plain);
+        public sealed record Holder(Outer<List<int>>.Inner Value, Outer<int>.Inner Plain);
         """);
 
     [TestMethod]
@@ -695,6 +695,68 @@ public sealed class Fp0203Tests(TestContext testContext)
         }
 
         public sealed class ImmutableHolder;
+        """);
+
+    [TestMethod]
+    public Task FP0203_ForbiddenTypeOnlyAsTypeArgument_NoReport() => VerifyAsync("""
+        #nullable enable
+        using System;
+        using System.Collections.Generic;
+        using System.Collections.Immutable;
+
+        [Fprog.FunctionalCore]
+        public sealed record Parser<T>(Func<string, IEnumerable<(T Value, string Remainder)>> Run);
+
+        [Fprog.FunctionalCore]
+        public sealed record Lookup(
+            ImmutableArray<KeyValuePair<string, int>> Entries,
+            ImmutableDictionary<string, ImmutableArray<int>> ByKey,
+            Lazy<IReadOnlyList<string>> Names);
+
+        [Fprog.FunctionalCore]
+        public sealed record Rule<T>(string Name, Func<IEnumerable<T>, bool> Holds, Comparison<T> Order);
+        """);
+
+    [TestMethod]
+    public Task FP0203_ListedOwnTypeWithAllowedTypeArguments_Reports() => VerifyAsync("""
+        using System;
+        using System.Collections.Generic;
+        using System.Collections.Immutable;
+
+        [Fprog.FunctionalCore]
+        public sealed record Outer(
+            List<ImmutableArray<int>> {|FP0203:Lists|},
+            IEnumerable<Func<int, string>> {|FP0203:Steps|},
+            IReadOnlyDictionary<string, ImmutableList<int>> {|FP0203:ByKey|},
+            ImmutableArray<int>[] {|FP0203:Rows|});
+        """);
+
+    [TestMethod]
+    public Task FP0203_NullableOfListedValueTypeIsUnwrapped_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+
+        [Fprog.FunctionalCore]
+        public readonly struct Window
+        {
+            public readonly System.Nullable<KeyValuePair<int, int>> {|FP0203:Pair|};
+            public readonly List<int>.Enumerator? {|FP0203:Cursor|};
+            public HashSet<int>.Enumerator? {|FP0203:Keys|} { get; init; }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0203_NullableUnwrapStopsAtOneLevel_NoReport() => VerifyAsync("""
+        using System;
+        using System.Collections.Generic;
+        using System.Collections.Immutable;
+        using System.Text;
+
+        [Fprog.FunctionalCore]
+        public sealed record Wrapped(
+            ImmutableArray<int[]>? Rows,
+            (List<int> Items, int Count)? Pair,
+            Lazy<StringBuilder> Text,
+            Func<int[]> Make);
         """);
 
     private Task VerifyAsync(string source)
