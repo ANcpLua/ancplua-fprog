@@ -845,6 +845,179 @@ public sealed class Fp0802Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0802_UnionBodyNestedInCoreClass_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public record Cat;
+        public record Dog;
+
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public union Pet(Cat, Dog)
+            {
+                public static {|FP0802:Task|} Feed() => Task.CompletedTask;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_TopLevelUnionUnderAssemblyLevelCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [assembly: Fprog.FunctionalCore]
+
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public {|FP0802:Task<int>|} Count() => Task.FromResult(1);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_ClassNestedInUnionBodyInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public record Cat;
+        public record Dog;
+
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public union Pet(Cat, Dog)
+            {
+                public static class Helper
+                {
+                    public static {|FP0802:ValueTask|} Run() => default;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_LocalFunctionsFieldAndOperatorInUnionBodyInCore_Reports() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        namespace Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            [Fprog.FunctionalCore]
+            public static class Pets
+            {
+                public union Pet(Cat, Dog)
+                {
+                    private static readonly Func<int> Make = static () =>
+                    {
+                        _ = InField();
+                        return 1;
+
+                        static {|FP0802:Task|} InField() => Task.CompletedTask;
+                    };
+
+                    public static int Describe()
+                    {
+                        _ = Later();
+                        return Make();
+
+                        static {|FP0802:Task<int>|} Later() => Task.FromResult(1);
+                    }
+
+                    public static {|FP0802:Task|} operator +(Pet left, Pet right) => Task.CompletedTask;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_CoreClassNestedInShellUnion_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public record Cat;
+        public record Dog;
+
+        public union Shelter(Cat, Dog)
+        {
+            public static Task Open() => Task.CompletedTask;
+
+            [Fprog.FunctionalCore]
+            public static class Rules
+            {
+                public static {|FP0802:Task|} Check() => Task.CompletedTask;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_ShellUnionAndNonTaskMembersOfCoreUnion_NoReport() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static Task Feed() => Task.CompletedTask;
+
+            public static ValueTask<int> Count()
+            {
+                return Local();
+
+                static ValueTask<int> Local() => new(1);
+            }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public union Animal(Cat, Dog)
+            {
+                public static int Legs() => Local();
+
+                public static Func<Task> Factory() => static () => Task.CompletedTask;
+
+                private static int Local() => 4;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_LocalFunctionInPrimaryConstructorBaseArgumentInCore_Reports() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        public class Base(Func<int> make)
+        {
+            public int Value { get; } = make();
+        }
+
+        public record BaseRecord(Func<int> Make);
+
+        [Fprog.FunctionalCore]
+        public sealed class Derived() : Base(static () =>
+        {
+            _ = Later();
+            return 1;
+
+            static {|FP0802:Task|} Later() => Task.CompletedTask;
+        });
+
+        [Fprog.FunctionalCore]
+        public sealed record DerivedRecord(int Id) : BaseRecord(static () =>
+        {
+            _ = Later();
+            return 1;
+
+            static {|FP0802:ValueTask<int>|} Later() => new(1);
+        });
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0802", source, testContext.CancellationToken);
 }

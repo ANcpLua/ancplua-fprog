@@ -69,6 +69,13 @@ public sealed class Fp0802TaskReturnAnalyzer : DiagnosticAnalyzer
 
     private static void Analyze(SyntaxNodeAnalysisContext context, ImmutableArray<INamedTypeSymbol> taskTypes)
     {
+        // Roslyn 5.9.0 runs a node inside a C# 15 union body three times: for its own member, for the union
+        // and for the union's container. Every real report comes from the pass of the method itself or of the
+        // member that holds the local function (the primary constructor for a base argument), never from a
+        // pass whose containing symbol is a type or a namespace.
+        if (context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol)
+            return;
+
         var returnTypeSyntax = context.Node switch
         {
             MethodDeclarationSyntax method => method.ReturnType,
