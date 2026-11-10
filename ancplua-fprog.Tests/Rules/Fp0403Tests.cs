@@ -274,6 +274,320 @@ public sealed class Fp0403Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0403_GenericCaseSpanExcludesTypeParameters_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Option<T>
+        {
+            public class {|FP0403:Some|}<TValue> : Option<TValue> where TValue : notnull { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_CaseWithAttributesCommentsAndLineBreaks_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            [System.Obsolete("old")]
+            public /* not sealed */ class
+                /* name follows */ {|FP0403:Circle|} /* base follows */
+                : Shape
+            {
+            }
+
+            /// <summary>A class with a primary constructor.</summary>
+            public class {|FP0403:Square|}(double side) : Shape
+            {
+                public double Side { get; } = side;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_QualifiedAndAliasedBaseNames_Reports() => VerifyAsync("""
+        using ShapeAlias = Geometry.Shapes.Shape;
+        using IntResult = Geometry.Results.Result<int>;
+
+        namespace Geometry.Shapes
+        {
+            [global::Fprog.UnionAttribute]
+            public abstract class Shape
+            {
+                public sealed class Square : global::Geometry.Shapes.Shape { }
+            }
+        }
+
+        namespace Geometry.Results
+        {
+            [Fprog.Union()]
+            public abstract record Result<T>
+            {
+                public sealed record Ok(T Value) : Result<T>;
+            }
+        }
+
+        namespace Drawing
+        {
+            public sealed class {|FP0403:Circle|} : ShapeAlias { }
+
+            public sealed record {|FP0403:Count|}(int Value) : IntResult;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_FileScopedNamespaceAndFileLocalCase_Reports() => VerifyAsync("""
+        namespace Geometry;
+
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public sealed class Square : Shape { }
+        }
+
+        file sealed class {|FP0403:Circle|} : Shape { }
+        """);
+
+    [TestMethod]
+    public Task FP0403_NonAbstractUnionWithSealedNestedCases_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public class Shape
+        {
+            public sealed class Circle : Shape { }
+
+            public sealed record class Marker;
+        }
+
+        [Fprog.Union]
+        public record Result
+        {
+            public sealed record Ok(int Value) : Result;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_CaseNestedInInterfaceStructOrRecordStruct_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape { }
+
+        public interface IShapes
+        {
+            sealed class {|FP0403:Circle|} : Shape { }
+        }
+
+        public readonly struct Holder
+        {
+            public sealed class {|FP0403:Square|} : Shape { }
+        }
+
+        public readonly record struct Pair(int A, int B)
+        {
+            public sealed class {|FP0403:Triangle|} : Shape { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_CaseOfSameNamedUnionWithOtherArity_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public sealed class Square : Shape { }
+
+            public sealed class {|FP0403:Circle|} : Shape<int> { }
+        }
+
+        [Fprog.Union]
+        public abstract class Shape<T>
+        {
+            public sealed class Box(T content) : Shape<T>
+            {
+                public T Content { get; } = content;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_UnionNestedInGenericType_Reports() => VerifyAsync("""
+        public static class Outer<T>
+        {
+            [Fprog.Union]
+            public abstract record Shape
+            {
+                public sealed record Circle(T Center) : Shape;
+
+                public sealed record Square(int Side) : Outer<int>.Shape;
+            }
+
+            public sealed record {|FP0403:Triangle|}(T A) : Shape;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_PartialCaseOutsideUnion_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape { }
+
+        public sealed partial class {|FP0403:Circle|} : Shape { }
+
+        public partial class {|FP0403:Circle|}
+        {
+            public double Radius { get; init; }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_CaseOfInnerUnionDeclaredInOuterUnion_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Expr
+        {
+            [Fprog.Union]
+            public abstract record {|FP0403:Literal|} : Expr
+            {
+                public sealed record Text(string Value) : Literal;
+            }
+
+            public sealed record {|FP0403:Number|}(int Value) : Literal;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_UnionDerivingFromNonUnion_NoReport() => VerifyAsync("""
+        public abstract class Entity
+        {
+            public int Id { get; init; }
+        }
+
+        [Fprog.Union]
+        public abstract class Shape : Entity
+        {
+            private Shape() { }
+
+            public sealed class Circle : Shape { }
+        }
+
+        public class Person : Entity { }
+        """);
+
+    [TestMethod]
+    public Task FP0403_AnyAccessibilityAndUnsafeCase_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            private sealed class Hidden : Shape { }
+
+            protected internal sealed class Shared(int value) : Shape
+            {
+                public int Value { get; } = value;
+            }
+
+            internal sealed unsafe class Raw : Shape
+            {
+                private readonly int* _pointer = null;
+
+                public bool IsEmpty => _pointer == null;
+            }
+
+            public sealed class Empty : Shape;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_ExtensionBlockOnUnion_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            public sealed record Circle(double Radius) : Shape;
+        }
+
+        public static class ShapeExtensions
+        {
+            extension(Shape shape)
+            {
+                public bool IsRound => shape is Shape.Circle;
+            }
+
+            extension<T>(T value) where T : Shape
+            {
+                public Shape AsShape() => value;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_GeneratedCode_NoReport() => VerifyAsync("""
+        // <auto-generated/>
+        [Fprog.Union]
+        public abstract class Shape { }
+
+        public class Circle : Shape { }
+        """);
+
+    [TestMethod]
+    public Task FP0403_UnionWithoutCases_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Empty
+        {
+            private Empty() { }
+
+            public static int Count => 0;
+        }
+
+        [Fprog.Union]
+        public abstract record Unit;
+        """);
+
+    [TestMethod]
+    public Task FP0403_NonCaseTypesNestedInUnion_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            public sealed record Circle(double Radius) : Shape;
+
+            public enum Kind { Round, Angular }
+
+            public interface IVisitor<out TResult>
+            {
+                TResult Visit(Circle circle);
+            }
+
+            public readonly record struct Point(double X, double Y);
+
+            public delegate TResult Fold<out TResult>(Shape shape);
+
+            public static class Factory
+            {
+                public static Shape Unit() => new Circle(1);
+            }
+
+            public record Tag(string Name);
+
+            public class Helper { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_UnionNestedInsideCaseOfOtherUnion_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Document
+        {
+            private Document() { }
+
+            public sealed record Page(Page.Block Content) : Document
+            {
+                [Fprog.Union]
+                public abstract record Block
+                {
+                    private Block() { }
+
+                    public sealed record Text(string Value) : Block;
+
+                    public sealed record Image(string Uri) : Block;
+                }
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0403", source, testContext.CancellationToken);
 }
