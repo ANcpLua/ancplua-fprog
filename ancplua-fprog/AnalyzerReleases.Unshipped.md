@@ -14,3 +14,4 @@ FP0104 | Functional | Warning | Do not write through a parameter in the function
 FP0201 | Functional | Warning | Do not declare mutable fields in the functional core
 FP0202 | Functional | Warning | Do not declare set accessors in the functional core
 FP0302 | Functional | Warning | Do not call partial members in the functional core
+FP0303 | Functional | Warning | Do not return null or default in the functional core
