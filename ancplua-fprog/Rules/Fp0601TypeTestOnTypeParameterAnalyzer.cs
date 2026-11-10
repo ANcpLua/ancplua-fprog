@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
+using System.Linq;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
@@ -16,7 +18,9 @@ namespace ancplua_fprog.Rules;
 /// unconstrained type parameters. A value of type <c>T</c> stays one through a cast such as
 /// <c>(object)value</c>. Null checks are not type tests: <c>is null</c>, <c>is not null</c>,
 /// <c>is { }</c>, <c>var</c> and discard patterns, and tests whose outcome the static types decide
-/// except for null (<c>x is T v</c> for <c>x</c> of type <c>T?</c>, <c>x is object</c>).
+/// except for null (<c>x is T v</c> for <c>x</c> of type <c>T?</c>, <c>x is object</c>). Constant and
+/// relational patterns are no type tests, and neither is a C# 15 union value tested against one of
+/// its own case types.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
@@ -42,14 +46,13 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
             OperationKind.Invocation,
             OperationKind.DeclarationPattern,
             OperationKind.TypePattern,
-            OperationKind.RecursivePattern,
-            OperationKind.ConstantPattern,
-            OperationKind.RelationalPattern);
+            OperationKind.RecursivePattern);
     }
 
     private static void Analyze(OperationAnalysisContext context)
     {
-        // The constant pattern of a `case 0:` label is an implicit operation over source syntax.
+        // A type name as a case label (`case string:`) or tested against a union value (`u is T`)
+        // is an implicit pattern over source syntax.
         if (context.Operation is { IsImplicit: true } and not IPatternOperation)
             return;
 
@@ -70,6 +73,9 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
             => typeOf.Syntax.GetLocation(),
         IInvocationOperation invocation when IsGetTypeOnOpaqueValue(invocation)
             => GetMethodNameLocation(invocation.Syntax),
+        IPatternOperation { Syntax: BinaryExpressionSyntax binary } pattern
+            when binary.IsKind(SyntaxKind.IsExpression) && IsTypeTestingPattern(pattern, compilation)
+            => binary.OperatorToken.GetLocation(),
         IPatternOperation pattern when IsTypeTestingPattern(pattern, compilation)
             => pattern.Syntax.GetLocation(),
         _ => null
@@ -86,15 +92,50 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
             => IsMatchedTypeTest(pattern, type.MatchedType, compilation),
         IRecursivePatternOperation { Syntax: RecursivePatternSyntax { Type: not null } } recursive
             => IsMatchedTypeTest(pattern, recursive.MatchedType, compilation),
-        IConstantPatternOperation constant
-            => HasOpaqueInput(pattern) && !IsNullConstant(constant.Value),
-        IRelationalPatternOperation
-            => HasOpaqueInput(pattern),
         _ => false
     };
 
     private static bool IsMatchedTypeTest(IPatternOperation pattern, ITypeSymbol? matched, Compilation compilation)
-        => (HasOpaqueInput(pattern) || IsOpaque(matched)) && !IsNullCheck(pattern.InputType, matched, compilation);
+        => (HasOpaqueInput(pattern) || IsOpaque(matched))
+           && !IsNullCheck(pattern.InputType, matched, compilation)
+           && !IsCaseOfUnion(pattern.InputType, matched);
+
+    /// <summary>
+    /// True when <paramref name="input"/> is a C# 15 union (it implements
+    /// <c>System.Runtime.CompilerServices.IUnion</c>) and <paramref name="matched"/> is one of its case
+    /// types, the parameter type of a public one-parameter constructor: the union's own discrimination.
+    /// </summary>
+    private static bool IsCaseOfUnion(ITypeSymbol? input, ITypeSymbol? matched)
+    {
+        if (input is not INamedTypeSymbol union || !union.AllInterfaces.Any(IsUnionInterface))
+            return false;
+
+        foreach (var constructor in union.InstanceConstructors)
+        {
+            if (constructor is { DeclaredAccessibility: Accessibility.Public, Parameters.Length: 1 }
+                && SymbolEqualityComparer.Default.Equals(constructor.Parameters[0].Type, matched))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsUnionInterface(INamedTypeSymbol type) => type is
+    {
+        Name: "IUnion",
+        ContainingType: null,
+        ContainingNamespace:
+        {
+            Name: "CompilerServices",
+            ContainingNamespace:
+            {
+                Name: "Runtime",
+                ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true }
+            }
+        }
+    };
 
     private static bool HasOpaqueInput(IPatternOperation pattern)
         => IsOpaque(pattern.InputType) || IsOpaqueValue(GetTestedValue(pattern));
@@ -122,9 +163,6 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
             _ => null
         };
     }
-
-    private static bool IsNullConstant(IOperation value)
-        => value.ConstantValue is { HasValue: true, Value: null };
 
     private static bool IsGetTypeOnOpaqueValue(IInvocationOperation invocation)
         => invocation.TargetMethod is { Name: nameof(GetType), IsStatic: false, Parameters.IsEmpty: true }

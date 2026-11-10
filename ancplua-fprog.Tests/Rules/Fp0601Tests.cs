@@ -128,11 +128,11 @@ public sealed class Fp0601Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0601_ConstantPatternOnValueOfTIsATypeTest_Reports() => VerifyAsync("""
+    public Task FP0601_ConstantPatternOnValueOfTIsNotATypeTest_NoReport() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public static class Inspect
         {
-            public static bool IsZero<T>(T value) => value is {|FP0601:0|};
+            public static bool IsZero<T>(T value) => value is 0;
         }
         """);
 
@@ -360,9 +360,9 @@ public sealed class Fp0601Tests(TestContext testContext)
                 {
                     case null:
                         return -1;
-                    case {|FP0601:0|}:
+                    case 0:
                         return 0;
-                    case {|FP0601:"zero"|}:
+                    case "zero":
                         return 0;
                     case {|FP0601:long wide|} when wide > 0:
                         return 1;
@@ -374,11 +374,11 @@ public sealed class Fp0601Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0601_RelationalPatternOnTButNotOnNarrowedInput_Reports() => VerifyAsync("""
+    public Task FP0601_TypePatternBesideRelationalPatternOnT_Reports() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public static class Ranges
         {
-            public static bool Positive<T>(T value) => value is {|FP0601:> 0|};
+            public static bool Positive<T>(T value) => value is > 0;
 
             public static bool Small<T>(T value) => value is {|FP0601:int|} and < 10;
         }
@@ -722,7 +722,7 @@ public sealed class Fp0601Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0601_CastValueOfTInSwitchStatementWithConstantCases_Reports() => VerifyAsync("""
+    public Task FP0601_CastValueOfTInSwitchStatementWithConstantCases_NoReport() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public static class Codes
         {
@@ -732,7 +732,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                 {
                     case null:
                         return -1;
-                    case {|FP0601:0|}:
+                    case 0:
                         return 0;
                     default:
                         return 1;
@@ -795,6 +795,222 @@ public sealed class Fp0601Tests(TestContext testContext)
 
             public static string Name<T>() => {|FP0601:typeof(
                 /* the parameter */ T)|}.Name;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_IsAgainstTypeParameterThatIsNoCaseOfUnionValue_Reports() => VerifyAsync("""
+        public sealed record Success<T>(T Value);
+
+        public sealed record Failure(string Reason);
+
+        public readonly union Result<T>(Success<T>, Failure);
+
+        [Fprog.FunctionalCore]
+        public static class Results
+        {
+            public static bool IsBare<T>(Result<T> result) => result {|FP0601:is|} T;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ConstantAndRelationalPatternsOnValueOfT_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Inspect
+        {
+            public static bool IsZero<T>(T value) => value is 0;
+
+            public static bool IsPositive<T>(T value) => value is > 0;
+
+            public static int Code<T>(T value)
+            {
+                switch (value)
+                {
+                    case "zero":
+                        return 0;
+                    default:
+                        return 1;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_CasePatternOfUnionWithTypeParameterCase_NoReport() => VerifyAsync("""
+        using System;
+
+        public sealed record None;
+
+        public readonly union Option<T>(T, None);
+
+        [Fprog.FunctionalCore]
+        public static class Options
+        {
+            public static U Match<T, U>(Option<T> option, Func<T, U> some, Func<U> none) => option switch
+            {
+                T value => some(value),
+                None => none(),
+                null => none(),
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_IsAgainstTypeParameterCaseOfUnionValue_NoReport() => VerifyAsync("""
+        public sealed record None;
+
+        public readonly union Option<T>(T, None);
+
+        [Fprog.FunctionalCore]
+        public static class Options
+        {
+            public static bool HasValue<T>(Option<T> option) => option is T;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_PatternSyntaxAgainstTypeParameterThatIsNoCaseOfUnionValue_Reports() => VerifyAsync("""
+        public sealed record Success<T>(T Value);
+
+        public sealed record Failure(string Reason);
+
+        public readonly union Result<T>(Success<T>, Failure);
+
+        [Fprog.FunctionalCore]
+        public static class Results
+        {
+            public static bool NotBare<T>(Result<T> result) => result is not {|FP0601:T|};
+
+            public static int Bare<T>(Result<T> result) => result is {|FP0601:T value|} ? value!.GetHashCode() : 0;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_TypeNameCaseLabelsOnTAndOfT_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Labels
+        {
+            public static int Kind<T>(T value)
+            {
+                switch (value)
+                {
+                    case null:
+                        return -1;
+                    case 0:
+                        return 0;
+                    case {|FP0601:System.String|}:
+                        return 1;
+                    case {|FP0601:int|}:
+                        return 2;
+                    default:
+                        return 3;
+                }
+            }
+
+            public static int Fits<T>(object item)
+            {
+                switch (item)
+                {
+                    case {|FP0601:T|}:
+                        return 1;
+                    default:
+                        return 0;
+                }
+            }
+
+            public static bool SmallNumber<T>(T value) => value is {|FP0601:int|} and > 0 and < 10;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_NamedNegatedCombinedAndComputedConstantsOnT_NoReport() => VerifyAsync("""
+        public enum Color { Red, Green }
+
+        [Fprog.FunctionalCore]
+        public static class Constants
+        {
+            private const int Zero = 0;
+
+            public static bool IsZero<T>(T value) => value is Zero;
+
+            public static bool NotZero<T>(T value) => value is not 0;
+
+            public static bool Small<T>(T value) => value is 0 or 1 or (> 5 and < 10);
+
+            public static bool Red<T>(T value) => value is Color.Red;
+
+            public static int Code<T>(T value) => value switch
+            {
+                "a" or "b" => 1,
+                >= 2.5 => 2,
+                null => -1,
+                _ => 0
+            };
+
+            public static int Sum<T>(T value)
+            {
+                switch (value)
+                {
+                    case 1 + 2:
+                        return 3;
+                    case Color.Green:
+                        return 1;
+                    default:
+                        return 0;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_OwnCaseTypesOfUnionInEveryPatternForm_NoReport() => VerifyAsync("""
+        using System;
+
+        public sealed record None;
+
+        public readonly union Option<T>(T, None);
+
+        public union Result<T>(T, Exception);
+
+        [Fprog.FunctionalCore]
+        public static class Unions
+        {
+            public static bool Empty<T>(Option<T> option) => option is not T;
+
+            public static int Peek<T>(Option<T> option) => option is T value ? value!.GetHashCode() : 0;
+
+            public static string Describe<T>(Result<T> result) => result switch
+            {
+                T value => $"Success: {value}",
+                Exception error => $"Error: {error.Message}",
+                null => "empty"
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_UnionValueAgainstOtherTypeParameterOrPlainStructWithConstructor_Reports() => VerifyAsync("""
+        public sealed record None;
+
+        public readonly union Option<T>(T, None);
+
+        public readonly struct Box<T>(T value)
+        {
+            public T Value { get; } = value;
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Checks
+        {
+            public static bool Other<T, U>(Option<T> option) => option {|FP0601:is|} U;
+
+            public static int Pick<T, U>(Option<T> option) => option switch
+            {
+                {|FP0601:U picked|} => picked!.GetHashCode(),
+                _ => 0
+            };
+
+            public static int Inner<T>(Box<T> box) => box is {|FP0601:T inner|} ? inner!.GetHashCode() : 0;
         }
         """);
 
