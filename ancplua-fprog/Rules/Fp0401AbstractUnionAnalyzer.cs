@@ -7,7 +7,7 @@ namespace ancplua_fprog.Rules;
 
 /// <summary>
 /// FP0401: a union (a class or record annotated <c>[Fprog.Union]</c>) that is not abstract, inside or
-/// outside the functional core. Reported at the union's name in every one of its declarations.
+/// outside the functional core. Reported once, at the union's name in its first declaration.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0401AbstractUnionAnalyzer : DiagnosticAnalyzer
@@ -34,11 +34,15 @@ public sealed class Fp0401AbstractUnionAnalyzer : DiagnosticAnalyzer
         if (type.IsAbstract || !UnionModel.IsUnion(type) || !CoreScope.IsDeclaredInSource(type))
             return;
 
-        // The locations of a source type are the identifiers of its declarations, one per partial part.
+        // The locations of a source type are the identifiers of its declarations in source order, one per
+        // partial part. "Not abstract" is a fact of the merged type, so it is reported once, at the first.
         foreach (var location in type.Locations)
         {
-            if (location.IsInSource)
-                context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name));
+            if (!location.IsInSource)
+                continue;
+
+            context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name));
+            return;
         }
     }
 }

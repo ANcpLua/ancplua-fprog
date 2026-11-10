@@ -136,15 +136,15 @@ public sealed class Fp0401Tests(TestContext testContext)
         }
         """);
 
-    // Decided: a partial union is reported at the name of every one of its declarations.
+    // Decided: a partial union is reported once, at its name in the first declaration in source order.
     [TestMethod]
-    public Task FP0401_PartialUnionReportedAtEveryDeclaration_Reports() => VerifyAsync("""
+    public Task FP0401_PartialUnionReportedOnceAtFirstDeclaration_Reports() => VerifyAsync("""
         [Fprog.Union]
         public partial class {|FP0401:Shape|}
         {
         }
 
-        public partial class {|FP0401:Shape|}
+        public partial class Shape
         {
             public sealed class Circle : Shape { }
         }
@@ -160,6 +160,20 @@ public sealed class Fp0401Tests(TestContext testContext)
         public abstract partial class Shape
         {
             public sealed class Circle : Shape { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0401_PartialUnionWithCaseInEachPartReportedOnce_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public partial class {|FP0401:Shape|}
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        public partial class Shape
+        {
+            public sealed class Square : Shape { }
         }
         """);
 
@@ -319,32 +333,102 @@ public sealed class Fp0401Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0401_PartialUnionAttributeOnLastOfThreeDeclarations_Reports() => VerifyAsync("""
+    public Task FP0401_PartialUnionAttributeOnLastOfThreeDeclarationsReportedAtFirst_Reports() => VerifyAsync("""
         public partial class {|FP0401:Shape|}
         {
         }
 
-        public sealed partial class {|FP0401:Shape|}
+        public sealed partial class Shape
         {
             public static int Count => 0;
         }
 
         [Fprog.Union]
-        partial class {|FP0401:Shape|}
+        partial class Shape
         {
         }
         """);
 
     [TestMethod]
-    public Task FP0401_StaticPartialUnion_Reports() => VerifyAsync("""
+    public Task FP0401_StaticPartialUnionReportedAtFirstDeclaration_Reports() => VerifyAsync("""
         [Fprog.Union]
         public static partial class {|FP0401:Holder|}
         {
         }
 
-        public static partial class {|FP0401:Holder|}
+        public static partial class Holder
         {
             public static int Zero() => 0;
+        }
+        """);
+
+    // One report per union, not per compilation: two partial unions each get their own single report.
+    [TestMethod]
+    public Task FP0401_TwoPartialUnionsEachReportedOnce_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public partial class {|FP0401:Shape|}
+        {
+        }
+
+        [Fprog.Union]
+        public partial record {|FP0401:Result|};
+
+        public partial class Shape
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        public partial record Result
+        {
+            public sealed record Ok : Result;
+        }
+        """);
+
+    // A partial union inside a partial outer type: the first declaration of the union itself is marked.
+    [TestMethod]
+    public Task FP0401_PartialUnionInPartialOuterTypeReportedOnce_Reports() => VerifyAsync("""
+        public partial class Outer
+        {
+            public partial class {|FP0401:Shape|}
+            {
+            }
+        }
+
+        public partial class Outer
+        {
+            [Fprog.Union]
+            public partial class Shape
+            {
+                public sealed class Circle : Shape { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0401_PartialUnionAbstractOnLastOfThreeDeclarations_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public partial class Shape
+        {
+        }
+
+        public partial class Shape
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        public abstract partial class Shape
+        {
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0401_PartialRecordUnionAbstractOnSecondDeclaration_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public partial record Result;
+
+        public abstract partial record Result
+        {
+            public sealed record Ok : Result;
         }
         """);
 
