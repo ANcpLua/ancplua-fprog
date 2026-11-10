@@ -810,6 +810,183 @@ public sealed class Fp0101Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0101_VoidMembersInUnionBodyNestedInCoreClass_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public void {|FP0101:Feed|}() { }
+
+                public int Legs()
+                {
+                    Count();
+                    return 4;
+
+                    static void {|FP0101:Count|}() { }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_VoidMethodInTopLevelUnionUnderAssemblyLevelCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public void {|FP0101:Feed|}() { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_VoidMethodInClassNestedInUnionBodyInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static class Keeper
+                {
+                    public static void {|FP0101:Feed|}() { }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_LocalFunctionsInInitializerAccessorAndOperatorOfUnionInNamespaceUnderAssemblyLevelCore_Reports()
+        => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        namespace Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                private static readonly System.Func<int, int> Twice = value =>
+                {
+                    Ignore(value);
+                    return value * 2;
+
+                    static void {|FP0101:Ignore|}(int x) => System.GC.KeepAlive(x);
+                };
+
+                public static int Size
+                {
+                    get
+                    {
+                        Probe();
+                        return Twice(1);
+
+                        static void {|FP0101:Probe|}() { }
+                    }
+                }
+
+                public static Pet operator +(Pet left, Pet right)
+                {
+                    Sum();
+                    return left;
+
+                    static void {|FP0101:Sum|}() { }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_RecordBaseArgumentAndNestedUnionInsideUnionBodyInCore_Reports() => VerifyAsync("""
+        public abstract record Seeded(int Seed);
+
+        [Fprog.FunctionalCore]
+        public static class Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public sealed record Tag(int Value) : Seeded(Compute(() =>
+                {
+                    Mark();
+                    return Value;
+
+                    static void {|FP0101:Mark|}() { }
+                }));
+
+                public union Inner(Cat, Dog)
+                {
+                    public void {|FP0101:Pat|}() { }
+                }
+
+                private static int Compute(System.Func<int> f) => f();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_ValueReturningMembersInUnionBodyInCore_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public int Legs()
+                {
+                    return Count();
+
+                    static int Count() => 4;
+                }
+
+                public static System.Action Callback() => static () => { };
+
+                public static class Keeper
+                {
+                    public static int Feed() => 1;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_VoidMembersInUnionBodyOutsideCore_NoReport() => VerifyAsync("""
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public void Feed() { }
+
+            public int Legs()
+            {
+                Count();
+                return 4;
+
+                static void Count() { }
+            }
+
+            public static class Keeper
+            {
+                public static void Feed() { }
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0101", source, testContext.CancellationToken);
 }
