@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
@@ -12,9 +13,10 @@ namespace ancplua_fprog.Rules;
 /// of a type in <c>System.IO</c>, <c>System.Net</c> or <c>System.Data</c> (and the namespaces below them),
 /// of <c>System.Console</c>, <c>System.Diagnostics.Process</c>, or one of the threading types
 /// <c>Thread</c>, <c>Monitor</c>, <c>Lock</c>, <c>Mutex</c>, <c>Semaphore</c>, <c>SemaphoreSlim</c>,
-/// <c>Interlocked</c> and <c>Timer</c> in <c>System.Threading</c> (nested types included); at the member
-/// name of a static member of such a type reached without a qualifier (<c>using static</c>); and at the
-/// <c>lock</c> keyword. <c>using</c> directives and <c>var</c> are not reported.
+/// <c>Interlocked</c> and <c>Timer</c> in <c>System.Threading</c> (their nested types, such as
+/// <c>Lock.Scope</c>, are not listed), and at the <c>lock</c> keyword. Only names that bind to a type are
+/// reported: a member reached without a type name token (<c>using static</c>, inherited statics) is not.
+/// <c>using</c> directives and <c>var</c> are not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
@@ -32,20 +34,27 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(AnalyzeName, SyntaxKind.IdentifierName, SyntaxKind.GenericName);
-        context.RegisterSyntaxNodeAction(AnalyzeLock, SyntaxKind.LockStatement);
+        context.RegisterCompilationStartAction(static start =>
+        {
+            // With Roslyn 5.9.0 a node inside the body of a C# 15 union declaration is analyzed up to three times
+            // (for its member, for the union and for the union's container). Report every location once.
+            var reported = new ConcurrentDictionary<Location, byte>();
+            start.RegisterSyntaxNodeAction(
+                node => AnalyzeName(node, reported), SyntaxKind.IdentifierName, SyntaxKind.GenericName);
+            start.RegisterSyntaxNodeAction(node => AnalyzeLock(node, reported), SyntaxKind.LockStatement);
+        });
     }
 
-    private static void AnalyzeLock(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeLock(SyntaxNodeAnalysisContext context, ConcurrentDictionary<Location, byte> reported)
     {
         if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var keyword = ((LockStatementSyntax)context.Node).LockKeyword;
-        context.ReportDiagnostic(Diagnostic.Create(Rule, keyword.GetLocation(), keyword.ValueText));
+        Report(context, reported, keyword.GetLocation(), keyword.ValueText);
     }
 
-    private static void AnalyzeName(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeName(SyntaxNodeAnalysisContext context, ConcurrentDictionary<Location, byte> reported)
     {
         var name = (SimpleNameSyntax)context.Node;
         if (name.IsVar
@@ -56,46 +65,33 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        var info = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken);
-
-        // A method group in nameof(...) and a dynamically bound call have no single symbol, only candidates.
-        var candidates = info.Symbol is { } symbol
-            ? [symbol]
-            : info.CandidateReason is CandidateReason.MemberGroup or CandidateReason.LateBound
-                ? info.CandidateSymbols
-                : ImmutableArray<ISymbol>.Empty;
-
-        foreach (var candidate in candidates)
+        if (context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is { } symbol
+            && ReferencedType(symbol, name) is { } type
+            && IsForbidden(type))
         {
-            if (ReferencedType(candidate, name) is { } type && IsForbidden(type))
-            {
-                context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation(), type.Name));
-                return;
-            }
+            Report(context, reported, name.Identifier.GetLocation(), type.Name);
         }
     }
 
-    /// <summary>The type that <paramref name="name"/> names, or whose static member it reaches without a qualifier.</summary>
+    private static void Report(
+        SyntaxNodeAnalysisContext context,
+        ConcurrentDictionary<Location, byte> reported,
+        Location location,
+        string subject)
+    {
+        // A source location is equal to another when both have the same syntax tree and span.
+        if (reported.TryAdd(location, 0))
+            context.ReportDiagnostic(Diagnostic.Create(Rule, location, subject));
+    }
+
+    /// <summary>The type that <paramref name="name"/> names (for an attribute name, the attribute type).</summary>
     private static INamedTypeSymbol? ReferencedType(ISymbol symbol, SimpleNameSyntax name)
         => symbol switch
         {
             INamedTypeSymbol named => named,
             IMethodSymbol { MethodKind: MethodKind.Constructor } constructor when IsAttributeName(name)
                 => constructor.ContainingType,
-            IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol when symbol.IsStatic && IsUnqualified(name)
-                => symbol.ContainingType,
             _ => null
-        };
-
-    /// <summary>True when <paramref name="name"/> is written without a qualifier on its left.</summary>
-    private static bool IsUnqualified(SimpleNameSyntax name)
-        => name.Parent switch
-        {
-            MemberAccessExpressionSyntax access => access.Name != name,
-            QualifiedNameSyntax qualified => qualified.Right != name,
-            AliasQualifiedNameSyntax aliasQualified => aliasQualified.Name != name,
-            MemberBindingExpressionSyntax => false,
-            _ => true
         };
 
     /// <summary>True when <paramref name="name"/> is the type name of an attribute (possibly qualified).</summary>
@@ -113,20 +109,21 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
 
     private static bool IsForbidden(INamedTypeSymbol type)
     {
-        var outermost = type;
-        while (outermost.ContainingType is { } containing)
-            outermost = containing;
-
-        var ns = outermost.ContainingNamespace;
+        // For a nested type this is the namespace of its outermost containing type.
+        var ns = type.ContainingNamespace;
         if (IsWithinSystemChild(ns, "IO") || IsWithinSystemChild(ns, "Net") || IsWithinSystemChild(ns, "Data"))
             return true;
 
+        // The row lists the types below by name; a type nested in one of them (Lock.Scope) is not listed.
+        if (type.ContainingType is not null)
+            return false;
+
         return ns switch
         {
-            _ when IsSystem(ns) => outermost.MetadataName == "Console",
-            { Name: "Diagnostics" } when IsSystem(ns.ContainingNamespace) => outermost.MetadataName == "Process",
+            _ when IsSystem(ns) => type.MetadataName == "Console",
+            { Name: "Diagnostics" } when IsSystem(ns.ContainingNamespace) => type.MetadataName == "Process",
             { Name: "Threading" } when IsSystem(ns.ContainingNamespace)
-                => outermost.MetadataName is "Thread" or "Monitor" or "Lock" or "Mutex" or "Semaphore"
+                => type.MetadataName is "Thread" or "Monitor" or "Lock" or "Mutex" or "Semaphore"
                     or "SemaphoreSlim" or "Interlocked" or "Timer",
             _ => false
         };

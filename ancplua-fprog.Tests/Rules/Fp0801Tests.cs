@@ -212,11 +212,11 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_NestedTypeOfLockReportsBothTokens_Reports() => VerifyAsync("""
+    public Task FP0801_NestedTypeOfLockReportsOnlyLockToken_Reports() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public static class Scopes
         {
-            public static System.Threading.{|FP0801:Lock|}.{|FP0801:Scope|} Enter(System.Threading.{|FP0801:Lock|} gate)
+            public static System.Threading.{|FP0801:Lock|}.Scope Enter(System.Threading.{|FP0801:Lock|} gate)
                 => gate.EnterScope();
         }
         """);
@@ -256,7 +256,7 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticMemberReportsMemberToken_Reports() => VerifyAsync("""
+    public Task FP0801_UsingStaticMethodAndEnumConstant_NoReport() => VerifyAsync("""
         using static System.Console;
         using static System.IO.FileMode;
 
@@ -265,8 +265,8 @@ public sealed class Fp0801Tests(TestContext testContext)
         {
             public static int Say(string text)
             {
-                {|FP0801:WriteLine|}(text);
-                return (int){|FP0801:Open|};
+                WriteLine(text);
+                return (int)Open;
             }
         }
         """);
@@ -822,24 +822,24 @@ public sealed class Fp0801Tests(TestContext testContext)
 
             public static bool Qualified() => IO::{|FP0801:File|}.Exists("a");
 
-            public static {|FP0801:L|}.{|FP0801:Scope|} Enter({|FP0801:L|} gate) => gate.EnterScope();
+            public static {|FP0801:L|}.Scope Enter({|FP0801:L|} gate) => gate.EnterScope();
         }
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_Reports() => VerifyAsync("""
+    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_NoReport() => VerifyAsync("""
         using static System.Console;
 
         [Fprog.FunctionalCore]
         public static class Imported
         {
-            public static System.Action<string> Group() => {|FP0801:WriteLine|};
+            public static System.Action<string> Group() => WriteLine;
 
-            public static string Name() => nameof({|FP0801:WriteLine|});
+            public static string Name() => nameof(WriteLine);
 
             public static int Dynamic(dynamic value)
             {
-                {|FP0801:WriteLine|}(value);
+                WriteLine(value);
                 return 0;
             }
         }
@@ -861,11 +861,11 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_StaticMemberInheritedFromForbiddenBaseUnqualified_Reports() => VerifyAsync("""
+    public Task FP0801_StaticMemberInheritedFromForbiddenBaseUnqualifiedReportsOnlyTypeTokens_Reports() => VerifyAsync("""
         [Fprog.FunctionalCore]
         public abstract class Wrapped : System.IO.{|FP0801:TextWriter|}
         {
-            public static System.IO.{|FP0801:TextWriter|} Quiet() => {|FP0801:Null|};
+            public static System.IO.{|FP0801:TextWriter|} Quiet() => Null;
         }
         """);
 
@@ -978,6 +978,221 @@ public sealed class Fp0801Tests(TestContext testContext)
             public static long Size(ShellBuffer buffer) => buffer.Length;
 
             public static ShellBuffer Fresh() => new();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticMemberHasNoTypeNameToken_NoReport() => VerifyAsync("""
+        using static System.Console;
+        using static System.Math;
+
+        [Fprog.FunctionalCore]
+        public static class Report
+        {
+            public static int Twice(int value)
+            {
+                WriteLine(value);
+                return Abs(value) * 2;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticStillReportsWrittenTypeTokens_Reports() => VerifyAsync("""
+        using static System.Console;
+        using static System.IO.Enumeration.FileSystemEnumerable<int>;
+        using C = System.Console;
+
+        [Fprog.FunctionalCore]
+        public static class Report
+        {
+            public static int Qualified(int value)
+            {
+                System.{|FP0801:Console|}.WriteLine(value);
+                {|FP0801:C|}.WriteLine(value);
+                return value;
+            }
+
+            public static {|FP0801:FindPredicate|}? Imported() => null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticPropertyFieldEventAndNameof_NoReport() => VerifyAsync("""
+        using static System.Console;
+        using static System.IO.Path;
+
+        [Fprog.FunctionalCore]
+        public static class Report
+        {
+            public static object Writer() => Out;
+
+            public static char Separator() => DirectorySeparatorChar;
+
+            public static System.ConsoleCancelEventHandler? Handler(System.ConsoleCancelEventHandler handler)
+            {
+                CancelKeyPress += handler;
+                return null;
+            }
+
+            public static string Name() => nameof(Out);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_NestedScopeOfLockIsNotAListedType_Reports() => VerifyAsync("""
+        using System.Threading;
+
+        [Fprog.FunctionalCore]
+        public static class Scopes
+        {
+            public static int Run({|FP0801:Lock|} gate)
+            {
+                using ({|FP0801:Lock|}.Scope scope = gate.EnterScope())
+                {
+                    return 1;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_NestedTypesInListedNamespacesStillReport_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Nested
+        {
+            public static System.IO.Enumeration.{|FP0801:FileSystemEnumerable|}<int>.{|FP0801:FindPredicate|}? Predicate() => null;
+
+            public static System.IO.Enumeration.{|FP0801:FileSystemEnumerable|}<int>.{|FP0801:FindTransform|}? Transform() => null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_NestedTypeNamedLikeListedType_NoReport() => VerifyAsync("""
+        namespace System.Threading
+        {
+            public static class Holder
+            {
+                public sealed class Timer { }
+
+                public sealed class Lock { }
+            }
+        }
+
+        namespace System
+        {
+            public static class Shelf
+            {
+                public sealed class Console { }
+            }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Uses
+        {
+            public static System.Threading.Holder.Timer? Timer() => null;
+
+            public static System.Threading.Holder.Lock? Lock() => null;
+
+            public static System.Shelf.Console? Console() => null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_InUnionBodyNestedInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static int Read() => System.{|FP0801:Console|}.Read();
+
+                public static int Locked(object gate)
+                {
+                    {|FP0801:lock|} (gate)
+                    {
+                        return 1;
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_InTopLevelUnionUnderAssemblyCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        public record Cat;
+
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static string Read(string path) => System.IO.{|FP0801:File|}.ReadAllText(path);
+
+            public static System.IO.{|FP0801:Stream|}? Open() => null;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_InClassNestedInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public abstract class Keeper : System.IO.{|FP0801:TextWriter|}
+                {
+                    public static int Read() => System.{|FP0801:Console|}.Read();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_DynamicCallAndCreationOnWrittenType_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Late
+        {
+            public static object Combine(dynamic value) => System.IO.{|FP0801:Path|}.Combine(value, "a");
+
+            public static object Create(dynamic value) => new System.IO.{|FP0801:StringReader|}(value);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UnionCaseTypeAndMemberTypeInUnion_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Sources
+        {
+            public union Source(System.IO.{|FP0801:Stream|}, string)
+            {
+                public static System.Threading.{|FP0801:Timer|}? Tick => null;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_InUnionBodyOutsideCore_NoReport() => VerifyAsync("""
+        public record Cat;
+
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static int Read() => System.Console.Read();
+
+            public abstract class Keeper : System.IO.TextWriter
+            {
+            }
         }
         """);
 
