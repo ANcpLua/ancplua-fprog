@@ -33,6 +33,12 @@ public sealed class Fp0202SetAccessorAnalyzer : DiagnosticAnalyzer
 
     private static void Analyze(SyntaxNodeAnalysisContext context)
     {
+        // Roslyn 5.9.0 runs this action again for an accessor inside a C# 15 union body, once with the
+        // union and once with its container as containing symbol. The accessor's own pass carries the
+        // accessor method, so the passes of a type or namespace only repeat it.
+        if (context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol)
+            return;
+
         if (context.Node is not AccessorDeclarationSyntax accessor || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 

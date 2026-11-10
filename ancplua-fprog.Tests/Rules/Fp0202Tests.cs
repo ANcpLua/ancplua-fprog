@@ -653,6 +653,132 @@ public sealed class Fp0202Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0202_SetInUnionBodyNestedInCoreClass_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+            public union Pet(Cat, Dog)
+            {
+                public int Tag
+                {
+                    get => 0;
+                    {|FP0202:set|} { }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_SetInTopLevelUnionUnderAssemblyCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        public record Cat;
+        public record Dog;
+        public union Pet(Cat, Dog)
+        {
+            public int Tag
+            {
+                get => 0;
+                {|FP0202:set|} { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_SetInClassNestedInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+            public union Pet(Cat, Dog)
+            {
+                public sealed class Box
+                {
+                    public int Tag { get; {|FP0202:set|}; }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_SetIndexerAndStaticSetInNamespacedUnionUnderAssemblyCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        namespace Zoo
+        {
+            public record Cat;
+            public record Dog;
+            public union Pet(Cat, Dog)
+            {
+                public static int Count { get; {|FP0202:set|}; }
+
+                public int this[int index]
+                {
+                    get => index;
+                    {|FP0202:set|} { }
+                }
+
+                public int Size
+                {
+                    get => 0;
+                    init { }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_CoreClassNestedInShellUnionBody_Reports() => VerifyAsync("""
+        public static class Shell
+        {
+            public record Cat;
+            public record Dog;
+            public union Pet(Cat, Dog)
+            {
+                public int Tag
+                {
+                    get => 0;
+                    set { }
+                }
+
+                [Fprog.FunctionalCore]
+                public sealed class Box
+                {
+                    public int Tag { get; {|FP0202:set|}; }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_SetInUnionBodyOutsideCore_NoReport() => VerifyAsync("""
+        public record Cat;
+        public record Dog;
+        public union Pet(Cat, Dog)
+        {
+            public int Tag
+            {
+                get => 0;
+                set { }
+            }
+        }
+
+        public static class Shell
+        {
+            public union Pet(Cat, Dog)
+            {
+                public sealed class Box
+                {
+                    public int Tag { get; set; }
+                }
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0202", source, testContext.CancellationToken);
 }
