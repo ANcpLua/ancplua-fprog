@@ -38,15 +38,17 @@ public sealed class Fp0101VoidMethodAnalyzer : DiagnosticAnalyzer
 
     private static void Analyze(SyntaxNodeAnalysisContext context)
     {
-        var name = context.Node switch
+        var (returnType, name) = context.Node switch
         {
-            MethodDeclarationSyntax method => method.Identifier,
-            LocalFunctionStatementSyntax local => local.Identifier,
-            OperatorDeclarationSyntax op => op.OperatorToken,
-            _ => default
+            MethodDeclarationSyntax method => (method.ReturnType, method.Identifier),
+            LocalFunctionStatementSyntax local => (local.ReturnType, local.Identifier),
+            OperatorDeclarationSyntax op => (op.ReturnType, op.OperatorToken),
+            _ => (null, default)
         };
 
-        if (name.IsKind(SyntaxKind.None))
+        // Only the keyword declares a void return; C# rejects `System.Void` as a type (CS0673). Checking the
+        // syntax first keeps the semantic model out of every method that returns a value.
+        if (returnType is not PredefinedTypeSyntax { Keyword.RawKind: (int)SyntaxKind.VoidKeyword })
             return;
 
         if (context.SemanticModel.GetDeclaredSymbol(context.Node, context.CancellationToken) is not IMethodSymbol
