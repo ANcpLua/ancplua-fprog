@@ -356,6 +356,495 @@ public sealed class Fp0802Tests(TestContext testContext)
         public readonly record struct Pending(Task<int> Value);
         """);
 
+    [TestMethod]
+    public Task FP0802_TypeDerivedFromTaskInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public class Job() : Task(static () => { });
+
+        public sealed class Typed() : Task<int>(static () => 1);
+
+        public sealed class Special() : Job;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static {|FP0802:Job|} Plain() => new();
+
+            public static {|FP0802:Typed|} Generic() => new();
+
+            public static {|FP0802:Special|} Deep() => new();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_TypeParameterConstrainedToTaskInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static {|FP0802:T|} Pick<T>(T first) where T : Task => first;
+
+            public static {|FP0802:T|} Chain<T, TBase>(T first) where T : TBase where TBase : Task<int> => first;
+
+            public static int Run()
+            {
+                _ = Local(Task.CompletedTask);
+                return 1;
+
+                static {|FP0802:TLocal|} Local<TLocal>(TLocal value) where TLocal : Task => value;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_UnconstrainedOrNonTaskTypeParameterInCore_NoReport() => VerifyAsync("""
+        using System;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static T Identity<T>(T value) => value;
+
+            public static T Some<T>(T value) where T : class, IDisposable => value;
+
+            public static T Make<T>() where T : struct => default;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_LocalFunctionsInOtherMemberKindsInCore_Reports() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public sealed class Work
+        {
+            private static readonly Func<int> Field = () =>
+            {
+                _ = InField();
+                return 1;
+
+                static {|FP0802:Task|} InField() => Task.CompletedTask;
+            };
+
+            public Func<int> Property { get; } = () =>
+            {
+                _ = InProperty();
+                return 1;
+
+                static {|FP0802:ValueTask|} InProperty() => default;
+            };
+
+            static Work()
+            {
+                _ = InStaticConstructor();
+
+                static {|FP0802:Task|} InStaticConstructor() => Task.CompletedTask;
+            }
+
+            public Work()
+            {
+                _ = InConstructor();
+
+                static {|FP0802:Task<int>|} InConstructor() => Task.FromResult(1);
+            }
+
+            ~Work()
+            {
+                _ = InFinalizer();
+
+                static {|FP0802:Task|} InFinalizer() => Task.CompletedTask;
+            }
+
+            public int Getter
+            {
+                get
+                {
+                    _ = InGetter();
+                    return 1;
+
+                    static {|FP0802:Task|} InGetter() => Task.CompletedTask;
+                }
+            }
+
+            public int this[int index]
+            {
+                get
+                {
+                    _ = InIndexer();
+                    return index;
+
+                    static {|FP0802:ValueTask<int>|} InIndexer() => new(1);
+                }
+            }
+
+            public event Action Changed
+            {
+                add
+                {
+                    _ = InAdd();
+
+                    static {|FP0802:Task|} InAdd() => Task.CompletedTask;
+                }
+                remove { }
+            }
+
+            public static int operator -(Work left, Work right)
+            {
+                _ = InOperator();
+                return 0;
+
+                static {|FP0802:Task|} InOperator() => Task.CompletedTask;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_MethodsInCoreRecordsStructsAndGenericTypes_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public sealed record Order(int Id)
+        {
+            public {|FP0802:Task<int>|} Total() => Task.FromResult(Id);
+        }
+
+        [Fprog.FunctionalCore]
+        public readonly struct Money(decimal amount)
+        {
+            public {|FP0802:ValueTask<decimal>|} Load() => new(amount);
+        }
+
+        [Fprog.FunctionalCore]
+        public readonly record struct Point(int X)
+        {
+            public static {|FP0802:Task|} Draw() => Task.CompletedTask;
+        }
+
+        [Fprog.FunctionalCore]
+        public sealed class Box<T>(T value)
+        {
+            public {|FP0802:Task<T>|} Get() => Task.FromResult(value);
+
+            public static {|FP0802:ValueTask<TOut>|} Map<TOut>(TOut output) => new(output);
+
+            public sealed record Nested
+            {
+                public {|FP0802:Task<T[]>|} Many() => Task.FromResult(System.Array.Empty<T>());
+            }
+        }
+
+        [Fprog.FunctionalCore]
+        file sealed class Hidden
+        {
+            public static {|FP0802:Task|} Run() => Task.CompletedTask;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_StaticAbstractInterfaceMembersInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Ports
+        {
+            public interface IFactory<TSelf> where TSelf : IFactory<TSelf>
+            {
+                static abstract {|FP0802:Task<TSelf>|} Create();
+
+                static virtual {|FP0802:ValueTask|} Warm() => default;
+
+                static abstract {|FP0802:Task|} operator +(TSelf left, TSelf right);
+
+                static abstract implicit operator {|FP0802:ValueTask<int>|}(TSelf value);
+            }
+
+            public sealed class Impl : IFactory<Impl>
+            {
+                public static {|FP0802:Task<Impl>|} Create() => Task.FromResult(new Impl());
+
+                public static {|FP0802:Task|} operator +(Impl left, Impl right) => Task.CompletedTask;
+
+                public static implicit operator {|FP0802:ValueTask<int>|}(Impl value) => new(1);
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_ExplicitConversionAndCheckedOperatorsInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public sealed class Job
+        {
+            public static explicit operator {|FP0802:Task<int>|}(Job job) => Task.FromResult(1);
+
+            public static {|FP0802:Task|} operator checked -(Job left, Job right) => Task.CompletedTask;
+
+            public static {|FP0802:Task|} operator -(Job left, Job right) => Task.CompletedTask;
+
+            public static {|FP0802:ValueTask|} operator !(Job job) => default;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_SpanExcludesAttributesModifiersAndTrivia_Reports() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public abstract class Work
+        {
+            /// <summary>Documented.</summary>
+            [Obsolete("old")]
+            [return: CLSCompliant(false)]
+            public static /* lead */ {|FP0802:Task|} /* trail */ Documented() => Task.CompletedTask;
+
+            public static {|FP0802:System.Threading.Tasks
+                .Task<
+                    /* inner */ int>|} Split() => Task.FromResult(1);
+
+            public static unsafe {|FP0802:Task<int>|} Unsafe(int* pointer) => Task.FromResult(*pointer);
+
+            public static extern {|FP0802:ValueTask|} Imported();
+
+            protected internal abstract {|FP0802:Task<string>|} Text();
+
+            public new static {|FP0802:Task|} Equals(object left, object right) => Task.CompletedTask;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_NamespaceAliasAndNestedGenericReturnTypes_Reports() => VerifyAsync("""
+        using Tasks = System.Threading.Tasks;
+        using MaybeJob = System.Threading.Tasks.ValueTask?;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static {|FP0802:Tasks::Task<int>|} Qualified() => Tasks.Task.FromResult(1);
+
+            public static {|FP0802:Tasks.ValueTask|} Dotted() => default;
+
+            public static {|FP0802:MaybeJob|} Maybe() => null;
+
+            public static {|FP0802:Tasks::Task<Tasks::Task<int>>|} Nested()
+                => Tasks.Task.FromResult(Tasks.Task.FromResult(1));
+
+            public static {|FP0802:Tasks::Task<(int Count, string Name)>|} Tuple() => Tasks.Task.FromResult((1, "x"));
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_AwaitablesAndContainersOfTasksInCore_NoReport() => VerifyAsync("""
+        using System.Runtime.CompilerServices;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static unsafe class Work
+        {
+            public static TaskAwaiter<int> Awaiter(Task<int> task) => task.GetAwaiter();
+
+            public static ConfiguredTaskAwaitable Configured(Task task) => task.ConfigureAwait(false);
+
+            public static ValueTaskAwaiter<int> ValueAwaiter(ValueTask<int> task) => task.GetAwaiter();
+
+            public static TaskCompletionSource<int> Source() => new();
+
+            public static TaskFactory Factory() => Task.Factory;
+
+            public static (Task First, int Second) Pair(Task first) => (first, 1);
+
+            public static delegate*<Task> Pointer() => null;
+
+            public static ref int Slot(int[] values) => ref values[0];
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_DelegatesIndexersAndEventsDeclaredInCore_NoReport() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public sealed class Work
+        {
+            public delegate Task Job();
+
+            public delegate ValueTask<int> Query(int id);
+
+            public Task this[int index] => Task.CompletedTask;
+
+            public ValueTask<int> Value
+            {
+                get { return new(1); }
+            }
+
+            public event Func<Task> Changed = static () => Task.CompletedTask;
+
+            public int Count() => Changed is null ? 0 : 1;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_OnlyTypesInCoreInMixedNesting_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public static class Shell
+        {
+            public static Task Run() => Task.CompletedTask;
+
+            [Fprog.FunctionalCore]
+            public static class Core
+            {
+                public static {|FP0802:Task|} Run() => Task.CompletedTask;
+            }
+
+            public static class Sibling
+            {
+                public static Task<int> Run() => Task.FromResult(1);
+            }
+        }
+
+        [Fprog.FunctionalCore]
+        public class CoreBase
+        {
+            public virtual int Value() => 1;
+        }
+
+        public sealed class ShellDerived : CoreBase
+        {
+            public Task Load() => Task.CompletedTask;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_GeneratedCodeInCore_NoReport() => VerifyAsync("""
+        // <auto-generated/>
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Generated
+        {
+            public static Task Run() => Task.CompletedTask;
+
+            public static int Local()
+            {
+                _ = Later();
+                return 1;
+
+                static ValueTask Later() => default;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_PureCoreCodeAroundTasks_NoReport() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public sealed record Step(string Name, int Cost);
+
+            public static bool Done(Task task) => task.IsCompleted;
+
+            public static int Total(ImmutableArray<Step> steps)
+            {
+                var total = 0;
+                foreach (var step in steps)
+                    total += step.Cost;
+
+                return Twice(total);
+
+                static int Twice(int value) => value * 2;
+            }
+
+            public static ImmutableArray<string> Names(ImmutableArray<Step> steps)
+                => [.. from step in steps where step.Cost > 0 select step.Name];
+
+            public static string Describe(Step step) => step switch
+            {
+                { Cost: 0 } => nameof(Task),
+                _ => $"{step.Name}: {step.Cost}"
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_DeeplyNestedAndGenericLocalFunctionsInCore_Reports() => VerifyAsync("""
+        using System;
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static int Run()
+            {
+                return Outer();
+
+                int Outer()
+                {
+                    Func<Func<int>> make = () => () =>
+                    {
+                        _ = Wrap(1);
+                        return 1;
+
+                        [Obsolete]
+                        static {|FP0802:Task<T>|} Wrap<T>(T value)
+                        {
+                            return Inner();
+
+                            {|FP0802:ValueTask<T>|} Never() => new(value);
+                            {|FP0802:Task<T>|} Inner() => Never().AsTask();
+                        }
+                    };
+
+                    return make()();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_ExtensionBlockStaticMembersInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        public sealed class Money;
+
+        [Fprog.FunctionalCore]
+        public static class Extensions
+        {
+            extension(Money)
+            {
+                public static {|FP0802:Task<Money>|} Zero() => Task.FromResult(new Money());
+
+                public static {|FP0802:Task|} operator +(Money left, Money right) => Task.CompletedTask;
+            }
+
+            extension<T>(T[] items)
+            {
+                public {|FP0802:ValueTask<int>|} Count() => new(items.Length);
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_GeneratedCodeAttributeOnCoreType_NoReport() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        [System.CodeDom.Compiler.GeneratedCode("tool", "1.0")]
+        public static class Generated
+        {
+            public static Task Run() => Task.CompletedTask;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0802", source, testContext.CancellationToken);
 }
