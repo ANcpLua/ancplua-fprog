@@ -12,14 +12,14 @@ namespace ancplua_fprog.Rules;
 /// <summary>
 /// FP0104: inside the functional core, an assignment, compound assignment, <c>??=</c>, deconstruction
 /// assignment, event subscription, <c>++</c> or <c>--</c> whose target is a field, property, event or
-/// element reached from a parameter, where the written storage is visible to the caller. The chain
-/// from the parameter to the target may pass through fields, properties, indexers, array elements,
-/// casts, null-conditional access and method calls. The storage is visible to the caller when the
-/// chain reads a value that may be a reference (the parameter itself, or any link of it, e.g. a class
-/// field inside a struct parameter), passes through a member that returns by reference (a
-/// <c>Span&lt;T&gt;</c> indexer, a <c>ref</c> field or method), or starts at a <c>ref</c>/<c>out</c>
-/// parameter. Writes into a struct parameter passed by value, or into a boxed copy of one, are not
-/// reported. Reported at the whole assignment target expression, including enclosing parentheses.
+/// element reached from a parameter whose type may be a reference (class, interface, array, delegate,
+/// <c>dynamic</c>, type parameter not known to be a value type) or from a <c>ref</c>/<c>out</c>
+/// parameter. The chain from the parameter to the target may pass through fields, properties, indexers,
+/// array elements, casts, null-conditional access and method calls. Writes through a struct parameter
+/// passed by value, <c>in</c> or <c>ref readonly</c> (<c>Span&lt;T&gt;</c> and structs holding references
+/// included) are not reported. Writes into a boxed copy are not reported unless the chain above the box
+/// reads a reference or passes through a member that returns by reference. Reported at the whole
+/// assignment target expression, including enclosing parentheses.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
@@ -103,8 +103,9 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
             shared |= ReturnsByRef(receiver) || MayBeReference(receiver.Type);
             switch (receiver)
             {
-                case IParameterReferenceOperation { Parameter.RefKind: var refKind }:
-                    if (shared || refKind is RefKind.Ref or RefKind.Out)
+                case IParameterReferenceOperation { Parameter: var parameter }:
+                    // A struct parameter (Span<T> included) is not a reference-type parameter unless ref/out.
+                    if (MayBeReference(parameter.Type) || parameter.RefKind is RefKind.Ref or RefKind.Out)
                         Report(context, target, start);
                     return;
                 case IConditionalAccessInstanceOperation instance:

@@ -535,7 +535,7 @@ public sealed class Fp0104Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0104_SpanAndRefFieldParameterWritesCallerMemory_Reports() => VerifyAsync("""
+    public Task FP0104_SpanAndRefFieldStructParametersByValue_NoReport() => VerifyAsync("""
         public ref struct Holder
         {
             public ref int Ref;
@@ -546,18 +546,18 @@ public sealed class Fp0104Tests(TestContext testContext)
         {
             public static int Fill(System.Span<int> span, System.Memory<int> memory, Holder holder, params System.Span<int> rest)
             {
-                {|FP0104:span[0]|} = 1;
-                {|FP0104:span[^1]|} += 1;
-                {|FP0104:memory.Span[0]|}++;
-                {|FP0104:holder.Ref|} = 5;
-                {|FP0104:rest[0]|} = 6;
+                span[0] = 1;
+                span[^1] += 1;
+                memory.Span[0]++;
+                holder.Ref = 5;
+                rest[0] = 6;
                 return span[0];
             }
         }
         """);
 
     [TestMethod]
-    public Task FP0104_StructParameterHoldingReference_Reports() => VerifyAsync("""
+    public Task FP0104_StructParameterHoldingReference_NoReport() => VerifyAsync("""
         public struct Wrapper
         {
             public Box Box;
@@ -570,9 +570,9 @@ public sealed class Fp0104Tests(TestContext testContext)
         {
             public static Wrapper Touch(Wrapper wrapper)
             {
-                {|FP0104:wrapper.Box.Count|} = 1;
-                {|FP0104:wrapper.Values[0]|}++;
-                {|FP0104:wrapper.Box.Items[0]|} = new Box();
+                wrapper.Box.Count = 1;
+                wrapper.Values[0]++;
+                wrapper.Box.Items[0] = new Box();
                 wrapper.Point.X = 2;
                 wrapper.Box = new Box();
                 return wrapper;
@@ -607,6 +607,154 @@ public sealed class Fp0104Tests(TestContext testContext)
                 ((IHasCount)value).Count = 1;
                 return counter.Count + value.Count;
             }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_SpanLambdaParameterOfStringCreate_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Text
+        {
+            public static string Reverse(string text)
+                => string.Create(text.Length, text, static (span, source) =>
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        span[i] = source[source.Length - 1 - i];
+                });
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_SpanParameterOfHelperFillingLocalBuffer_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Hex
+        {
+            public static string Format(byte value)
+            {
+                System.Span<char> buffer = stackalloc char[2];
+                var written = Write(buffer, value);
+                return new string(buffer[..written]);
+            }
+
+            private static int Write(System.Span<char> destination, byte value)
+            {
+                destination[0] = Digit(value >> 4);
+                destination[1] = Digit(value & 0xF);
+                return 2;
+            }
+
+            private static char Digit(int nibble) => (char)(nibble < 10 ? '0' + nibble : 'a' + nibble - 10);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_TupleAccumulatorHoldingArray_NoReport() => VerifyAsync("""
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Histogram
+        {
+            public static int[] Count(int[] values, int buckets)
+                => values.Aggregate(
+                    (Counts: new int[buckets], Total: 0),
+                    (acc, value) =>
+                    {
+                        acc.Counts[value % buckets]++;
+                        return (acc.Counts, acc.Total + 1);
+                    }).Counts;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_SpanReachedFromReferenceTypeParameter_Reports() => VerifyAsync("""
+        using System;
+
+        public sealed class Buffer
+        {
+            public Memory<int> Memory;
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Ops
+        {
+            public static int Fill(int[] values, Buffer buffer)
+            {
+                {|FP0104:values.AsSpan()[0]|} = 1;
+                {|FP0104:values.AsSpan(1)[^1]|} += 2;
+                {|FP0104:buffer.Memory.Span[0]|}++;
+                return values[0];
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_HelperFillingArrayParameter_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Hex
+        {
+            private static int Write(char[] destination, byte value)
+            {
+                {|FP0104:destination[0]|} = Digit(value >> 4);
+                {|FP0104:destination[1]|} = Digit(value & 0xF);
+                return 2;
+            }
+
+            private static char Digit(int nibble) => (char)(nibble < 10 ? '0' + nibble : 'a' + nibble - 10);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_ArrayAccumulatorLambdaParameter_Reports() => VerifyAsync("""
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Histogram
+        {
+            public static int[] Count(int[] values, int buckets)
+                => values.Aggregate(
+                    new int[buckets],
+                    (acc, value) =>
+                    {
+                        {|FP0104:acc[value % buckets]|}++;
+                        return acc;
+                    });
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_RefParameterOfStructHoldingReferenceOrSpan_Reports() => VerifyAsync("""
+        public struct Wrapper
+        {
+            public Box Box;
+            public int[] Values;
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Ops
+        {
+            public static int Touch(ref Wrapper wrapper, ref System.Span<int> span)
+            {
+                {|FP0104:wrapper.Box.Count|} = 1;
+                {|FP0104:wrapper.Values[0]|}++;
+                {|FP0104:span[0]|} = 2;
+                return span[0];
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_SpanExtensionReceiverAndInSpanParameter_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class SpanOps
+        {
+            public static int FillWith(this System.Span<int> span, int value)
+            {
+                for (var i = 0; i < span.Length; i++)
+                    span[i] = value;
+                return span.Length;
+            }
+
+            public static int First(in System.Span<int> span) => span[0] = 1;
         }
         """);
 
@@ -876,7 +1024,7 @@ public sealed class Fp0104Tests(TestContext testContext)
             public static int Touch(in Box box, ref readonly Wrapper wrapper, in Point point)
             {
                 {|FP0104:box.Count|} = 1;
-                {|FP0104:wrapper.Box.X|} += 2;
+                wrapper.Box.X += 2;
                 return point.X + wrapper.Point.Y;
             }
         }
