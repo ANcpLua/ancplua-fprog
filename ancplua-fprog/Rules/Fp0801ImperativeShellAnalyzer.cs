@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
@@ -34,27 +33,20 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterCompilationStartAction(static start =>
-        {
-            // With Roslyn 5.9.0 a node inside the body of a C# 15 union declaration is analyzed up to three times
-            // (for its member, for the union and for the union's container). Report every location once.
-            var reported = new ConcurrentDictionary<Location, byte>();
-            start.RegisterSyntaxNodeAction(
-                node => AnalyzeName(node, reported), SyntaxKind.IdentifierName, SyntaxKind.GenericName);
-            start.RegisterSyntaxNodeAction(node => AnalyzeLock(node, reported), SyntaxKind.LockStatement);
-        });
+        context.RegisterSyntaxNodeAction(AnalyzeName, SyntaxKind.IdentifierName, SyntaxKind.GenericName);
+        context.RegisterSyntaxNodeAction(AnalyzeLock, SyntaxKind.LockStatement);
     }
 
-    private static void AnalyzeLock(SyntaxNodeAnalysisContext context, ConcurrentDictionary<Location, byte> reported)
+    private static void AnalyzeLock(SyntaxNodeAnalysisContext context)
     {
         if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var keyword = ((LockStatementSyntax)context.Node).LockKeyword;
-        Report(context, reported, keyword.GetLocation(), keyword.ValueText);
+        Report(context, keyword.GetLocation(), keyword.ValueText);
     }
 
-    private static void AnalyzeName(SyntaxNodeAnalysisContext context, ConcurrentDictionary<Location, byte> reported)
+    private static void AnalyzeName(SyntaxNodeAnalysisContext context)
     {
         var name = (SimpleNameSyntax)context.Node;
         if (name.IsVar
@@ -69,20 +61,29 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
             && ReferencedType(symbol, name) is { } type
             && IsForbidden(type))
         {
-            Report(context, reported, name.Identifier.GetLocation(), type.Name);
+            Report(context, name.Identifier.GetLocation(), type.Name);
         }
     }
 
-    private static void Report(
-        SyntaxNodeAnalysisContext context,
-        ConcurrentDictionary<Location, byte> reported,
-        Location location,
-        string subject)
+    private static void Report(SyntaxNodeAnalysisContext context, Location location, string subject)
     {
-        // A source location is equal to another when both have the same syntax tree and span.
-        if (reported.TryAdd(location, 0))
+        if (!IsRepeatedUnionPass(context))
             context.ReportDiagnostic(Diagnostic.Create(Rule, location, subject));
     }
+
+    /// <summary>
+    /// True for the extra passes that Roslyn 5.9.0 makes over a node in a C# 15 union declaration: after the genuine
+    /// pass, the node is analyzed again with the union and with the union's container as containing symbol (a node
+    /// in the union's header only with the container). A genuine pass carries a type only where the declaration
+    /// that holds the node declares that type: its base list, constraints and attributes (also on its type
+    /// parameters), a delegate signature, an extension block parameter, or a union's case list. Everywhere else
+    /// the genuine pass carries a member. A pass with a namespace as containing symbol is never in core.
+    /// </summary>
+    private static bool IsRepeatedUnionPass(SyntaxNodeAnalysisContext context)
+        => context.ContainingSymbol is INamedTypeSymbol type
+           && context.Node.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } declaration
+           && !SymbolEqualityComparer.Default.Equals(
+               context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken), type);
 
     /// <summary>The type that <paramref name="name"/> names (for an attribute name, the attribute type).</summary>
     private static INamedTypeSymbol? ReferencedType(ISymbol symbol, SimpleNameSyntax name)

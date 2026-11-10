@@ -1196,6 +1196,380 @@ public sealed class Fp0801Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0801_EveryPositionOutsideUnion_Reports() => VerifyAsync("""
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+
+            public class Base(char separator)
+            {
+                public char Separator { get; } = separator;
+            }
+        }
+
+        namespace Core
+        {
+            [Fprog.FunctionalCore]
+            public static class Plain
+            {
+                public abstract class Wrapper : System.IO.{|FP0801:Stream|}
+                {
+                }
+
+                public sealed class Holder<T> where T : System.IO.{|FP0801:Stream|}
+                {
+                }
+
+                [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+                public sealed class Tagged
+                {
+                }
+
+                public sealed class Keeper(System.IO.{|FP0801:Stream|} source) : Shell.Base(System.IO.{|FP0801:Path|}.PathSeparator)
+                {
+                    private readonly System.IO.{|FP0801:Stream|} _source = source;
+
+                    public System.IO.{|FP0801:Stream|} Source => _source;
+                }
+
+                private static readonly System.IO.{|FP0801:Stream|} Shared = System.IO.{|FP0801:Stream|}.Null;
+
+                public static System.IO.{|FP0801:Stream|} Empty { get; } = Shared;
+
+                public static System.IO.{|FP0801:Stream|} Same(System.IO.{|FP0801:Stream|} stream) => stream;
+
+                public static T Constrained<T>(T value) where T : System.IO.{|FP0801:Stream|} => value;
+
+                public static int Body(object value, object gate)
+                {
+                    System.IO.{|FP0801:Stream|} local = System.IO.{|FP0801:Stream|}.Null;
+                    var reader = new System.IO.{|FP0801:StringReader|}("a");
+                    var exists = System.IO.{|FP0801:File|}.Exists("p");
+                    System.Collections.Generic.List<System.IO.{|FP0801:Stream|}> list = [];
+                    var cast = (System.IO.{|FP0801:Stream|})value;
+                    var matches = value is System.IO.{|FP0801:Stream|} { CanRead: true };
+                    var name = nameof(System.IO.{|FP0801:Stream|});
+                    var type = typeof(System.IO.{|FP0801:Stream|});
+                    {|FP0801:lock|} (gate)
+                    {
+                        return local.CanRead && exists && matches && list.Count == 0 && cast.CanRead && reader.Peek() > 0
+                            ? name.Length + type.Name.Length
+                            : 0;
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_EveryPositionInUnionBodyNestedInCore_Reports() => VerifyAsync("""
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+
+            public class Base(char separator)
+            {
+                public char Separator { get; } = separator;
+            }
+        }
+
+        namespace Core
+        {
+            [Fprog.FunctionalCore]
+            public static class Pets
+            {
+                public record Cat;
+
+                public record Dog;
+
+                [Shell.Tag(typeof(System.IO.{|FP0801:File|}))]
+                public union Pet(Cat, Dog)
+                {
+                    public abstract class Wrapper : System.IO.{|FP0801:Stream|}
+                    {
+                    }
+
+                    public sealed class Holder<T> where T : System.IO.{|FP0801:Stream|}
+                    {
+                    }
+
+                    [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+                    public sealed class Tagged
+                    {
+                    }
+
+                    public sealed class Keeper(System.IO.{|FP0801:Stream|} source) : Shell.Base(System.IO.{|FP0801:Path|}.PathSeparator)
+                    {
+                        private readonly System.IO.{|FP0801:Stream|} _source = source;
+
+                        public System.IO.{|FP0801:Stream|} Source => _source;
+                    }
+
+                    private static readonly System.IO.{|FP0801:Stream|} Shared = System.IO.{|FP0801:Stream|}.Null;
+
+                    public static System.IO.{|FP0801:Stream|} Empty { get; } = Shared;
+
+                    public static System.IO.{|FP0801:Stream|} Same(System.IO.{|FP0801:Stream|} stream) => stream;
+
+                    public static T Constrained<T>(T value) where T : System.IO.{|FP0801:Stream|} => value;
+
+                    public static int Body(object value, object gate)
+                    {
+                        System.IO.{|FP0801:Stream|} local = System.IO.{|FP0801:Stream|}.Null;
+                        var reader = new System.IO.{|FP0801:StringReader|}("a");
+                        var exists = System.IO.{|FP0801:File|}.Exists("p");
+                        System.Collections.Generic.List<System.IO.{|FP0801:Stream|}> list = [];
+                        var cast = (System.IO.{|FP0801:Stream|})value;
+                        var matches = value is System.IO.{|FP0801:Stream|} { CanRead: true };
+                        var name = nameof(System.IO.{|FP0801:Stream|});
+                        var type = typeof(System.IO.{|FP0801:Stream|});
+                        {|FP0801:lock|} (gate)
+                        {
+                            return local.CanRead && exists && matches && list.Count == 0 && cast.CanRead && reader.Peek() > 0
+                                ? name.Length + type.Name.Length
+                                : 0;
+                        }
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_EveryPositionInUnionBodyInNamespaceUnderAssemblyCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+
+            public class Base(char separator)
+            {
+                public char Separator { get; } = separator;
+            }
+        }
+
+        namespace Zoo
+        {
+            public record Cat;
+
+            public record Dog;
+
+            [Shell.Tag(typeof(System.IO.{|FP0801:File|}))]
+            public union Pet(Cat, Dog)
+            {
+                public abstract class Wrapper : System.IO.{|FP0801:Stream|}
+                {
+                }
+
+                public sealed class Holder<T> where T : System.IO.{|FP0801:Stream|}
+                {
+                }
+
+                [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+                public sealed class Tagged
+                {
+                }
+
+                public sealed class Keeper(System.IO.{|FP0801:Stream|} source) : Shell.Base(System.IO.{|FP0801:Path|}.PathSeparator)
+                {
+                    private readonly System.IO.{|FP0801:Stream|} _source = source;
+
+                    public System.IO.{|FP0801:Stream|} Source => _source;
+                }
+
+                private static readonly System.IO.{|FP0801:Stream|} Shared = System.IO.{|FP0801:Stream|}.Null;
+
+                public static System.IO.{|FP0801:Stream|} Empty { get; } = Shared;
+
+                public static System.IO.{|FP0801:Stream|} Same(System.IO.{|FP0801:Stream|} stream) => stream;
+
+                public static T Constrained<T>(T value) where T : System.IO.{|FP0801:Stream|} => value;
+
+                public static int Body(object value, object gate)
+                {
+                    System.IO.{|FP0801:Stream|} local = System.IO.{|FP0801:Stream|}.Null;
+                    var reader = new System.IO.{|FP0801:StringReader|}("a");
+                    var exists = System.IO.{|FP0801:File|}.Exists("p");
+                    System.Collections.Generic.List<System.IO.{|FP0801:Stream|}> list = [];
+                    var cast = (System.IO.{|FP0801:Stream|})value;
+                    var matches = value is System.IO.{|FP0801:Stream|} { CanRead: true };
+                    var name = nameof(System.IO.{|FP0801:Stream|});
+                    var type = typeof(System.IO.{|FP0801:Stream|});
+                    {|FP0801:lock|} (gate)
+                    {
+                        return local.CanRead && exists && matches && list.Count == 0 && cast.CanRead && reader.Peek() > 0
+                            ? name.Length + type.Name.Length
+                            : 0;
+                    }
+                }
+            }
+
+            public union Source(System.Collections.Generic.List<System.IO.{|FP0801:Stream|}>, string);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_TypeLevelPositionsInAndOutsideUnionBody_Reports() => VerifyAsync("""
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+
+            public interface IMark<T>
+            {
+            }
+
+            public class Box<T>
+            {
+            }
+
+            public record Parent(char Separator);
+        }
+
+        namespace Core
+        {
+            [Fprog.FunctionalCore]
+            public static class Kinds
+            {
+                public sealed class Marked<[Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))] T>
+                {
+                }
+
+                public sealed class Boxed : Shell.Box<System.IO.{|FP0801:Stream|}>, Shell.IMark<System.IO.{|FP0801:FileInfo|}>
+                {
+                }
+
+                public readonly struct Amount : Shell.IMark<System.IO.{|FP0801:Stream|}>
+                {
+                }
+
+                public interface IShape : Shell.IMark<System.IO.{|FP0801:Stream|}>
+                {
+                }
+
+                [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+                public enum Mode
+                {
+                    [Shell.Tag(typeof(System.IO.{|FP0801:File|}))] Open
+                }
+
+                [method: Shell.Tag(typeof(System.IO.{|FP0801:File|}))]
+                public sealed record Child(int Size) : Shell.Parent(System.IO.{|FP0801:Path|}.PathSeparator);
+
+                [Shell.Tag(typeof(System.{|FP0801:Console|}))]
+                public delegate int Reader();
+
+                public record Cat;
+
+                public record Dog;
+
+                public union Pet(Cat, Dog)
+                {
+                    public sealed class Marked<[Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))] T>
+                    {
+                    }
+
+                    public sealed class Boxed : Shell.Box<System.IO.{|FP0801:Stream|}>, Shell.IMark<System.IO.{|FP0801:FileInfo|}>
+                    {
+                    }
+
+                    public readonly struct Amount : Shell.IMark<System.IO.{|FP0801:Stream|}>
+                    {
+                    }
+
+                    public interface IShape : Shell.IMark<System.IO.{|FP0801:Stream|}>
+                    {
+                    }
+
+                    [Shell.Tag(typeof(System.IO.{|FP0801:Stream|}))]
+                    public enum Mode
+                    {
+                        [Shell.Tag(typeof(System.IO.{|FP0801:File|}))] Open
+                    }
+
+                    [method: Shell.Tag(typeof(System.IO.{|FP0801:File|}))]
+                    public sealed record Child(int Size) : Shell.Parent(System.IO.{|FP0801:Path|}.PathSeparator);
+
+                    [Shell.Tag(typeof(System.{|FP0801:Console|}))]
+                    public delegate int Reader();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_CoreClassInShellUnionBodyReportsOnlyInner_Reports() => VerifyAsync("""
+        public record Cat;
+
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static int Read() => System.Console.Read();
+
+            [Fprog.FunctionalCore]
+            public abstract class Keeper : System.IO.{|FP0801:TextWriter|}
+            {
+                public static int Read() => System.{|FP0801:Console|}.Read();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UnionHeaderAndTypeLevelPositionsOutsideCore_NoReport() => VerifyAsync("""
+        namespace Shell
+        {
+            [System.AttributeUsage(System.AttributeTargets.All)]
+            public sealed class TagAttribute(System.Type type) : System.Attribute
+            {
+                public System.Type Type { get; } = type;
+            }
+
+            public static class Outer
+            {
+                public record Cat;
+
+                public record Dog;
+
+                [Tag(typeof(System.IO.File))]
+                public union Pet(Cat, Dog)
+                {
+                    [Tag(typeof(System.IO.Stream))]
+                    public sealed class Holder<T> where T : System.IO.Stream
+                    {
+                    }
+
+                    public static int Locked(object gate)
+                    {
+                        lock (gate)
+                        {
+                            return 1;
+                        }
+                    }
+                }
+
+                public union Source(System.IO.Stream, string);
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0801", source, testContext.CancellationToken);
 }
