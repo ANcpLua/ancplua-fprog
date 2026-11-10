@@ -290,6 +290,316 @@ public sealed class Fp0201Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0201_SpanIsIdentifierDespiteAttributesCommentsAndLineBreaks_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Annotated
+        {
+            [System.NonSerialized]
+            public global::System.Int32
+                /* the count */ {|FP0201:Count|} /* trailing */;
+
+            public int {|FP0201:@event|};
+
+            public System.Collections.Generic.List<int>? {|FP0201:Items|} = new() { 1, 2 };
+
+            public System.Func<int, int> {|FP0201:Twice|} = x =>
+            {
+                var local = x;
+                return local * 2;
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_RequiredNewProtectedInternalAndThreadStaticModifiers_Reports() => VerifyAsync("""
+        public class Base
+        {
+            public int Shadowed;
+        }
+
+        [Fprog.FunctionalCore]
+        public class Derived : Base
+        {
+            public required int {|FP0201:Id|};
+            public new int {|FP0201:Shadowed|};
+            protected internal static int {|FP0201:Shared|};
+            [System.ThreadStatic] private static int {|FP0201:_perThread|};
+            private static volatile int {|FP0201:_flag|};
+
+            public static int Read() => _perThread + _flag;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldsInGenericTypes_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Box<T>
+            where T : notnull
+        {
+            public T {|FP0201:Value|} = default!;
+            public static Box<T>? {|FP0201:Empty|};
+
+            public sealed class Slot<TKey>
+                where TKey : notnull
+            {
+                public System.Collections.Generic.Dictionary<TKey, T>? {|FP0201:Map|};
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_PointerFunctionPointerAndRefStructFields_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public unsafe struct Native
+        {
+            public int* {|FP0201:Pointer|};
+            public delegate*<int, int> {|FP0201:Callback|};
+            public readonly int* Fixed;
+        }
+
+        [Fprog.FunctionalCore]
+        public ref struct Window
+        {
+            public int {|FP0201:Length|};
+            public static int {|FP0201:Instances|};
+            public readonly int Start;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_TupleTypedFieldReportsOnlyFieldName_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Pairs
+        {
+            public (int Left, int Right) {|FP0201:Pair|};
+            public readonly (string Key, int Count) Entry = ("a", 1);
+
+            public int Sum() => Pair.Left + Pair.Right + Entry.Count;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldMatchingPositionalRecordParameter_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed record Person(string Name, int Age)
+        {
+            public string {|FP0201:Name|} = Name;
+            public readonly int Age = Age;
+        }
+
+        [Fprog.FunctionalCore]
+        public readonly record struct Point(int X)
+        {
+            public readonly int X = X;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldInitializedFromPrimaryConstructorParameter_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Account(decimal opening)
+        {
+            private decimal {|FP0201:_balance|} = opening;
+
+            public decimal Balance() => _balance;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldsInNamespacesFileLocalAndNestedRecords_Reports() => VerifyAsync("""
+        namespace App.Domain
+        {
+            [Fprog.FunctionalCore]
+            file sealed class Hidden
+            {
+                public int {|FP0201:Value|};
+            }
+
+            [Fprog.FunctionalCore]
+            public sealed record class Order(int Id)
+            {
+                private static int {|FP0201:_next|};
+
+                public sealed record Line(string Sku)
+                {
+                    public decimal {|FP0201:Price|};
+                }
+
+                public record struct Tag(string Text)
+                {
+                    public int {|FP0201:Weight|};
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldLikeEventsWithInitializerOverrideAndInInterface_Reports() => VerifyAsync("""
+        public abstract class Notifier
+        {
+            public abstract event System.Action? Changed;
+        }
+
+        [Fprog.FunctionalCore]
+        public class Concrete : Notifier
+        {
+            public override event System.Action? {|FP0201:Changed|};
+            public virtual event System.Action {|FP0201:Started|} = delegate { };
+        }
+
+        [Fprog.FunctionalCore]
+        public struct Signal
+        {
+            public event System.Action? {|FP0201:Fired|};
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Hub
+        {
+            public interface IBus
+            {
+                static event System.Action? {|FP0201:Published|};
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_ExternFieldLikeEvent_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Interop
+        {
+            public static extern event System.Action? Raised;
+            public extern event System.Action? Changed;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_MutatedPrimaryConstructorParameterHasNoDeclarator_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Ticker(int start)
+        {
+            public int Next() => ++start;
+        }
+
+        [Fprog.FunctionalCore]
+        public struct Step(int size)
+        {
+            public int Grow() => size += 1;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_ClosuresQueriesAnonymousTypesAndLocalConstsInCore_NoReport() => VerifyAsync("""
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Pipeline
+        {
+            private static readonly System.Func<int, int> Twice = x => x * 2;
+
+            public static int[] Run(int[] values)
+            {
+                var offset = 1;
+                System.Func<int, int> shift = x => x + offset;
+                var query = from v in values
+                            let doubled = Twice(v)
+                            where doubled > offset
+                            select new { Value = shift(doubled), Original = v };
+
+                return query.Select(item => Local(item.Value)).ToArray();
+
+                static int Local(int y)
+                {
+                    const int step = 2;
+                    var acc = y;
+                    acc += step;
+                    return acc;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_BackingFieldsOfSettableAndPartialProperties_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public partial struct Tracked
+        {
+            public Tracked() { }
+
+            public int Value { get; set; }
+            public static int Count { get; set; }
+            public int Clamped { get => field; set => field = value < 0 ? 0 : value; }
+            public partial int Partial { get; set; }
+            public partial int Partial { get => field; set => field = value; }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_ReadonlyFieldsOfMutableTypesAndInterfaceConstants_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Registry
+        {
+            private readonly int[] _items = [1, 2];
+            private static readonly System.Collections.Generic.List<string> Names = [];
+            private readonly System.Text.StringBuilder _builder = new();
+
+            public int Count() => _items.Length + Names.Count + _builder.Length;
+
+            public interface ILimits
+            {
+                const int Max = 3;
+                static readonly int Min = 1;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_GeneratedCodeAttributeInCore_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        [System.CodeDom.Compiler.GeneratedCode("tool", "1.0")]
+        public sealed class Emitted
+        {
+            public int Value;
+            public event System.Action? Changed;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_UnusualShapesInCore_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static unsafe class Odd
+        {
+            public delegate int Map(int x);
+
+            [System.Flags]
+            public enum Bits : byte { None = 0, A = 1 << 0, B = A | 2 }
+
+            private static readonly System.Func<int, System.Func<int, System.Func<int, int>>> Curry =
+                a => b => c => a + b + c;
+
+            [System.Runtime.InteropServices.DllImport("native")]
+            public static extern int Native(int* pointer);
+
+            public static T Identity<T>(T value)
+                where T : allows ref struct
+                => value;
+
+            public static int Apply() => Curry(1)(2)(3);
+
+            extension(int value)
+            {
+                public int Doubled => value * 2;
+            }
+        }
+
+        [Fprog.FunctionalCore]
+        public abstract class Shape
+        {
+            public abstract double Area();
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0201", source, testContext.CancellationToken);
 }
