@@ -1,0 +1,56 @@
+using Microsoft.CodeAnalysis;
+
+namespace ancplua_fprog.Shared;
+
+/// <summary>Decides whether a symbol is in the functional core (AGENTS.md, "Scope").</summary>
+internal static class CoreScope
+{
+    /// <summary>
+    /// True when <paramref name="symbol"/> is a type in core, or a member, local function, lambda,
+    /// parameter or type parameter whose containing type is in core. A type is in core when it or a
+    /// type that contains it (any depth) is annotated <c>[Fprog.FunctionalCore]</c>, or when its
+    /// assembly is annotated <c>[assembly: Fprog.FunctionalCore]</c>. Symbols outside any type
+    /// (namespaces, assemblies, array types) are not in core.
+    /// </summary>
+    public static bool IsInCore(ISymbol? symbol)
+    {
+        var type = symbol as INamedTypeSymbol ?? symbol?.ContainingType;
+        if (type is null)
+            return false;
+
+        for (var current = type; current is not null; current = current.ContainingType)
+        {
+            if (FprogAttributes.Contains(current.GetAttributes(), FprogAttributes.FunctionalCore))
+                return true;
+        }
+
+        return type.ContainingAssembly is { } assembly
+               && FprogAttributes.Contains(assembly.GetAttributes(), FprogAttributes.FunctionalCore);
+    }
+
+    /// <summary>
+    /// True when <paramref name="symbol"/> is written in the source of this compilation; false when the
+    /// compiler synthesized it or it comes from a referenced assembly (AGENTS.md, "Scope": only members
+    /// declared in source count).
+    /// <para>
+    /// Observed with Roslyn 5.9.0 on <c>record Circle(double Radius)</c>. Declared: the positional
+    /// property <c>Radius</c> (its declaring syntax is the parameter) and the primary constructor with
+    /// its parameter. Not declared: <c>Deconstruct</c> and its <c>out</c> parameter, the copy
+    /// constructor, <c>EqualityContract</c>, <c>ToString</c>, <c>PrintMembers</c>, both <c>Equals</c>,
+    /// <c>GetHashCode</c>, <c>==</c> and <c>!=</c>, <c>&lt;Clone&gt;$</c>, the backing field of
+    /// <c>Radius</c> and the accessors of <c>Radius</c> (no <c>get</c> or <c>init</c> keyword exists).
+    /// A member the record declares itself (its own <c>Deconstruct</c> or <c>ToString</c>) is declared.
+    /// An implicit default constructor and the backing field of any auto-property are not declared.
+    /// </para>
+    /// <para>
+    /// <see cref="ISymbol.IsImplicitlyDeclared"/> alone is not enough. It is false for the parameters of
+    /// synthesized members (the <c>out</c> parameters of a record's <c>Deconstruct</c>), which have no
+    /// declaring syntax; for the entry point <c>&lt;Main&gt;$</c> that holds top-level statements; and
+    /// for every symbol from a referenced assembly.
+    /// </para>
+    /// </summary>
+    public static bool IsDeclaredInSource(ISymbol symbol)
+        => !symbol.IsImplicitlyDeclared
+           && !symbol.DeclaringSyntaxReferences.IsEmpty
+           && symbol is not IMethodSymbol { Name: WellKnownMemberNames.TopLevelStatementsEntryPointMethodName };
+}
