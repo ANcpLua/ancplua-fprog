@@ -4,3 +4,6 @@
 **/obj/
 TestResults/
 *.DotSettings.user
+artifacts/
+fprog-kit/
+.claude/

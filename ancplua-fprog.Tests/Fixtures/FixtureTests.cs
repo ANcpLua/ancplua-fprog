@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using JetBrains.Annotations;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Fixtures;
@@ -32,6 +33,7 @@ public abstract class FixtureTests<TFixture> where TFixture : class, IFixture<TF
     private bool _ownsFixture;
 
     // MSTest injects TestContext before TestInitialize; only this infrastructure handles absence.
+    [UsedImplicitly(ImplicitUseKindFlags.Assign)]
     public TestContext? TestContext { get; set; }
 
     protected TFixture Fixture => _fixture

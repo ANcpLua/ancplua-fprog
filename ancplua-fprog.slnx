@@ -1,6 +1,4 @@
 <Solution>
-  <Project Path="ancplua-fprog/ancplua-fprog.Sample/ancplua-fprog.Sample.csproj" />
-  <Project Path="ancplua-fprog/ancplua-fprog.Tests.Net10/ancplua-fprog.Tests.Net10.csproj" />
-  <Project Path="ancplua-fprog/ancplua-fprog.Tests/ancplua-fprog.Tests.csproj" />
-  <Project Path="ancplua-fprog/ancplua-fprog/ancplua-fprog.csproj" />
+  <Project Path="ancplua-fprog.Tests/ancplua-fprog.Tests.csproj" />
+  <Project Path="ancplua-fprog/ancplua-fprog.csproj" />
 </Solution>

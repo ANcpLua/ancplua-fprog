@@ -72,7 +72,7 @@ public sealed class FixtureLifecycleTests
     public void AccessOutsideLifetime_FailsInTheInfrastructure()
     {
         var host = new UninitializedHost();
-        var error = Assert.ThrowsExactly<InvalidOperationException>(() => host.ReadFixture());
+        var error = Assert.ThrowsExactly<InvalidOperationException>(host.ReadFixture);
         Assert.AreEqual("The fixture is outside its test lifetime.", error.Message);
     }
 

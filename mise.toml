@@ -1,0 +1,19 @@
+[tools]
+jq = "1.7.1"
+python = "3.14"
+
+[env]
+DOTNET_NOLOGO = "1"
+DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+
+[tasks.check]
+description = "The done gate: build, tests, InspectCode, RefTrace"
+run = "make check"
+
+[tasks.test]
+description = "Run all visible tests"
+run = "make test"
+
+[tasks.score]
+description = "Referee: hidden tests and corpus (needs BASE and REFEREE)"
+run = "make score"
