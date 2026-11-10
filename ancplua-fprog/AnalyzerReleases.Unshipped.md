@@ -17,3 +17,4 @@ FP0302 | Functional | Warning | Do not call partial members in the functional co
 FP0303 | Functional | Warning | Do not return null or default in the functional core
 FP0401 | Functional | Warning | A union must be abstract
 FP0402 | Functional | Warning | Union constructors must be private
+FP0403 | Functional | Warning | A union case must be sealed and nested inside its union
