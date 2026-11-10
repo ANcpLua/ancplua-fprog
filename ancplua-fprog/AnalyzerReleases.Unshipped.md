@@ -5,3 +5,4 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
+FP0301 | Functional | Warning | Do not throw in the functional core
