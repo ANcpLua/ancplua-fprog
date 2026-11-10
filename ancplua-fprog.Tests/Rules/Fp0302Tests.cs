@@ -635,20 +635,110 @@ public sealed class Fp0302Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0302_ImmutableArrayExtensionsAreNotEnumerable_NoReport() => VerifyAsync("""
+    public Task FP0302_ImmutableArrayExtensionsAreNotEnumerable_Reports() => VerifyAsync("""
         using System.Collections.Immutable;
         using System.Linq;
 
         [Fprog.FunctionalCore]
         public static class Immutables
         {
-            public static int Head(ImmutableArray<int> xs) => xs.First();
+            public static int Head(ImmutableArray<int> xs) => xs.{|FP0302:First|}();
 
-            public static int Tail(ImmutableArray<int> xs) => xs.Last();
+            public static int Tail(ImmutableArray<int> xs) => xs.{|FP0302:Last|}();
 
-            public static int Only(ImmutableArray<int> xs) => xs.Single();
+            public static int Only(ImmutableArray<int> xs) => xs.{|FP0302:Single|}();
 
-            public static int Third(ImmutableArray<int> xs) => xs.ElementAt(2);
+            public static int Third(ImmutableArray<int> xs) => xs.{|FP0302:ElementAt|}(2);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_FirstOnImmutableArrayBindsOutsideEnumerable_Reports() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Lists
+        {
+            public static int Head(ImmutableArray<int> xs) => xs.{|FP0302:First|}();
+
+            public static int Tail(ImmutableArray<int> xs) => xs.{|FP0302:Last|}(x => x > 0);
+
+            public static int Only(ImmutableArray<int> xs) => xs.{|FP0302:Single|}();
+
+            public static int Third(ImmutableArray<int> xs) => xs.{|FP0302:ElementAt|}(2);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_ImmutableArrayExtensionsStaticBuilderAndConditional_Reports() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Immutables
+        {
+            public static int Head(ImmutableArray<int> xs) => ImmutableArrayExtensions.{|FP0302:First|}(xs);
+
+            public static int Only(ImmutableArray<int> xs) => System.Linq.ImmutableArrayExtensions.{|FP0302:Single|}(xs, x => x > 0);
+
+            public static int Start(ImmutableArray<int>.Builder builder) => builder.{|FP0302:First|}();
+
+            public static int End(ImmutableArray<int>.Builder builder) => builder.{|FP0302:Last|}();
+
+            public static int? Maybe(ImmutableArray<int>? xs) => xs?.{|FP0302:Last|}();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_ImmutableArrayOrDefaultAndOtherOperators_NoReport() => VerifyAsync("""
+        using System;
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Immutables
+        {
+            public static int Head(ImmutableArray<int> xs) => xs.FirstOrDefault();
+
+            public static int Tail(ImmutableArray<int> xs) => xs.LastOrDefault(x => x > 0);
+
+            public static int Only(ImmutableArray<int> xs) => xs.SingleOrDefault();
+
+            public static int Third(ImmutableArray<int> xs) => xs.ElementAtOrDefault(2);
+
+            public static int Start(ImmutableArray<int>.Builder builder) => builder.FirstOrDefault() + builder.LastOrDefault();
+
+            public static int Sum(ImmutableArray<int> xs) => xs.Any() ? xs.Aggregate((a, b) => a + b) : xs.Where(x => x > 0).Select(x => x).ToArray().Length;
+
+            public static int Indexed(ImmutableArray<int> xs) => xs.Length > 0 ? xs[0] : 0;
+
+            public static Func<ImmutableArray<int>, int> Group() => ImmutableArrayExtensions.First;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_ImmutableArrayLookalikesAndShell_NoReport() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        namespace Domain
+        {
+            public static class ImmutableArrayExtensions
+            {
+                public static int First(this ImmutableArray<int> xs, int fallback) => xs.IsEmpty ? fallback : xs[0];
+            }
+
+            [Fprog.FunctionalCore]
+            public static class Use
+            {
+                public static int Head(ImmutableArray<int> xs) => xs.First(0);
+            }
+
+            public static class Shell
+            {
+                public static int Head(ImmutableArray<int> xs) => xs.First() + xs.Last() + xs.Single() + xs.ElementAt(0);
+            }
         }
         """);
 

@@ -12,8 +12,10 @@ namespace ancplua_fprog.Rules;
 /// <summary>
 /// FP0302: a call to a partial member inside the functional core. Partial members are every static
 /// <c>Parse</c> method on a type in namespace <c>System</c>, <c>Enumerable.First/Last/Single/ElementAt</c>
-/// (not the <c>OrDefault</c> forms) and reads of the indexer declared on <c>Dictionary&lt;,&gt;</c>,
-/// <c>IDictionary&lt;,&gt;</c> or <c>IReadOnlyDictionary&lt;,&gt;</c>. Calls are reported at the method
+/// (not the <c>OrDefault</c> forms; the same operators of <c>System.Linq.ImmutableArrayExtensions</c>,
+/// which <c>xs.First()</c> on an <c>ImmutableArray&lt;T&gt;</c> binds to, count as well) and reads of the
+/// indexer declared on <c>Dictionary&lt;,&gt;</c>, <c>IDictionary&lt;,&gt;</c> or
+/// <c>IReadOnlyDictionary&lt;,&gt;</c>. Calls are reported at the method
 /// name token, indexer reads at the whole element access (for <c>d?[key]</c> including the receiver).
 /// Method groups are references, not calls, and are not reported.
 /// </summary>
@@ -79,18 +81,21 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
     private static bool IsPartialMethod(IMethodSymbol method) => method.Name switch
     {
         "Parse" => method.IsStatic && IsSystemNamespace(method.ContainingType?.ContainingNamespace),
-        "First" or "Last" or "Single" or "ElementAt" => IsEnumerable(method.ContainingType),
+        "First" or "Last" or "Single" or "ElementAt" => IsLinqOperatorClass(method.ContainingType),
         _ => false
     };
 
-    /// <summary>True for <c>System.Linq.Enumerable</c> or a type nested in it (extension blocks).</summary>
-    private static bool IsEnumerable(INamedTypeSymbol? type)
+    /// <summary>
+    /// True for <c>System.Linq.Enumerable</c>, for <c>System.Linq.ImmutableArrayExtensions</c> (the LINQ
+    /// operators an <c>ImmutableArray&lt;T&gt;</c> receiver binds to) or for a type nested in either (extension blocks).
+    /// </summary>
+    private static bool IsLinqOperatorClass(INamedTypeSymbol? type)
     {
         var outermost = type;
         while (outermost?.ContainingType is { } containing)
             outermost = containing;
 
-        return outermost is { Name: "Enumerable", ContainingNamespace: { Name: "Linq" } linq }
+        return outermost is { Name: "Enumerable" or "ImmutableArrayExtensions", ContainingNamespace: { Name: "Linq" } linq }
                && IsSystemNamespace(linq.ContainingNamespace);
     }
 
