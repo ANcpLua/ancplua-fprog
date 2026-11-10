@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -7,11 +8,12 @@ namespace ancplua_fprog.Rules;
 
 /// <summary>
 /// FP0203: a record or readonly struct in the functional core has a field or property whose type is an
-/// array, <c>System.Text.StringBuilder</c>, or a type from <c>System.Collections</c> or one of its
-/// namespaces other than <c>Immutable</c> and <c>Frozen</c> (interfaces included). The type is searched
-/// through type arguments, so <c>ImmutableArray&lt;List&lt;int&gt;&gt;</c> and <c>KeyValuePair&lt;K, V&gt;?</c>
-/// count. Reported at the member name: the declarator name for fields, the parameter name for positional
-/// record properties, and the <c>this</c> keyword for indexers.
+/// array (including <c>System.Array</c>), <c>System.Text.StringBuilder</c>, or a type from
+/// <c>System.Collections</c> or one of its namespaces other than <c>Immutable</c> and <c>Frozen</c>
+/// (interfaces included). The type is searched through type arguments, pointed-at types and function
+/// pointer signatures, so <c>ImmutableArray&lt;List&lt;int&gt;&gt;</c>, <c>KeyValuePair&lt;K, V&gt;?</c> and
+/// <c>delegate*&lt;List&lt;int&gt;, int&gt;</c> count. Reported at the member name: the declarator name for
+/// fields, the parameter name for positional record properties, and the <c>this</c> keyword for indexers.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
@@ -65,6 +67,11 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
         {
             case IArrayTypeSymbol:
                 return true;
+            case IPointerTypeSymbol pointer:
+                return ContainsForbiddenType(pointer.PointedAtType);
+            case IFunctionPointerTypeSymbol functionPointer:
+                return ContainsForbiddenType(functionPointer.Signature.ReturnType)
+                       || functionPointer.Signature.Parameters.Any(parameter => ContainsForbiddenType(parameter.Type));
             case INamedTypeSymbol named:
                 if (IsForbiddenNamedType(named))
                     return true;
@@ -86,6 +93,9 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
 
     private static bool IsForbiddenNamedType(INamedTypeSymbol type)
     {
+        if (type.SpecialType == SpecialType.System_Array)
+            return true;
+
         var ns = type.ContainingNamespace;
         if (type.Name == "StringBuilder" && IsSystemChild(ns, "Text"))
             return true;
