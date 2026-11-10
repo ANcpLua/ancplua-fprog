@@ -7,8 +7,9 @@ namespace ancplua_fprog.Rules;
 
 /// <summary>
 /// FP0402: a union has an instance constructor declared in source that is not <c>private</c>
-/// (reported at the constructor name; a primary constructor at the union's name), or has no declared
-/// instance constructor, so the implicit one is not private (reported once at the union's name).
+/// (reported at the constructor name, at both declarations of a partial constructor; a primary
+/// constructor at the union's name), or has no declared instance constructor, so the implicit one
+/// is not private (reported once at the union's name).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
@@ -42,11 +43,23 @@ public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
                 continue;
 
             hasDeclaredConstructor = true;
-            if (constructor.DeclaredAccessibility != Accessibility.Private && !constructor.Locations.IsEmpty)
-                context.ReportDiagnostic(Diagnostic.Create(Rule, constructor.Locations[0]));
+            if (constructor.DeclaredAccessibility == Accessibility.Private)
+                continue;
+
+            // A partial constructor has two declarations, each with its own name; the symbol of the
+            // defining part carries only its own location.
+            ReportAtName(context, constructor);
+            if (constructor.PartialImplementationPart is { } implementation)
+                ReportAtName(context, implementation);
         }
 
-        if (!hasDeclaredConstructor && !type.Locations.IsEmpty)
-            context.ReportDiagnostic(Diagnostic.Create(Rule, type.Locations[0]));
+        if (!hasDeclaredConstructor)
+            ReportAtName(context, type);
+    }
+
+    private static void ReportAtName(SymbolAnalysisContext context, ISymbol symbol)
+    {
+        if (!symbol.Locations.IsEmpty)
+            context.ReportDiagnostic(Diagnostic.Create(Rule, symbol.Locations[0]));
     }
 }

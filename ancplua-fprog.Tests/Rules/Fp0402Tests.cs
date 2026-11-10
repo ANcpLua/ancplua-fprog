@@ -257,6 +257,319 @@ public sealed class Fp0402Tests(TestContext testContext)
         public class Plain { }
         """);
 
+    [TestMethod]
+    public Task FP0402_PartialConstructorReportedAtBothDeclarations_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial class Shape
+        {
+            public partial {|FP0402:Shape|}(int sides);
+
+            public sealed class Circle() : Shape(0);
+        }
+
+        public abstract partial class Shape
+        {
+            public partial {|FP0402:Shape|}(int sides) { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_ConstructorInPartialDeclarationWithoutAttribute_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial class Shape
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        public abstract partial class Shape
+        {
+            protected {|FP0402:Shape|}() { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_AttributeOnSecondPartialDeclarationReportsAtFirstName_Reports() => VerifyAsync("""
+        public abstract partial class {|FP0402:Shape|}
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        [Fprog.Union]
+        public abstract partial class Shape;
+        """);
+
+    [TestMethod]
+    public Task FP0402_PrimaryConstructorOnSecondPartialDeclaration_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial record Shape
+        {
+            public sealed record Circle(double Radius) : Shape(Radius);
+        }
+
+        public abstract partial record {|FP0402:Shape|}(double Size);
+        """);
+
+    [TestMethod]
+    public Task FP0402_AliasAndGlobalQualifiedUnionAttribute_Reports() => VerifyAsync("""
+        using U = Fprog.UnionAttribute;
+
+        [U]
+        public abstract class {|FP0402:Shape|}
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        [global::Fprog.UnionAttribute]
+        public abstract class Token
+        {
+            internal {|FP0402:Token|}() { }
+
+            public sealed class Number : Token { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_VerbatimIdentifierNamesIncludeAt_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class @Shape
+        {
+            public {|FP0402:@Shape|}() { }
+
+            public sealed class Circle : Shape { }
+        }
+
+        [Fprog.Union]
+        public abstract record {|FP0402:@Token|};
+        """);
+
+    [TestMethod]
+    public Task FP0402_ConstructorWithAttributesCommentsAndLineBreaksSpanIsNameOnly_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            [System.Obsolete("old")]
+            public /* not private */
+                {|FP0402:Shape|}
+                ( int sides ) { }
+
+            private Shape() { }
+
+            public sealed class Circle : Shape { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_ExpressionBodiedExternAndUnsafeConstructors_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            protected {|FP0402:Shape|}(int sides) => Sides = sides;
+
+            public extern {|FP0402:Shape|}(string name);
+
+            internal unsafe {|FP0402:Shape|}(int* sides) => Sides = *sides;
+
+            public int Sides { get; }
+
+            public sealed class Circle() : Shape(0);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_EmptyAndGenericPrimaryConstructorsReportedAtName_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record {|FP0402:Shape|}()
+        {
+            public sealed record Circle : Shape;
+        }
+
+        [Fprog.Union]
+        public abstract record {|FP0402:Result|}<T>(T Value)
+        {
+            public sealed record Ok(T Value) : Result<T>(Value);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_PrimaryConstructorAndPublicSecondaryConstructor_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class {|FP0402:Shape|}(int sides)
+        {
+            public {|FP0402:Shape|}() : this(0) { }
+
+            public int Sides => sides;
+
+            public sealed class Circle() : Shape(1);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_UnionNestedInGenericTypeAndInsideUnion_Reports() => VerifyAsync("""
+        public static class Outer<T>
+        {
+            [Fprog.Union]
+            public abstract record Option
+            {
+                private protected {|FP0402:Option|}() { }
+
+                public sealed record Some(T Value) : Option;
+            }
+        }
+
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            [Fprog.Union]
+            public abstract record {|FP0402:Polygon|} : Shape
+            {
+                public sealed record Square(double Side) : Polygon;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_RecordClassAndFileLocalUnions_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record class {|FP0402:Shape|}
+        {
+            public sealed record class Circle : Shape;
+        }
+
+        [Fprog.Union]
+        file abstract class Token
+        {
+            public {|FP0402:Token|}() { }
+
+            public sealed class Number : Token { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_PrivateConstructorInPartialDeclarationWithoutAttribute_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial class Shape
+        {
+            public sealed class Circle : Shape { }
+        }
+
+        public abstract partial class Shape
+        {
+            private Shape() { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_PrivatePartialAndExpressionBodiedConstructors_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial class Shape
+        {
+            private partial Shape(int sides);
+
+            private Shape(string name) => Name = name;
+
+            public string Name { get; } = "";
+
+            public sealed class Circle() : Shape(1);
+        }
+
+        public abstract partial class Shape
+        {
+            private partial Shape(int sides) => Name = sides.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_UnionDerivedFromNonUnionWithPublicConstructor_NoReport() => VerifyAsync("""
+        public abstract class Entity
+        {
+            public Entity() { }
+
+            protected Entity(int id) => Id = id;
+
+            public int Id { get; }
+        }
+
+        [Fprog.Union]
+        public abstract class Shape : Entity
+        {
+            private Shape() : base(1) { }
+
+            public sealed class Circle : Shape { }
+        }
+
+        public abstract class Animal(string name)
+        {
+            public string Name => name;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_FunctionalCoreWithCasesAndAbstractRecordHierarchy_NoReport() => VerifyAsync("""
+        using System.Collections.Immutable;
+        using System.Linq;
+
+        [Fprog.FunctionalCore]
+        public static class Geometry
+        {
+            [Fprog.Union]
+            public abstract record Shape
+            {
+                private Shape() { }
+
+                public sealed record Circle(double Radius) : Shape;
+
+                public sealed record Square(double Side) : Shape
+                {
+                    public Square() : this(1) { }
+                }
+            }
+
+            public abstract record Measurement(double Value);
+
+            public sealed record Area(double Value) : Measurement(Value);
+
+            public static double Total(ImmutableArray<Shape> shapes)
+                => shapes.Sum(static shape => shape switch
+                {
+                    Shape.Circle { Radius: var r } => r * r * 3.14,
+                    Shape.Square s => s.Side * s.Side,
+                    _ => 0
+                });
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_UnionAttributeFromOtherNamespace_NoReport() => VerifyAsync("""
+        namespace Other.Fprog
+        {
+            [System.AttributeUsage(System.AttributeTargets.Class)]
+            public sealed class UnionAttribute : System.Attribute { }
+
+            [Union]
+            public abstract class Shape
+            {
+                public Shape() { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0402_GeneratedCodeFile_NoReport() => VerifyAsync("""
+        // <auto-generated/>
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public Shape() { }
+
+            public sealed class Circle : Shape { }
+        }
+
+        [Fprog.Union]
+        public abstract record Token;
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0402", source, testContext.CancellationToken);
 }
