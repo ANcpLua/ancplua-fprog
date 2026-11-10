@@ -1,11 +1,9 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
-using Microsoft.CodeAnalysis.Text;
 
 namespace ancplua_fprog.Rules;
 
@@ -29,24 +27,19 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        // Roslyn 5.9.0 runs a syntax node action inside the body of a C# 15 union declaration once per
-        // enclosing declaration (its member, the union, the union's container), so each location is
-        // reported only once per compilation.
-        context.RegisterCompilationStartAction(static start =>
-        {
-            var reported = new ConcurrentDictionary<(SyntaxTree Tree, TextSpan Span), byte>();
-            start.RegisterSyntaxNodeAction(
-                node => Analyze(node, reported),
-                SyntaxKind.ThrowStatement,
-                SyntaxKind.ThrowExpression);
-        });
+        context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ThrowStatement, SyntaxKind.ThrowExpression);
     }
 
-    private static void Analyze(
-        SyntaxNodeAnalysisContext context,
-        ConcurrentDictionary<(SyntaxTree Tree, TextSpan Span), byte> reported)
+    private static void Analyze(SyntaxNodeAnalysisContext context)
     {
-        if (!CoreScope.IsInCore(context.ContainingSymbol))
+        // Roslyn 5.9.0 runs a syntax node action inside the body of a C# 15 union declaration once with
+        // the enclosing member, then again with the union type and with each declaration around it (a
+        // type or a namespace). A throw is always executable code, so its genuine pass carries a member:
+        // a method, accessor, constructor (also the primary constructor for a base argument), operator,
+        // the field, property or event of an initializer, or the entry point of top-level statements.
+        // A type or namespace as containing symbol is therefore one of the repeated passes.
+        if (context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol
+            || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var keyword = context.Node switch
@@ -56,7 +49,7 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
             _ => default
         };
 
-        if (keyword.IsKind(SyntaxKind.ThrowKeyword) && reported.TryAdd((context.Node.SyntaxTree, keyword.Span), 0))
+        if (keyword.IsKind(SyntaxKind.ThrowKeyword))
             context.ReportDiagnostic(Diagnostic.Create(Rule, keyword.GetLocation()));
     }
 }

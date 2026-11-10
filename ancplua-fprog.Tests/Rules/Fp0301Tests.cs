@@ -303,6 +303,272 @@ public sealed class Fp0301Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0301_ThrowStatementInConstructorAccessorAndOperatorInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Money
+        {
+            public Money(int cents)
+            {
+                if (cents < 0)
+                    {|FP0301:throw|} new System.ArgumentOutOfRangeException(nameof(cents));
+
+                Cents = cents;
+            }
+
+            public int Cents { get; }
+
+            public static int Rate
+            {
+                get { {|FP0301:throw|} new System.NotSupportedException(); }
+            }
+
+            public static Money operator +(Money left, Money right)
+            {
+                {|FP0301:throw|} new System.NotSupportedException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInPropertyInitializerAndLambdaInFieldInitializerInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Defaults
+        {
+            private static int? Seed() => null;
+
+            public static int Start { get; } = Seed() ?? {|FP0301:throw|} new System.InvalidOperationException();
+
+            public static readonly System.Func<int> Fail = () => {|FP0301:throw|} new System.InvalidOperationException();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInClassPrimaryConstructorBaseArgumentInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Shapes
+        {
+            public class B(int x)
+            {
+                public int X => x;
+            }
+
+            public sealed class D(int x) : B(x > 0 ? x : {|FP0301:throw|} new System.InvalidOperationException());
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInThisAndBaseConstructorInitializerInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Shapes
+        {
+            public class B(int x)
+            {
+                public int X => x;
+            }
+
+            public sealed class E : B
+            {
+                public E(int x) : base(x > 0 ? x : {|FP0301:throw|} new System.ArgumentOutOfRangeException(nameof(x))) { }
+
+                public E(string text) : this(text.Length > 0 ? text.Length : {|FP0301:throw|} new System.ArgumentException(nameof(text))) { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInTopLevelStatementsUnderAssemblyLevelCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        {|CS8805:int? seed = null;|}
+        if (seed is null)
+            {|FP0301:throw|} new System.InvalidOperationException();
+        System.Func<int> fail = () => {|FP0301:throw|} new System.InvalidOperationException();
+        static int Local() => {|FP0301:throw|} new System.InvalidOperationException();
+
+        public record Cat;
+        public record Dog;
+
+        public union Pet(Cat, Dog)
+        {
+            public static Pet Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowStatementInMethodConstructorAccessorAndOperatorInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                private Pet(int lives) : this(new Cat())
+                {
+                    if (lives < 0)
+                        {|FP0301:throw|} new System.ArgumentOutOfRangeException(nameof(lives));
+                }
+
+                public static Pet Pick(int index)
+                {
+                    if (index < 0)
+                        {|FP0301:throw|} new System.ArgumentOutOfRangeException(nameof(index));
+
+                    return new Pet(new Cat());
+                }
+
+                public static int Count
+                {
+                    get { {|FP0301:throw|} new System.NotSupportedException(); }
+                }
+
+                public static Pet operator +(Pet left, Pet right)
+                {
+                    {|FP0301:throw|} new System.NotSupportedException();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInLocalFunctionAndLambdaInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public static System.Func<Pet> Lambda() => () => {|FP0301:throw|} new System.InvalidOperationException();
+
+                public static Pet Local()
+                {
+                    return Fail();
+
+                    static Pet Fail()
+                    {
+                        {|FP0301:throw|} new System.InvalidOperationException();
+                    }
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInInitializersInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                private static int? Seed() => null;
+
+                public static readonly int Lives = Seed() ?? {|FP0301:throw|} new System.InvalidOperationException();
+
+                public static int Legs { get; } = Seed() ?? {|FP0301:throw|} new System.InvalidOperationException();
+
+                public static readonly System.Func<int> Fail = () => {|FP0301:throw|} new System.InvalidOperationException();
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInPrimaryConstructorBaseArgumentInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public class B(int x)
+                {
+                    public int X => x;
+                }
+
+                public sealed class D(int x) : B(x > 0 ? x : {|FP0301:throw|} new System.InvalidOperationException());
+
+                public abstract record Named(string Name);
+
+                public sealed record Tag(string? Label) : Named(Label ?? {|FP0301:throw|} new System.ArgumentNullException(nameof(Label)));
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInThisConstructorInitializerInUnionBody_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Pets
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                private Pet(string name) : this(name.Length > 0 ? new Cat() : {|FP0301:throw|} new System.ArgumentException(nameof(name))) { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInUnionNestedInUnionBodyInCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        namespace Zoo
+        {
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                public union Inner(Cat, Dog)
+                {
+                    public static Inner Fail() => {|FP0301:throw|} new System.InvalidOperationException();
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0301_ThrowInInitializersAndBaseArgumentsInUnionBodyOutsideCore_NoReport() => VerifyAsync("""
+        namespace Zoo
+        {
+            [Fprog.FunctionalCore]
+            public static class Rules
+            {
+                public static int Zero() => 0;
+            }
+
+            public record Cat;
+            public record Dog;
+
+            public union Pet(Cat, Dog)
+            {
+                private static int? Seed() => null;
+
+                public static readonly int Lives = Seed() ?? throw new System.InvalidOperationException();
+
+                public static int Legs { get; } = Seed() ?? throw new System.InvalidOperationException();
+
+                private Pet(string name) : this(name.Length > 0 ? new Cat() : throw new System.ArgumentException(nameof(name))) { }
+
+                public class B(int x)
+                {
+                    public int X => x;
+                }
+
+                public sealed class D(int x) : B(x > 0 ? x : throw new System.InvalidOperationException());
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0301", source, testContext.CancellationToken);
 }
