@@ -133,7 +133,7 @@ public sealed class Fp0403Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0403_PartialCaseReportedAtEveryDeclaration_Reports() => VerifyAsync("""
+    public Task FP0403_PartialCaseReportedAtFirstDeclaration_Reports() => VerifyAsync("""
         [Fprog.Union]
         public abstract partial class Shape
         {
@@ -142,7 +142,7 @@ public sealed class Fp0403Tests(TestContext testContext)
 
         public abstract partial class Shape
         {
-            public partial class {|FP0403:Circle|}
+            public partial class Circle
             {
                 public int Radius { get; init; }
             }
@@ -428,9 +428,84 @@ public sealed class Fp0403Tests(TestContext testContext)
 
         public sealed partial class {|FP0403:Circle|} : Shape { }
 
-        public partial class {|FP0403:Circle|}
+        public partial class Circle
         {
             public double Radius { get; init; }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_PartialCaseBaseListInLaterDeclaration_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial class Shape
+        {
+            public partial class {|FP0403:Circle|}
+            {
+                public double Radius { get; init; }
+            }
+        }
+
+        public abstract partial class Shape
+        {
+            public partial class Circle : Shape { }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_PartialCaseWithThreeDeclarations_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial record Result
+        {
+            public partial record {|FP0403:Ok|}(int Value) : Result;
+
+            public partial record Ok
+            {
+                public bool IsZero => Value == 0;
+            }
+
+            public sealed record Error(string Message) : Result;
+        }
+
+        public abstract partial record Result
+        {
+            public partial record Ok
+            {
+                public bool IsPositive => Value > 0;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_PartialCaseNestedDeeperInsideUnion_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public static partial class Round
+            {
+                public sealed partial class {|FP0403:Circle|} : Shape { }
+            }
+
+            public static partial class Round
+            {
+                public partial class Circle { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_PartialCaseSealedInLaterDeclaration_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract partial record Result
+        {
+            public partial record Ok(int Value) : Result;
+        }
+
+        public abstract partial record Result
+        {
+            public sealed partial record Ok
+            {
+                public bool IsZero => Value == 0;
+            }
         }
         """);
 

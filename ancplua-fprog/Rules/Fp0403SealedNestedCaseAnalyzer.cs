@@ -8,7 +8,7 @@ namespace ancplua_fprog.Rules;
 /// <summary>
 /// FP0403: a case of a union (a type whose direct base type is a union) is not sealed, or its
 /// containing type is not that union. Applies to every union, inside and outside core. Reported once
-/// per case at the case's name, in every declaration of a partial case.
+/// per case at the case's name, for a partial case at its first declaration in source order.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0403SealedNestedCaseAnalyzer : DiagnosticAnalyzer
@@ -39,10 +39,9 @@ public sealed class Fp0403SealedNestedCaseAnalyzer : DiagnosticAnalyzer
         if (type.IsSealed && nested)
             return;
 
-        foreach (var location in type.Locations)
-        {
-            if (location.IsInSource)
-                context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name, union.Name));
-        }
+        // The locations of a source type are the identifiers of its declarations in source order, one
+        // per partial part. "Not sealed" and "not nested" are facts of the merged type: report it once.
+        if (type.Locations is { Length: > 0 } locations && locations[0].IsInSource)
+            context.ReportDiagnostic(Diagnostic.Create(Rule, locations[0], type.Name, union.Name));
     }
 }
