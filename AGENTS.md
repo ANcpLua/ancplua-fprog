@@ -14,7 +14,7 @@ hidden clean corpus. A rule that is half done scores nothing, so finish rules on
 
 ## Environment
 
-- .NET 11 RC3 SDK, pinned in `global.json`. C# language version `preview`.
+- .NET 11 SDK `11.0.100`, pinned in `global.json`. C# language version `preview`.
 - Newer compiler APIs may be missing from your training data. Before you rely on an API you
   are unsure about, read its real signature:
   `dotnet tool run ref assembly ~/.nuget/packages/microsoft.codeanalysis.csharp/<version>/lib/netstandard2.0/Microsoft.CodeAnalysis.CSharp.dll --type 'Microsoft.CodeAnalysis.CSharp.Syntax.SwitchExpressionSyntax'`
