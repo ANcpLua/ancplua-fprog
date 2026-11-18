@@ -1,5 +1,7 @@
 # ancplua-fprog: playbook
 
+@claude repo needs heav< cleanup and production setup
+
 You are building Roslyn analyzers that verify functional-programming rules in C#.
 This file is binding. `docs/SPEC.source.md` explains the ideas behind the rules; it was
 written by another model and its claims are **not verified**. `docs/ROSLYN.source.md` maps the
