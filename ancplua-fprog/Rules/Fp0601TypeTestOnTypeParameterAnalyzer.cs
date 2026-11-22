@@ -28,7 +28,7 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0601",
         "Do not inspect the runtime type of an unconstrained type parameter",
-        "Treat the type parameter as opaque; add a constraint or pass a function instead of testing its type");
+        "Add an interface constraint (`where T : ICapability`) and call its member, or take a `Func<T, TResult>` parameter or a union of the expected cases, instead of testing the runtime type of an unconstrained type parameter");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
