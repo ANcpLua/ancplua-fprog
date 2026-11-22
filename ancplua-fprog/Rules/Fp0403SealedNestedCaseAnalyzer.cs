@@ -16,7 +16,7 @@ public sealed class Fp0403SealedNestedCaseAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0403",
         "A union case must be sealed and nested inside its union",
-        "Make case '{0}' sealed and declare it inside union '{1}'");
+        "Declare case '{0}' as 'sealed {1} {0} : {2}' directly in the body of union '{3}': {4}");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -41,7 +41,28 @@ public sealed class Fp0403SealedNestedCaseAnalyzer : DiagnosticAnalyzer
 
         // The locations of a source type are the identifiers of its declarations in source order, one
         // per partial part. "Not sealed" and "not nested" are facts of the merged type: report it once.
-        if (type.Locations is { Length: > 0 } locations && locations[0].IsInSource)
-            context.ReportDiagnostic(Diagnostic.Create(Rule, locations[0], type.Name, union.Name));
+        if (type.Locations is not { Length: > 0 } locations || !locations[0].IsInSource)
+            return;
+
+        var keyword = type.IsRecord ? "record" : "class";
+        var baseName = type.BaseType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat) ?? union.Name;
+        context.ReportDiagnostic(Diagnostic.Create(
+            Rule, locations[0], type.Name, keyword, baseName, union.Name, Hint(type, union, nested)));
+    }
+
+    // What to change, concretely: the missing 'sealed' (for an abstract case, where its subtypes go)
+    // and where to move a case that is not a direct member of its union.
+    private static string Hint(INamedTypeSymbol type, INamedTypeSymbol union, bool nested)
+    {
+        var move = type.ContainingType is { } container
+            ? $"move it out of '{container.Name}' into the body of '{union.Name}'"
+            : $"move it into the body of '{union.Name}' (a 'partial' declaration of '{union.Name}' can hold it in another file)";
+        if (type.IsSealed)
+            return move;
+
+        var seal = type.IsAbstract
+            ? $"replace 'abstract' with 'sealed' and declare each subtype of '{type.Name}' as its own sealed case of '{union.Name}'"
+            : "add the 'sealed' modifier";
+        return nested ? seal : seal + ", and " + move;
     }
 }

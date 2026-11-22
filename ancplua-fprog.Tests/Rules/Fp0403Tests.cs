@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -663,6 +665,89 @@ public sealed class Fp0403Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0403_MessageSaysToAddSealed_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract record Result<T>
+        {
+            public record {|#0:Ok|}(T Value) : Result<T>;
+        }
+        """,
+        "Ok", "record", "Result<T>", "Result", "add the 'sealed' modifier");
+
+    [TestMethod]
+    public Task FP0403_MessageSaysWhereToMoveTopLevelCase_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract class Shape { }
+
+        public class {|#0:Circle|} : Shape { }
+        """,
+        "Circle", "class", "Shape", "Shape",
+        "add the 'sealed' modifier, and move it into the body of 'Shape' (a 'partial' declaration of 'Shape' can hold it in another file)");
+
+    [TestMethod]
+    public Task FP0403_MessageNamesWrongContainer_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public static class Round
+            {
+                public sealed class {|#0:Circle|} : Shape { }
+            }
+        }
+        """,
+        "Circle", "class", "Shape", "Shape", "move it out of 'Round' into the body of 'Shape'");
+
+    [TestMethod]
+    public Task FP0403_MessageForAbstractCaseNamesItsSubtypes_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public abstract class {|#0:Polygon|} : Shape { }
+        }
+        """,
+        "Polygon", "class", "Shape", "Shape",
+        "replace 'abstract' with 'sealed' and declare each subtype of 'Polygon' as its own sealed case of 'Shape'");
+
+    [TestMethod]
+    public Task FP0403_CaseTwoLevelsDeepInsideCase_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            public sealed record Square(double Side) : Shape
+            {
+                public static class Parts
+                {
+                    public sealed record {|FP0403:Corner|}(int Index) : Shape;
+                }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0403_TypesDerivingFromSealedCaseOrNestedNonUnion_NoReport() => VerifyAsync("""
+        public abstract class Base { }
+
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            private Shape() { }
+
+            public sealed class Circle : Shape { }
+
+            public class Helper : Base { }
+
+            public sealed class Other : Base { }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0403", source, testContext.CancellationToken);
+
+    private Task VerifyMessageAsync(string source, params object[] arguments)
+        => FpAnalyzerTestHost.VerifyRuleAsync(
+            "FP0403",
+            source,
+            testContext.CancellationToken,
+            new DiagnosticResult("FP0403", DiagnosticSeverity.Warning).WithLocation(0).WithArguments(arguments));
 }
