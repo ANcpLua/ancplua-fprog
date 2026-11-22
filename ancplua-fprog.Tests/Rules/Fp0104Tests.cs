@@ -1074,6 +1074,79 @@ public sealed class Fp0104Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0104_ExtensionBlockRefStructReceiver_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class PointExtensions
+        {
+            extension(Point point)
+            {
+                public Point Moved()
+                {
+                    point.X = 1;
+                    return point;
+                }
+            }
+
+            extension(ref Point target)
+            {
+                public int Move() => {|FP0104:target.Y|} = 2;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_TopLevelLocalFunctionParameter_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        {|CS8805:System.Console.WriteLine(Set(new Box()));|}
+
+        static int Set(Box box) => {|FP0104:box.Count|} = 1;
+        """);
+
+    [TestMethod]
+    public Task FP0104_ObjectInitializerAndWithOnParameterData_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Ops
+        {
+            public sealed record Tag(string Name, Box Box);
+
+            public static Tag Retag(Tag tag, Box box)
+                => tag with { Name = box.Name ?? "", Box = new Box { Count = box.Count, Inner = new() { X = box.X } } };
+
+            public static System.Func<Box, Box> Copy() => b => new Box { Count = b.Count + 1, Items = [.. b.Items] };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_WriteThroughLocalAliasOfParameter_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Ops
+        {
+            // Documented reading: the row says "reached from that parameter"; a local alias is a local,
+            // and following it needs data flow. Not reported.
+            public static int Alias(Box box)
+            {
+                var alias = box;
+                alias.Count = 1;
+                return alias.Count;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0104_IncompleteMemberAccess_NoReport() => FpAnalyzerTestHost.VerifyRuleAsync("FP0104", """
+        [Fprog.FunctionalCore]
+        public static class Ops
+        {
+            public static int Broken(Box box)
+            {
+                box. {|CS1001:=|} 1;
+                return 0;
+            }
+        }
+        """ + Types, testContext.CancellationToken);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);
 }
