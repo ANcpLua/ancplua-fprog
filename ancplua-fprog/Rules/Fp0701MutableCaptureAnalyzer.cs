@@ -123,6 +123,18 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
                 case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument:
                     AddWrittenTarget(argument.Value, written);
                     break;
+                case IDynamicInvocationOperation dynamicInvocation:
+                    for (var i = 0; i < dynamicInvocation.Arguments.Length; i++)
+                        AddWrittenDynamicArgument(dynamicInvocation.GetArgumentRefKind(i), dynamicInvocation.Arguments[i], written);
+                    break;
+                case IDynamicObjectCreationOperation dynamicCreation:
+                    for (var i = 0; i < dynamicCreation.Arguments.Length; i++)
+                        AddWrittenDynamicArgument(dynamicCreation.GetArgumentRefKind(i), dynamicCreation.Arguments[i], written);
+                    break;
+                case IDynamicIndexerAccessOperation dynamicIndexer:
+                    for (var i = 0; i < dynamicIndexer.Arguments.Length; i++)
+                        AddWrittenDynamicArgument(dynamicIndexer.GetArgumentRefKind(i), dynamicIndexer.Arguments[i], written);
+                    break;
                 case IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref } refLocal:
                     AddWrittenTarget(refLocal.GetVariableInitializer()?.Value, written);
                     break;
@@ -134,6 +146,13 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
             foreach (var child in operation.ChildOperations)
                 pending.Push(child);
         }
+    }
+
+    /// <summary>A <c>ref</c> or <c>out</c> argument of a dynamically bound call writes its variable.</summary>
+    private static void AddWrittenDynamicArgument(RefKind? refKind, IOperation argument, HashSet<ISymbol> written)
+    {
+        if (refKind is RefKind.Ref or RefKind.Out)
+            AddWrittenTarget(argument, written);
     }
 
     /// <summary>True when the target of a <c>ref</c> reassignment allows writes through it (not <c>ref readonly</c>).</summary>

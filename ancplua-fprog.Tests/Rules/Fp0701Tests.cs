@@ -1158,6 +1158,34 @@ public sealed class Fp0701Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0701_RefAndOutArgumentsOfDynamicCalls_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Dynamic
+        {
+            public static int Run(dynamic target, dynamic value)
+            {
+                var a = 0;
+                var b = 0;
+                var c = 0;
+                System.Func<int> read = () => {|FP0701:a|} + {|FP0701:b|} + {|FP0701:c|};
+                target.Fill(ref a);
+                Fill(ref b, value);
+                _ = new Holder(ref c, value);
+                return read();
+            }
+
+            private static int Fill(ref int x, int v) => x + v;
+
+            private sealed class Holder
+            {
+                public Holder(ref int x, int v) => Value = x + v;
+
+                public int Value { get; }
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0701", source, testContext.CancellationToken);
 }
