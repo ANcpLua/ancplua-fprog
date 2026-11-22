@@ -92,26 +92,47 @@ jobs:
           if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
 
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: nupkg
           path: artifacts/package/*.nupkg
           if-no-files-found: error
 
+  # Packs and checks the tagged commit itself, so it does not depend on artifact storage.
   publish:
     needs: pack
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: nuget
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: nupkg
-          path: artifacts/package
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
+      - name: Pack
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version_args=("-p:Version=${GITHUB_REF_NAME#v}")
+          else
+            version_args=("-p:VersionSuffix=ci.${GITHUB_RUN_NUMBER}")
+          fi
+          dotnet pack ancplua-fprog/ancplua-fprog.csproj -c Release -warnaserror -o artifacts/package "${version_args[@]}"
+
+      - name: Check the package layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing=$(unzip -Z1 artifacts/package/*.nupkg)
+          echo "$listing"
+          for entry in analyzers/dotnet/cs/ancplua-fprog.dll contentFiles/cs/any/Fprog/FprogAttributes.cs README.md LICENSE; do
+            grep -qx "$entry" <<< "$listing" || { echo "missing: $entry"; exit 1; }
+          done
+          if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
 
       - name: Push to nuget.org
         env:
