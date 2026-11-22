@@ -13,8 +13,10 @@ namespace ancplua_fprog.Rules;
 /// of <c>System.Console</c>, <c>System.Diagnostics.Process</c>, or one of the threading types
 /// <c>Thread</c>, <c>Monitor</c>, <c>Lock</c>, <c>Mutex</c>, <c>Semaphore</c>, <c>SemaphoreSlim</c>,
 /// <c>Interlocked</c> and <c>Timer</c> in <c>System.Threading</c> (their nested types, such as
-/// <c>Lock.Scope</c>, are not listed), and at the <c>lock</c> keyword. Only names that bind to a type are
-/// reported: a member reached without a type name token (<c>using static</c>, inherited statics) is not.
+/// <c>Lock.Scope</c>, are not listed), and at the <c>lock</c> keyword. A static member of such a type that is
+/// written without a type name token because a <c>using static</c> directive imports it (<c>WriteLine</c>,
+/// also as a method group, in <c>nameof</c> or in a dynamic call) is reported at the member name token. A static
+/// member inherited by the enclosing type is not: the base list already reports the type token.
 /// <c>using</c> directives and <c>var</c> are not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -23,7 +25,7 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0801",
         "Do not reach the imperative shell from the functional core",
-        "'{0}' belongs to the imperative shell (I/O, processes, threads or locks)");
+        "'{0}' belongs to the imperative shell: take its result as a parameter (or return a value that describes the effect) and call it from a type outside [Fprog.FunctionalCore]");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -57,12 +59,72 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is { } symbol
+        var info = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken);
+        if (info.Symbol is { } symbol
             && ReferencedType(symbol, name) is { } type
             && IsForbidden(type))
         {
             Report(context, name.Identifier.GetLocation(), type.Name);
+            return;
         }
+
+        if (ImportedStaticMember(context, name, info) is { } member)
+            Report(context, name.Identifier.GetLocation(), member.ContainingType.Name + "." + member.Name);
+    }
+
+    /// <summary>
+    /// The forbidden static member that an unqualified <paramref name="name"/> reaches through a <c>using static</c>
+    /// directive. For a method group (<c>nameof</c>, a dynamic call) every candidate must be such a member.
+    /// </summary>
+    private static ISymbol? ImportedStaticMember(
+        SyntaxNodeAnalysisContext context, SimpleNameSyntax name, SymbolInfo info)
+    {
+        if (name.Parent is MemberAccessExpressionSyntax { Name: var accessed } && accessed == name
+            || name.Parent is QualifiedNameSyntax { Right: var right } && right == name
+            || name.Parent is AliasQualifiedNameSyntax { Name: var aliased } && aliased == name
+            || name.Parent is MemberBindingExpressionSyntax)
+        {
+            return null;
+        }
+
+        if (info.Symbol is { } single)
+            return IsImportedStatic(context, single) ? single : null;
+
+        ISymbol? first = null;
+        foreach (var candidate in info.CandidateSymbols)
+        {
+            if (!IsImportedStatic(context, candidate))
+                return null;
+            first ??= candidate;
+        }
+
+        return first;
+    }
+
+    private static bool IsImportedStatic(SyntaxNodeAnalysisContext context, ISymbol member)
+    {
+        if (member is not (IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol)
+            || !member.IsStatic
+            || member.ContainingType is not { } owner
+            || !IsForbidden(owner))
+        {
+            return false;
+        }
+
+        // Reached through inheritance (or from inside the type itself): not an import.
+        var target = owner.OriginalDefinition;
+        for (var enclosing = context.ContainingSymbol as INamedTypeSymbol ?? context.ContainingSymbol?.ContainingType;
+             enclosing is not null;
+             enclosing = enclosing.ContainingType)
+        {
+            for (var type = enclosing; type is not null; type = type.BaseType)
+            {
+                if (SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, target))
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private static void Report(SyntaxNodeAnalysisContext context, Location location, string subject)

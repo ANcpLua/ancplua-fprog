@@ -256,7 +256,7 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticMethodAndEnumConstant_NoReport() => VerifyAsync("""
+    public Task FP0801_UsingStaticMethodAndEnumConstant_Reports() => VerifyAsync("""
         using static System.Console;
         using static System.IO.FileMode;
 
@@ -265,8 +265,8 @@ public sealed class Fp0801Tests(TestContext testContext)
         {
             public static int Say(string text)
             {
-                WriteLine(text);
-                return (int)Open;
+                {|FP0801:WriteLine|}(text);
+                return (int){|FP0801:Open|};
             }
         }
         """);
@@ -827,19 +827,19 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_NoReport() => VerifyAsync("""
+    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_Reports() => VerifyAsync("""
         using static System.Console;
 
         [Fprog.FunctionalCore]
         public static class Imported
         {
-            public static System.Action<string> Group() => WriteLine;
+            public static System.Action<string> Group() => {|FP0801:WriteLine|};
 
-            public static string Name() => nameof(WriteLine);
+            public static string Name() => nameof({|FP0801:WriteLine|});
 
             public static int Dynamic(dynamic value)
             {
-                WriteLine(value);
+                {|FP0801:WriteLine|}(value);
                 return 0;
             }
         }
@@ -982,7 +982,7 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticMemberHasNoTypeNameToken_NoReport() => VerifyAsync("""
+    public Task FP0801_UsingStaticMemberReportsMemberToken_Reports() => VerifyAsync("""
         using static System.Console;
         using static System.Math;
 
@@ -991,7 +991,7 @@ public sealed class Fp0801Tests(TestContext testContext)
         {
             public static int Twice(int value)
             {
-                WriteLine(value);
+                {|FP0801:WriteLine|}(value);
                 return Abs(value) * 2;
             }
         }
@@ -1018,24 +1018,24 @@ public sealed class Fp0801Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0801_UsingStaticPropertyFieldEventAndNameof_NoReport() => VerifyAsync("""
+    public Task FP0801_UsingStaticPropertyFieldEventAndNameof_Reports() => VerifyAsync("""
         using static System.Console;
         using static System.IO.Path;
 
         [Fprog.FunctionalCore]
         public static class Report
         {
-            public static object Writer() => Out;
+            public static object Writer() => {|FP0801:Out|};
 
-            public static char Separator() => DirectorySeparatorChar;
+            public static char Separator() => {|FP0801:DirectorySeparatorChar|};
 
             public static System.ConsoleCancelEventHandler? Handler(System.ConsoleCancelEventHandler handler)
             {
-                CancelKeyPress += handler;
+                {|FP0801:CancelKeyPress|} += handler;
                 return null;
             }
 
-            public static string Name() => nameof(Out);
+            public static string Name() => nameof({|FP0801:Out|});
         }
         """);
 
@@ -1566,6 +1566,52 @@ public sealed class Fp0801Tests(TestContext testContext)
                 }
 
                 public union Source(System.IO.Stream, string);
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticOutsideCoreAndAllowedImports_NoReport() => VerifyAsync("""
+        using static System.Console;
+        using static System.Math;
+        using static System.Threading.Timeout;
+        using static System.Timers.ElapsedEventArgs;
+
+        public static class Shell
+        {
+            public static void Say(string text) => WriteLine(text);
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Core
+        {
+            public static int Calm(int value) => Max(Abs(value), Infinite);
+
+            public static System.Threading.CancellationToken None() => System.Threading.CancellationToken.None;
+
+            public static int Fence(ref int value) => System.Threading.Volatile.Read(ref value);
+
+            public static System.Timers.Timer? Clock() => default;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0801_UsingStaticInsideLambdaLocalFunctionAndTopLevelCoreType_Reports() => VerifyAsync("""
+        using static System.Console;
+        using static System.Threading.Interlocked;
+
+        [Fprog.FunctionalCore]
+        public sealed class Counter
+        {
+            private readonly int[] _cells = [0];
+
+            public System.Func<string> Reader() => () => {|FP0801:ReadLine|}() ?? "";
+
+            public int Bump()
+            {
+                return Local();
+
+                int Local() => {|FP0801:Increment|}(ref _cells[0]);
             }
         }
         """);
