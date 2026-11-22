@@ -15,10 +15,10 @@ using Microsoft.CodeAnalysis.Testing;
 namespace ancplua_fprog.Tests;
 
 /// <summary>
-/// The single entry point for analyzer tests, shared by visible and hidden tests.
+/// The single entry point for analyzer tests.
 /// Every test compiles against exactly the .NET 11 reference assemblies from
 /// Basic.Reference.Assemblies.Net110, downloads nothing at test time, parses C# preview
-/// syntax and sees the Fprog marker attributes. Protected file: do not edit.
+/// syntax and sees the Fprog marker attributes.
 /// </summary>
 internal static class FpAnalyzerTestHost
 {
@@ -47,7 +47,7 @@ internal static class FpAnalyzerTestHost
 
     /// <summary>
     /// Runs every analyzer in the analyzer assembly and compares only diagnostics with
-    /// <paramref name="ruleId"/>. Hidden tests use this method, so analyzer class names are free.
+    /// <paramref name="ruleId"/>, so tests do not depend on analyzer class names.
     /// Expected diagnostics usually come from markup such as <c>{|FP0301:throw|}</c>.
     /// </summary>
     public static Task VerifyRuleAsync(
