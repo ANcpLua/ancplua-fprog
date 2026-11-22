@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -1474,6 +1476,65 @@ public sealed class Fp0501Tests(TestContext testContext)
             };
         }
         """ + Shape);
+
+    // Message: the example fits the switch form it is reported in.
+
+    [TestMethod]
+    public Task FP0501_MessageForSwitchExpressionArm_Reports()
+        => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", """
+            public static class Area
+            {
+                public static int Of(Shape shape) => shape switch
+                {
+                    Shape.Circle => 1,
+                    {|#0:_|} => 0
+                };
+            }
+            """ + Shape, testContext.CancellationToken,
+            Expected("arm", "Shape.<Case> c => ..."));
+
+    [TestMethod]
+    public Task FP0501_MessageForSwitchStatementCasePattern_Reports()
+        => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", """
+            public static class Area
+            {
+                public static int Of(Shape shape)
+                {
+                    switch (shape)
+                    {
+                        case Shape.Circle:
+                            return 1;
+                        case {|#0:var other|}:
+                            return other.GetHashCode();
+                    }
+
+                    return -1;
+                }
+            }
+            """ + Shape, testContext.CancellationToken,
+            Expected("case label", "case Shape.<Case> c:"));
+
+    [TestMethod]
+    public Task FP0501_MessageForSwitchStatementDefaultLabel_Reports()
+        => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", """
+            public static class Area
+            {
+                public static int Of(Shape shape)
+                {
+                    switch (shape)
+                    {
+                        case Shape.Circle:
+                            return 1;
+                        {|#0:default|}:
+                            return 0;
+                    }
+                }
+            }
+            """ + Shape, testContext.CancellationToken,
+            Expected("case label", "case Shape.<Case> c:"));
+
+    private static DiagnosticResult Expected(string form, string example)
+        => new DiagnosticResult("FP0501", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("Shape", form, example);
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);

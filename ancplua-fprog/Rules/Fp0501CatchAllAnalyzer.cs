@@ -25,7 +25,11 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0501",
         "Do not use a catch-all in a switch over a union",
-        "Replace this catch-all with one arm per case of union '{0}' (for example '{0}.<Case> c => ...') and a 'null' arm if the value can be null, so that a new case breaks the build instead of falling through");
+        "Replace this catch-all with one {1} per case of union '{0}' (for example '{2}') and a 'null' {1} if the value can be null, so that a new case breaks the build instead of falling through");
+
+    private const string Arm = "arm";
+
+    private const string CaseLabel = "case label";
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -46,8 +50,9 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
             return;
 
         var unionName = GetUnionName(valueType);
+        object[] arguments = [unionName, Arm, $"{unionName}.<Case> c => ..."];
         foreach (var arm in switchExpression.Arms)
-            ReportCatchAlls(context, arm.Pattern, valueType, unionName);
+            ReportCatchAlls(context, arm.Pattern, valueType, arguments);
     }
 
     private static void AnalyzeSwitchStatement(OperationAnalysisContext context)
@@ -57,6 +62,7 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
             return;
 
         var unionName = GetUnionName(valueType);
+        object[] arguments = [unionName, CaseLabel, $"case {unionName}.<Case> c:"];
         foreach (var section in switchStatement.Cases)
         {
             foreach (var clause in section.Clauses)
@@ -64,10 +70,10 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
                 switch (clause)
                 {
                     case IDefaultCaseClauseOperation { Syntax: DefaultSwitchLabelSyntax label }:
-                        context.ReportDiagnostic(Diagnostic.Create(Rule, label.Keyword.GetLocation(), unionName));
+                        context.ReportDiagnostic(Diagnostic.Create(Rule, label.Keyword.GetLocation(), arguments));
                         break;
                     case IPatternCaseClauseOperation patternClause:
-                        ReportCatchAlls(context, patternClause.Pattern, valueType, unionName);
+                        ReportCatchAlls(context, patternClause.Pattern, valueType, arguments);
                         break;
                 }
             }
@@ -87,21 +93,21 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     /// Reports every catch-all among <paramref name="pattern"/> and the sides of its top-level <c>or</c>,
     /// and the sides of its top-level <c>and</c> when the whole <c>and</c> still matches every value.
     /// </summary>
-    private static void ReportCatchAlls(OperationAnalysisContext context, IPatternOperation pattern, ITypeSymbol valueType, string unionName)
+    private static void ReportCatchAlls(OperationAnalysisContext context, IPatternOperation pattern, ITypeSymbol valueType, object[] arguments)
     {
         if (pattern is IBinaryPatternOperation binary)
         {
             if (binary.OperatorKind == BinaryOperatorKind.And && !MatchesEveryValue(context.Compilation, binary, valueType))
                 return;
 
-            ReportCatchAlls(context, binary.LeftPattern, valueType, unionName);
-            ReportCatchAlls(context, binary.RightPattern, valueType, unionName);
+            ReportCatchAlls(context, binary.LeftPattern, valueType, arguments);
+            ReportCatchAlls(context, binary.RightPattern, valueType, arguments);
             return;
         }
 
         var syntax = GetPatternSyntax(pattern);
         if (syntax is VarPatternSyntax || IsCatchAll(context.Compilation, pattern, valueType))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.GetLocation(), unionName));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.GetLocation(), arguments));
     }
 
     /// <summary>
