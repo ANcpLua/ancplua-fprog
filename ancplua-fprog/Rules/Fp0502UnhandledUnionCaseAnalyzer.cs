@@ -9,11 +9,12 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0502: a <c>switch</c> expression over a union value has a case that no arm without a <c>when</c>
-/// clause names with a type test for the case's own type (<see cref="UnionSwitchCoverage.CasesNotNamed"/>).
-/// A case reached only through a catch-all, a base type or an arm with a <c>when</c> clause counts as
-/// not handled, and so does a case that the code at the switch cannot name (a private nested case seen
-/// from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
+/// FP0502: a <c>switch</c> expression over a union value has a case without its own arm: an arm without a
+/// <c>when</c> clause that names the case and matches every value of it (<see cref="UnionSwitchCoverage.CasesWithoutOwnArm"/>,
+/// the same definition FPS001 uses). A case reached only through a catch-all, a base type, an arm with a
+/// <c>when</c> clause or arms whose subpatterns reject some of its values (<c>Circle { Radius: &gt; 0 }</c>)
+/// counts as not handled, and so does a case that the code at the switch cannot name (a private nested case
+/// seen from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
 /// statements are not checked.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -22,7 +23,7 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0502",
         "Handle every case of a union in a switch expression",
-        "The switch expression over '{0}' does not handle every case with an arm that has no 'when' clause: {1}");
+        "Add one arm without a 'when' clause per unhandled case of '{0}' that matches every value of it, for example '{1} => ...' or '{1}(var x) => ...', instead of a catch-all, a 'when' clause or a subpattern that rejects values: {2}");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -51,7 +52,7 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
         // A case that the code at the switch cannot name (a private nested case seen from outside the
         // union) is in none of the coverage lists, yet no arm handles it. GetCases still has it.
         var nameable = coverage.Cases;
-        var missing = coverage.CasesNotNamed.AddRange(
+        var missing = coverage.CasesWithoutOwnArm.AddRange(
             model.GetCases(switchExpression.Value.Type)
                 .RemoveAll(@case => nameable.Contains(@case, SymbolEqualityComparer.Default)));
         if (missing.IsEmpty)
@@ -61,6 +62,11 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
             Rule,
             syntax.SwitchKeyword.GetLocation(),
             coverage.Union.Name,
-            string.Join(", ", missing.Select(static @case => @case.Name))));
+            NameOf(missing[0]),
+            string.Join(", ", missing.Select(NameOf))));
     }
+
+    /// <summary>The case as an arm names it: <c>Shape.Circle</c> for a nested case, <c>Circle</c> otherwise.</summary>
+    private static string NameOf(INamedTypeSymbol @case)
+        => @case.ContainingType is { } container ? container.Name + "." + @case.Name : @case.Name;
 }

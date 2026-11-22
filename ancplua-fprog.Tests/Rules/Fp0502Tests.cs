@@ -216,10 +216,10 @@ public sealed class Fp0502Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0502_CaseNamedButSubpatternRejectsValues_NoReport() => VerifyAsync(Shapes + """
+    public Task FP0502_CaseNamedButSubpatternRejectsValues_Reports() => VerifyAsync(Shapes + """
         public static class Area
         {
-            public static double Of(Shape shape) => shape switch
+            public static double Of(Shape shape) => shape {|FP0502:switch|}
             {
                 Shape.Circle { Radius: > 0 } c => 3.14 * c.Radius * c.Radius,
                 Shape.Square s => s.Side * s.Side,
@@ -229,10 +229,10 @@ public sealed class Fp0502Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0502_NestedUnionCasesNamedInPositionalSubpatterns_NoReport() => VerifyAsync(Results + """
+    public Task FP0502_NestedUnionCasesSplitOverPositionalSubpatterns_Reports() => VerifyAsync(Results + """
         public static class Describe
         {
-            public static string Of(Result<Inner> result) => result switch
+            public static string Of(Result<Inner> result) => result {|FP0502:switch|}
             {
                 Result<Inner>.Ok(Inner.A) => "a",
                 Result<Inner>.Ok(Inner.B) => "b",
@@ -737,7 +737,86 @@ public sealed class Fp0502Tests(TestContext testContext)
             {
                 Shape.Circle and var c => 1.0,
                 { } and Shape.Square => 2.0,
+                Shape.Triangle and { A: var a } => 3.0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_AndPatternWithRefutingSide_Reports() => VerifyAsync(Shapes + """
+        public static class Area
+        {
+            public static double Of(Shape shape) => shape {|FP0502:switch|}
+            {
+                Shape.Circle => 1.0,
+                Shape.Square => 2.0,
                 Shape.Triangle and { A: > 0 } => 3.0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_ConstantPositionalSubpattern_Reports() => VerifyAsync(Shapes + """
+        public static class Area
+        {
+            public static double Of(Shape shape) => shape {|FP0502:switch|}
+            {
+                Shape.Circle(1) => 1.0,
+                Shape.Square => 2.0,
+                Shape.Triangle => 3.0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_RefutingArmNextToOwnArm_NoReport() => VerifyAsync(Shapes + """
+        public static class Area
+        {
+            public static double Of(Shape shape) => shape switch
+            {
+                Shape.Circle { Radius: > 0 } c => c.Radius,
+                Shape.Circle => 0.0,
+                Shape.Square(_) => 2.0,
+                Shape.Triangle { A: _ } => 3.0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_NestedUnionCaseWithOwnArm_NoReport() => VerifyAsync(Results + """
+        public static class Describe
+        {
+            public static string Of(Result<Inner> result) => result switch
+            {
+                Result<Inner>.Ok(Inner.A) => "a",
+                Result<Inner>.Ok(var inner) => "other",
+                Result<Inner>.Error => "error"
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_NotPatternAndNullArm_Reports() => VerifyAsync("#nullable enable\n" + Shapes + """
+        public static class Area
+        {
+            public static double Of(Shape? shape) => shape {|FP0502:switch|}
+            {
+                null => 0.0,
+                Shape.Circle => 1.0,
+                not Shape.Circle => 2.0
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0502_NullArmWithEveryCase_NoReport() => VerifyAsync("#nullable enable\n" + Shapes + """
+        public static class Area
+        {
+            public static double Of(Shape? shape) => shape switch
+            {
+                null => 0.0,
+                (Shape.Circle or Shape.Square) => 1.0,
+                Shape.Triangle => 2.0
             };
         }
         """);
