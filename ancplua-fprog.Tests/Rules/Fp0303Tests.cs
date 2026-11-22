@@ -916,8 +916,27 @@ public sealed class Fp0303Tests(TestContext testContext)
         }
         """,
         testContext.CancellationToken,
-        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("string", "null"),
-        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(1).WithArguments("int", "default"));
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("an Option<string> (or the empty case of a union)", "null"),
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(1).WithArguments("an Option<int> (or the empty case of a union)", "default"));
+
+    [TestMethod]
+    public Task FP0303_MessageForPointerReturnsCanBeWritten_Reports() => FpAnalyzerTestHost.VerifyRuleAsync(
+        "FP0303",
+        """
+        [Fprog.FunctionalCore]
+        public static unsafe class Pointers
+        {
+            public static int* Nowhere() => {|#0:null|};
+
+            public static void* NoAddress() => {|#1:default|};
+
+            public static delegate*<int> NoFunction() => {|#2:null|};
+        }
+        """,
+        testContext.CancellationToken,
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("a Span<int> (empty when there is nothing)", "null"),
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(1).WithArguments("a value that is not a pointer (or the empty case of a union)", "default"),
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(2).WithArguments("a value that is not a pointer (or the empty case of a union)", "null"));
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0303", source, testContext.CancellationToken);
