@@ -1018,6 +1018,88 @@ public sealed class Fp0802Tests(TestContext testContext)
         });
         """);
 
+    [TestMethod]
+    public Task FP0802_LocalFunctionInTopLevelStatementsUnderAssemblyCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [assembly: Fprog.FunctionalCore]
+
+        {|CS8805:_ = Later();|}
+
+        static {|FP0802:Task<int>|} Later() => Task.FromResult(1);
+        """);
+
+    [TestMethod]
+    public Task FP0802_LocalFunctionInTopLevelStatementsOutsideCore_NoReport() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        {|CS8805:await Later();|}
+
+        static Task<int> Later() => Task.FromResult(1);
+        """);
+
+    [TestMethod]
+    public Task FP0802_CustomTaskLikeTypeNotDerivedFromTaskInCore_NoReport() => VerifyAsync("""
+        using System;
+        using System.Runtime.CompilerServices;
+
+        [AsyncMethodBuilder(typeof(JobBuilder))]
+        public sealed class Job
+        {
+            public Awaiter GetAwaiter() => new();
+
+            public sealed class Awaiter : INotifyCompletion
+            {
+                public bool IsCompleted => true;
+
+                public int GetResult() => 1;
+
+                public void OnCompleted(Action continuation) => continuation();
+            }
+        }
+
+        public sealed class JobBuilder
+        {
+            public static JobBuilder Create() => new();
+
+            public Job Task => new();
+
+            public void Start<TStateMachine>(ref TStateMachine stateMachine)
+                where TStateMachine : IAsyncStateMachine => stateMachine.MoveNext();
+
+            public void SetStateMachine(IAsyncStateMachine stateMachine) { }
+
+            public void SetResult() { }
+
+            public void SetException(Exception exception) { }
+
+            public void AwaitOnCompleted<TAwaiter, TStateMachine>(ref TAwaiter awaiter, ref TStateMachine stateMachine)
+                where TAwaiter : INotifyCompletion where TStateMachine : IAsyncStateMachine { }
+
+            public void AwaitUnsafeOnCompleted<TAwaiter, TStateMachine>(ref TAwaiter awaiter, ref TStateMachine stateMachine)
+                where TAwaiter : ICriticalNotifyCompletion where TStateMachine : IAsyncStateMachine { }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static Job Make() => new();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0802_ErrorTypeArgumentStillTaskInCore_Reports() => VerifyAsync("""
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static {|CS0246:Missing|} Unknown() => default;
+
+            public static {|FP0802:Task<{|CS0246:Missing|}>|} Half() => default;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0802", source, testContext.CancellationToken);
 }
