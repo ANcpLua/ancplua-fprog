@@ -1097,6 +1097,67 @@ public sealed class Fp0701Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0701_OutVarDeclarationIsNotALaterAssignment_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Parsing
+        {
+            public static System.Func<int> Run(string text)
+            {
+                _ = int.TryParse(text, out var number);
+                return () => number;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0701_PatternAndUsingVariables_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Patterns
+        {
+            public static System.Func<int> Run(object value, System.IDisposable resource)
+            {
+                using var scope = resource;
+                if (value is int number)
+                    return () => number + scope.GetHashCode();
+                return static () => 0;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0701_LocalFunctionCalledBeforeAssignment_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Early
+        {
+            public static int Run()
+            {
+                var count = 1;
+                var first = Read();
+                count = 2;
+                return first + Read();
+
+                int Read() => {|FP0701:count|} + count;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0701_TwoVariablesInOneClosureReportEach_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Two
+        {
+            public static int Run(int left)
+            {
+                var right = 0;
+                System.Func<int> sum = () => {|FP0701:right|} * {|FP0701:left|} + right + left;
+                left++;
+                right += 2;
+                return sum();
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0701", source, testContext.CancellationToken);
 }

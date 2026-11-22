@@ -26,7 +26,7 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0701",
         "Do not capture a variable that is reassigned",
-        "The closure captures '{0}', which is assigned after its declaration");
+        "The closure captures '{0}', which is assigned after its declaration; capture a new local that is never reassigned instead (for example 'var {0}Value = {0};' after the last write), or pass the value to the closure as a parameter");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -61,7 +61,7 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
             foreach (var use in FindFirstUses(closure, written.Contains))
             {
                 if (reported.Add(use.Value))
-                    context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Key.Name));
+                    context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Value.ToString()));
             }
         }
     }
@@ -273,7 +273,7 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
                 foreach (var use in _uses)
                 {
                     if (_written.Contains(use.Key) && reported.Add(use.Value))
-                        context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Key.Name));
+                        context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Value.ToString()));
                 }
             }
         }
