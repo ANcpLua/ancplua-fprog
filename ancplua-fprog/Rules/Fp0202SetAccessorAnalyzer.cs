@@ -18,7 +18,7 @@ public sealed class Fp0202SetAccessorAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0202",
         "Do not declare set accessors in the functional core",
-        "Use an init accessor or a get-only property instead of a set accessor");
+        "Replace 'set' on '{0}' with 'init' (or drop it for a get-only property) and produce a changed copy with a 'with' expression or a method that returns a new instance");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -42,6 +42,12 @@ public sealed class Fp0202SetAccessorAnalyzer : DiagnosticAnalyzer
         if (context.Node is not AccessorDeclarationSyntax accessor || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
-        context.ReportDiagnostic(Diagnostic.Create(Rule, accessor.Keyword.GetLocation()));
+        var member = accessor.Parent?.Parent switch
+        {
+            PropertyDeclarationSyntax property => property.Identifier.ValueText,
+            IndexerDeclarationSyntax => "this[]",
+            _ => "the property"
+        };
+        context.ReportDiagnostic(Diagnostic.Create(Rule, accessor.Keyword.GetLocation(), member));
     }
 }

@@ -779,6 +779,63 @@ public sealed class Fp0202Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0202_SetOnAttributeUnionAndItsCasesInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            public string Label { get; {|FP0202:set|}; } = "";
+
+            public sealed record Circle(double Radius) : Shape
+            {
+                public double Radius { get; {|FP0202:set|}; } = Radius;
+            }
+
+            public sealed record Square(double Side) : Shape;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_SetOnAttributeUnionOutsideCore_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            public string Label { get; set; } = "";
+
+            public sealed record Circle(double Radius) : Shape
+            {
+                public double Radius { get; set; } = Radius;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0202_PartialPropertyAcrossTypePartsReportsEachSetKeyword_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed partial class Person
+        {
+            public partial string Name { get; {|FP0202:set|}; }
+        }
+
+        public sealed partial class Person
+        {
+            public partial string Name
+            {
+                get => field;
+                {|FP0202:set|} => field = value.Trim();
+            }
+
+            public partial int Age { get; init; }
+
+            public partial int Age { get => field; init => field = value; }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0202", source, testContext.CancellationToken);
 }
