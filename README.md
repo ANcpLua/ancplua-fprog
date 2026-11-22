@@ -72,7 +72,7 @@ every union. Compiler-generated members are not checked.
 | FP0104 | No writes through a reference-type parameter (field, property or element assignment, `++`, `--`) |
 | FP0201 | Fields are `readonly` or `const` |
 | FP0202 | Properties have no `set` accessor (`init` is allowed) |
-| FP0203 | Records and readonly structs hold no arrays, `StringBuilder` or mutable collections (`System.Collections.Immutable` and `.Frozen` are allowed) |
+| FP0203 | Records and readonly structs hold no arrays, `StringBuilder` or types from `System.Collections`, `.Generic`, `.ObjectModel` or `.Concurrent`, interfaces such as `IReadOnlyList<T>` and `IEnumerable<T>` included (`System.Collections.Immutable` and `.Frozen` are allowed) |
 | FP0301 | No `throw` statements or expressions |
 | FP0302 | No partial members: `Parse` on `System` types, `First/Last/Single/ElementAt`, dictionary indexer reads |
 | FP0303 | No `null` or `default` returned for a reference or nullable return type |

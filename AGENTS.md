@@ -110,7 +110,9 @@ Not implemented. Each needs an exact definition and span in the catalog before w
    with markup `{|FPxxxx:...|}`. For FPS001 call
    `FpAnalyzerTestHost.VerifySuppressionAsync("CS8509", source, ct, expected)` with markup
    `{|#0:switch|}` and `DiagnosticResult.CompilerWarning("CS8509").WithLocation(0).WithIsSuppressed(true)`.
-3. Every false positive that is fixed gets a `_NoReport` test with the code that triggered it.
+3. Every rule has at least one `_NoReport` test with correct code that looks similar, for example
+   a local `StringBuilder` in a pure function or the same code outside core. Every false positive
+   that is fixed gets a `_NoReport` test with the code that triggered it.
 4. Keep each rule in its own files: `ancplua-fprog/Rules/Fpxxxx*.cs` and
    `ancplua-fprog.Tests/Rules/FpxxxxTests.cs`. Shared helpers live in `ancplua-fprog/Shared/`;
    say in the commit message when you change one.
