@@ -38,6 +38,7 @@ public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
         if (!UnionModel.IsUnion(type) || !CoreScope.IsDeclaredInSource(type))
             return;
 
+        var name = SourceName(type, context.CancellationToken);
         var hasDeclaredConstructor = false;
         foreach (var constructor in type.InstanceConstructors)
         {
@@ -48,20 +49,43 @@ public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
             if (constructor.DeclaredAccessibility == Accessibility.Private)
                 continue;
 
-            var fix = IsPrimaryConstructor(constructor, context.CancellationToken)
-                ? $"replace the primary constructor parameter list with a 'private {type.Name}(...)' constructor that takes the same parameters"
-                : $"write 'private' instead of '{AccessibilityKeyword(constructor.DeclaredAccessibility)}' on this constructor";
+            string fix;
+            if (IsPrimaryConstructor(constructor, context.CancellationToken))
+                fix = $"replace the primary constructor parameter list with a 'private {name}(...)' constructor that takes the same parameters";
+            else if (IsRecordCopyConstructor(type, constructor))
+                fix = "remove this explicit copy constructor (a record copy constructor cannot be private; the compiler generates one)";
+            else
+                fix = $"write 'private' instead of '{AccessibilityKeyword(constructor.DeclaredAccessibility)}' on this constructor";
 
             // A partial constructor has two declarations, each with its own name; the symbol of the
             // defining part carries only its own location.
-            ReportAtName(context, constructor, type, fix);
+            ReportAtName(context, constructor, name, fix);
             if (constructor.PartialImplementationPart is { } implementation)
-                ReportAtName(context, implementation, type, fix);
+                ReportAtName(context, implementation, name, fix);
         }
 
         if (!hasDeclaredConstructor)
-            ReportAtName(context, type, type, $"declare 'private {type.Name}() {{ }}'");
+        {
+            var fix = type.IsStatic
+                ? $"remove 'static' from the declaration and declare 'private {name}() {{ }}'"
+                : $"declare 'private {name}() {{ }}'";
+            ReportAtName(context, type, name, fix);
+        }
     }
+
+    private static string SourceName(INamedTypeSymbol type, CancellationToken cancellationToken)
+    {
+        // The identifier as written, so a verbatim name keeps its '@'.
+        if (!type.Locations.IsEmpty && type.Locations[0] is { SourceTree: { } tree } location)
+            return tree.GetText(cancellationToken).ToString(location.SourceSpan);
+
+        return type.Name;
+    }
+
+    private static bool IsRecordCopyConstructor(INamedTypeSymbol type, IMethodSymbol constructor)
+        => type.IsRecord
+           && constructor.Parameters.Length == 1
+           && SymbolEqualityComparer.Default.Equals(constructor.Parameters[0].Type.OriginalDefinition, type.OriginalDefinition);
 
     private static bool IsPrimaryConstructor(IMethodSymbol constructor, CancellationToken cancellationToken)
     {
@@ -85,9 +109,9 @@ public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
             _ => "the current access modifier"
         };
 
-    private static void ReportAtName(SymbolAnalysisContext context, ISymbol symbol, INamedTypeSymbol union, string fix)
+    private static void ReportAtName(SymbolAnalysisContext context, ISymbol symbol, string union, string fix)
     {
         if (!symbol.Locations.IsEmpty)
-            context.ReportDiagnostic(Diagnostic.Create(Rule, symbol.Locations[0], union.Name, fix));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, symbol.Locations[0], union, fix));
     }
 }

@@ -624,6 +624,45 @@ public sealed class Fp0402Tests(TestContext testContext)
         DiagnosticResult.CompilerError("CS1002").WithSpan(4, 27, 4, 27),
         DiagnosticResult.CompilerError("CS1026").WithSpan(4, 27, 4, 27));
 
+    [TestMethod]
+    public Task FP0402_MessageSaysToRemoveExplicitCopyConstructor_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            protected {|#0:Shape|}(Shape original) { }
+
+            public sealed record Circle(double Radius) : Shape;
+        }
+        """,
+        Arguments(0, "Shape", "remove this explicit copy constructor (a record copy constructor cannot be private; the compiler generates one)"));
+
+    [TestMethod]
+    public Task FP0402_MessageSaysToRemoveStaticFromStaticUnion_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public static class {|#0:Shape|}
+        {
+        }
+        """,
+        Arguments(0, "Shape", "remove 'static' from the declaration and declare 'private Shape() { }'"));
+
+    [TestMethod]
+    public Task FP0402_MessageKeepsVerbatimIdentifier_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract class {|#0:@Shape|}
+        {
+            public sealed class Circle : Shape { }
+        }
+        """,
+        Arguments(0, "@Shape", "declare 'private @Shape() { }'"));
+
+    private static DiagnosticResult Arguments(int location, string union, string fix)
+        => new DiagnosticResult("FP0402", DiagnosticSeverity.Warning).WithLocation(location).WithArguments(union, fix);
+
     private static DiagnosticResult Expected(int location, string message)
         => new DiagnosticResult("FP0402", DiagnosticSeverity.Warning).WithLocation(location).WithMessage(message);
 
