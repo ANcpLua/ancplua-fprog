@@ -79,10 +79,18 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
         IPropertyReferenceOperation reference => reference.Property,
         IInvocationOperation invocation => invocation.TargetMethod,
         IMethodReferenceOperation reference => reference.Method,
-        _ => operation.SemanticModel?.GetSymbolInfo(operation.Syntax).CandidateSymbols is { Length: > 0 } candidates
-            ? candidates[0]
-            : null
+        _ => BoundMember(operation)
     };
+
+    /// <summary>The method a <c>dynamic</c> call binds to: the single symbol, or else the first candidate.</summary>
+    private static ISymbol? BoundMember(IOperation operation)
+    {
+        if (operation.SemanticModel is not { } model)
+            return null;
+
+        var info = model.GetSymbolInfo(operation.Syntax);
+        return info.Symbol ?? (info.CandidateSymbols is { Length: > 0 } candidates ? candidates[0] : null);
+    }
 
     private static (string Advice, string Member) DescribeMember(ISymbol? member)
     {

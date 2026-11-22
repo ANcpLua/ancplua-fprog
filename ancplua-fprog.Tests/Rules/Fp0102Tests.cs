@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -1048,6 +1050,32 @@ public sealed class Fp0102Tests(TestContext testContext)
             }
         }
         """);
+
+    [TestMethod]
+    public Task FP0102_DynamicArgumentMessageNamesBoundMember_Reports() => FpAnalyzerTestHost.VerifyRuleAsync(
+        "FP0102",
+        """
+        using System;
+
+        [Fprog.FunctionalCore]
+        public static class Late
+        {
+            public static int Roll(Random random, dynamic max) => random.{|#0:Next|}(max);
+
+            public static object? Read(dynamic name) => Environment.{|#1:GetEnvironmentVariable|}(name);
+        }
+        """,
+        testContext.CancellationToken,
+        new DiagnosticResult("FP0102", DiagnosticSeverity.Warning)
+            .WithLocation(0)
+            .WithArguments(
+                "Take the random value as a parameter (for example 'int roll' or 'double sample') produced by the shell",
+                "Random.Next"),
+        new DiagnosticResult("FP0102", DiagnosticSeverity.Warning)
+            .WithLocation(1)
+            .WithArguments(
+                "Take the value as a parameter (for example 'string newLine', or a settings record built by the shell)",
+                "Environment.GetEnvironmentVariable"));
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0102", source, testContext.CancellationToken);
