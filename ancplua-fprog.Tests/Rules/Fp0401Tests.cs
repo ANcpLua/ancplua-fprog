@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -737,6 +739,49 @@ public sealed class Fp0401Tests(TestContext testContext)
         [{|CS0592:Fprog.Union|}]
         public union Animal(Cat, Dog);
         """);
+
+    // The message quotes the declaration to write: name with type parameters and '@', 'partial', and
+    // the modifier to remove, naming the line of the part that carries it.
+    [TestMethod]
+    public Task FP0401_MessageQuotesGenericName_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public class {|#0:Result|}<TValue, TError>
+        {
+        }
+        """, "Result<TValue, TError>", "abstract class", "");
+
+    [TestMethod]
+    public Task FP0401_MessageKeepsVerbatimIdentifier_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public sealed record {|#0:@class|};
+        """, "@class", "abstract record", " and remove 'sealed'");
+
+    [TestMethod]
+    public Task FP0401_MessageNamesStaticModifier_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public static class {|#0:Holder|}
+        {
+        }
+        """, "Holder", "abstract class", " and remove 'static'");
+
+    [TestMethod]
+    public Task FP0401_MessageKeepsPartialAndNamesSealedOnOtherPart_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public partial class {|#0:Shape|}
+        {
+        }
+
+        public sealed partial class Shape
+        {
+        }
+        """, "Shape", "abstract partial class", " and remove 'sealed' from its declaration on line 6");
+
+    private Task VerifyMessageAsync(string source, string name, string declaration, string removal)
+        => FpAnalyzerTestHost.VerifyRuleAsync(
+            "FP0401",
+            source,
+            testContext.CancellationToken,
+            new DiagnosticResult("FP0401", DiagnosticSeverity.Warning).WithLocation(0).WithArguments(name, declaration, removal));
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0401", source, testContext.CancellationToken);
