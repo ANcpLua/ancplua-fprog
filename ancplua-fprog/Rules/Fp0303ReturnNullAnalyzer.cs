@@ -12,6 +12,8 @@ namespace ancplua_fprog.Rules;
 /// type that is not a non-nullable value type (pointers count as nullable). Conversions, conditional branches, switch-expression
 /// arms, the right side of <c>??</c> and the value of <c>=</c> and <c>??=</c> are looked through. Reported at the literal or
 /// expression. A <c>null</c> constant reached through a name, and <c>new int?()</c>, are not literals and are not reported.
+/// The returned type is the type of the returned value: the <c>T</c> of an async <c>Task&lt;T&gt;</c>, the element type of
+/// an iterator. Accessors, operators and conversion operators count as methods. The message names the option to return.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
@@ -19,7 +21,7 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0303",
         "Do not return null or default in the functional core",
-        "Return an option or result value instead of null or default");
+        "Return an Option<{0}> (or the empty case of a union) instead of '{1}', so that the return type says the value can be missing");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -41,7 +43,16 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        ReportNullOrDefault(context, value);
+        ReportNullOrDefault(context, value, type);
+    }
+
+    /// <summary>The type an option would wrap: <c>int</c> for <c>int?</c>, <c>string</c> for <c>string?</c>.</summary>
+    private static string ValueTypeName(ITypeSymbol type)
+    {
+        var underlying = type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type.WithNullableAnnotation(NullableAnnotation.NotAnnotated);
+        return underlying.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
     }
 
     private static bool CanBeNull(ITypeSymbol type)
@@ -49,34 +60,36 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
            || type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer
            || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
 
-    private static void ReportNullOrDefault(OperationAnalysisContext context, IOperation value)
+    private static void ReportNullOrDefault(OperationAnalysisContext context, IOperation value, ITypeSymbol returnType)
     {
         switch (value)
         {
             case IConversionOperation conversion:
-                ReportNullOrDefault(context, conversion.Operand);
+                ReportNullOrDefault(context, conversion.Operand, returnType);
                 break;
             case IConditionalOperation { WhenFalse: { } whenFalse } conditional:
-                ReportNullOrDefault(context, conditional.WhenTrue);
-                ReportNullOrDefault(context, whenFalse);
+                ReportNullOrDefault(context, conditional.WhenTrue, returnType);
+                ReportNullOrDefault(context, whenFalse, returnType);
                 break;
             case ISwitchExpressionOperation switchExpression:
                 foreach (var arm in switchExpression.Arms)
-                    ReportNullOrDefault(context, arm.Value);
+                    ReportNullOrDefault(context, arm.Value, returnType);
                 break;
             case ICoalesceOperation coalesce:
-                ReportNullOrDefault(context, coalesce.WhenNull);
+                ReportNullOrDefault(context, coalesce.WhenNull, returnType);
                 break;
             // `return x = null;` and `return x ??= null;` return the assigned null.
             case ISimpleAssignmentOperation { IsRef: false } assignment:
-                ReportNullOrDefault(context, assignment.Value);
+                ReportNullOrDefault(context, assignment.Value, returnType);
                 break;
             case ICoalesceAssignmentOperation coalesceAssignment:
-                ReportNullOrDefault(context, coalesceAssignment.Value);
+                ReportNullOrDefault(context, coalesceAssignment.Value, returnType);
                 break;
             case ILiteralOperation { ConstantValue: { HasValue: true, Value: null } }:
+                context.ReportDiagnostic(Diagnostic.Create(Rule, value.Syntax.GetLocation(), ValueTypeName(returnType), "null"));
+                break;
             case IDefaultValueOperation:
-                context.ReportDiagnostic(Diagnostic.Create(Rule, value.Syntax.GetLocation()));
+                context.ReportDiagnostic(Diagnostic.Create(Rule, value.Syntax.GetLocation(), ValueTypeName(returnType), "default"));
                 break;
         }
     }

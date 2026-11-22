@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -834,6 +836,88 @@ public sealed class Fp0303Tests(TestContext testContext)
             }
         }
         """);
+
+    [TestMethod]
+    public Task FP0303_ExplicitReturnTypeStaticAndNaturalTypeLambdas_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Lambdas
+        {
+            public static System.Func<string?> Explicit()
+            {
+                var make = string? () => {|FP0303:null|};
+                return make;
+            }
+
+            public static System.Func<int?> Natural()
+            {
+                var make = () => (int?){|FP0303:null|};
+                return make;
+            }
+
+            public static System.Func<string?> Static() => static () => {|FP0303:default|};
+
+            public static System.Func<string?, string?> Fallback() => (string? text) => text ?? {|FP0303:null|};
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0303_FieldKeywordParenthesesForgivingAndThrowBranch_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed class Shapes
+        {
+            public string? Cached { get => field ?? {|FP0303:null|}; init; }
+
+            public static string? Wrapped() => ({|FP0303:null|});
+
+            public static string? Forgiven() => {|FP0303:default|}!;
+
+            public static string? OrThrow(bool ok) => ok ? {|FP0303:null|} : throw new System.InvalidOperationException();
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0303_ClassAndNotNullConstrainedTypeParameters_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Generic
+        {
+            public static T? Class<T>() where T : class => {|FP0303:null|};
+
+            public static T NotNull<T>() where T : notnull => {|FP0303:default(T)|}!;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0303_NullConditionalAndMethodGroupResults_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Probe
+        {
+            public static string? Host(System.Uri? uri) => uri?.Host;
+
+            public static int? Length(string? text) => text?.Length;
+
+            public static string Name() => nameof(System.String);
+
+            public static System.Func<string?> Factory() => Make;
+
+            private static string? Make() => "made";
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0303_MessageNamesTheOptionToReturn_Reports() => FpAnalyzerTestHost.VerifyRuleAsync(
+        "FP0303",
+        """
+        [Fprog.FunctionalCore]
+        public static class Lookup
+        {
+            public static string? Find() => {|#0:null|};
+
+            public static int? Count() => {|#1:default|};
+        }
+        """,
+        testContext.CancellationToken,
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("string", "null"),
+        new DiagnosticResult("FP0303", DiagnosticSeverity.Warning).WithLocation(1).WithArguments("int", "default"));
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0303", source, testContext.CancellationToken);
