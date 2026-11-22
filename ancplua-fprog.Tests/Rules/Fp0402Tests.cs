@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -570,6 +572,61 @@ public sealed class Fp0402Tests(TestContext testContext)
         public abstract record Token;
         """);
 
-    private Task VerifyAsync(string source)
-        => FpAnalyzerTestHost.VerifyRuleAsync("FP0402", source, testContext.CancellationToken);
+    [TestMethod]
+    public Task FP0402_MessageSaysWhichModifierToReplace_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            private protected {|#0:Shape|}() { }
+
+            public sealed class Circle : Shape { }
+        }
+        """,
+        Expected(0, "Union 'Shape' must have only private constructors: write 'private' instead of 'private protected' on this constructor, so that only its nested sealed cases can derive from it"));
+
+    [TestMethod]
+    public Task FP0402_MessageSaysWhichConstructorToDeclare_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract record {|#0:Result|}<T>
+        {
+            public sealed record Ok(T Value) : Result<T>;
+        }
+        """,
+        Expected(0, "Union 'Result' must have only private constructors: declare 'private Result() { }', so that only its nested sealed cases can derive from it"));
+
+    [TestMethod]
+    public Task FP0402_MessageSaysToReplacePrimaryConstructor_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract record {|#0:Shape|}(int X)
+        {
+            public sealed record Circle(double Radius) : Shape(0);
+        }
+        """,
+        Expected(0, "Union 'Shape' must have only private constructors: replace the primary constructor parameter list with a 'private Shape(...)' constructor that takes the same parameters, so that only its nested sealed cases can derive from it"));
+
+    [TestMethod]
+    public Task FP0402_IncompleteConstructorDoesNotCrash_Reports() => VerifyAsync(
+        """
+        [Fprog.Union]
+        public abstract class Shape
+        {
+            public {|FP0402:Shape|}(int sides
+
+            private Shape() { }
+
+            public sealed class Circle : Shape { }
+        }
+        """,
+        DiagnosticResult.CompilerError("CS0501").WithSpan(4, 12, 4, 17).WithArguments("Shape.Shape(int)"),
+        DiagnosticResult.CompilerError("CS1002").WithSpan(4, 27, 4, 27),
+        DiagnosticResult.CompilerError("CS1026").WithSpan(4, 27, 4, 27));
+
+    private static DiagnosticResult Expected(int location, string message)
+        => new DiagnosticResult("FP0402", DiagnosticSeverity.Warning).WithLocation(location).WithMessage(message);
+
+    private Task VerifyAsync(string source, params DiagnosticResult[] expected)
+        => FpAnalyzerTestHost.VerifyRuleAsync("FP0402", source, testContext.CancellationToken, expected);
 }
