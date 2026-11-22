@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -786,6 +788,38 @@ public sealed class Fp0203Tests(TestContext testContext)
         public sealed record Holder<T, TItems>(T Value, TItems Items, Memory<int> Buffer, ReadOnlyMemory<char> Text)
             where TItems : List<T>;
         """);
+
+    [TestMethod]
+    public Task FP0203_MessageNamesTheReplacement_Reports() => FpAnalyzerTestHost.VerifyRuleAsync("FP0203", """
+        using System.Collections.Generic;
+        using System.Text;
+
+        [Fprog.FunctionalCore]
+        public sealed record Shapes(
+            IEqualityComparer<string> {|#0:Comparer|},
+            int[,] {|#1:Grid|},
+            StringBuilder {|#2:Text|},
+            HashSet<int> {|#3:Marks|},
+            List<string> {|#4:Names|},
+            IEnumerator<int> {|#5:Cursor|});
+        """,
+        testContext.CancellationToken,
+        Expect(0, "Comparer", "IEqualityComparer<string>",
+            "an immutable type from System.Collections.Immutable or System.Collections.Frozen"),
+        Expect(1, "Grid", "int[,]",
+            "ImmutableArray<ImmutableArray<int>> (build each row with ToImmutableArray())"),
+        Expect(2, "Text", "StringBuilder",
+            "string (build the string with string.Concat, string.Join or interpolation)"),
+        Expect(3, "Marks", "HashSet<int>",
+            "ImmutableHashSet<int> or FrozenSet<int> (build it with ToImmutableHashSet() or ToFrozenSet())"),
+        Expect(4, "Names", "List<string>", "ImmutableArray<string> (build it with ToImmutableArray())"),
+        Expect(5, "Cursor", "IEnumerator<int>",
+            "an immutable type from System.Collections.Immutable or System.Collections.Frozen"));
+
+    private static DiagnosticResult Expect(int location, string name, string type, string replacement)
+        => new DiagnosticResult("FP0203", DiagnosticSeverity.Warning)
+            .WithLocation(location)
+            .WithArguments(name, type, replacement);
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0203", source, testContext.CancellationToken);
