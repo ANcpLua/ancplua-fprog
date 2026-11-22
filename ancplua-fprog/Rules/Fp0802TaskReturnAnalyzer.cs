@@ -22,7 +22,9 @@ public sealed class Fp0802TaskReturnAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0802",
         "Do not return a task from the functional core",
-        "Return a plain value and keep asynchronous work in the shell");
+        "'{0}' returns '{1}': return {2} instead, and move the asynchronous work and its await to the shell");
+
+    private const string EffectValue = "a value that describes the effect (a record or a union case) for the shell to run";
 
     private const int MaxConstraintDepth = 32;
 
@@ -96,7 +98,62 @@ public sealed class Fp0802TaskReturnAnalyzer : DiagnosticAnalyzer
         }
 
         var reported = returnTypeSyntax is RefTypeSyntax refType ? refType.Type : returnTypeSyntax;
-        context.ReportDiagnostic(Diagnostic.Create(Rule, reported.GetLocation()));
+        var resultType = ResultType(symbol.ReturnType, taskTypes);
+        context.ReportDiagnostic(Diagnostic.Create(
+            Rule,
+            reported.GetLocation(),
+            MemberName(context.Node),
+            symbol.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+            resultType is null
+                ? EffectValue
+                : $"the plain result '{resultType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}'"));
+    }
+
+    private static string MemberName(SyntaxNode node) => node switch
+    {
+        MethodDeclarationSyntax method => method.Identifier.ValueText,
+        LocalFunctionStatementSyntax localFunction => localFunction.Identifier.ValueText,
+        OperatorDeclarationSyntax @operator => "operator " + @operator.OperatorToken.ValueText,
+        ConversionOperatorDeclarationSyntax conversion => "operator " + conversion.Type.ToString(),
+        _ => node.ToString()
+    };
+
+    /// <summary>
+    /// The <c>T</c> of the first <c>Task&lt;T&gt;</c> or <c>ValueTask&lt;T&gt;</c> found through nullable
+    /// wrappers, base types and type parameter constraints; null for a non-generic task.
+    /// </summary>
+    private static ITypeSymbol? ResultType(ITypeSymbol type, ImmutableArray<INamedTypeSymbol> taskTypes, int depth = 0)
+    {
+        if (depth > MaxConstraintDepth)
+            return null;
+
+        switch (type)
+        {
+            case INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable:
+                return ResultType(nullable.TypeArguments[0], taskTypes, depth + 1);
+            case ITypeParameterSymbol typeParameter:
+                foreach (var constraint in typeParameter.ConstraintTypes)
+                {
+                    if (ResultType(constraint, taskTypes, depth + 1) is { } result)
+                        return result;
+                }
+
+                return null;
+        }
+
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (current.TypeArguments.Length != 1)
+                continue;
+
+            foreach (var taskType in taskTypes)
+            {
+                if (taskType.Arity == 1 && SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, taskType))
+                    return current.TypeArguments[0];
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
