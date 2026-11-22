@@ -748,6 +748,41 @@ public sealed class Fp0103Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0103_TypelessLambdaRefAndOutParameters_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Swapper
+        {
+            public delegate int Swap(ref int {|FP0103:left|}, out int {|FP0103:right|});
+
+            public static readonly Swap Run = (ref {|FP0103:a|}, out {|FP0103:b|}) =>
+            {
+                b = a;
+                return a;
+            };
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0103_MemberParameterInsideExtensionBlock_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class IntExtensions
+        {
+            extension(int source)
+            {
+                public int AddTo(ref int {|FP0103:target|}) => target + source;
+
+                public static int Halve(int value, out int {|FP0103:rest|})
+                {
+                    rest = value % 2;
+                    return value / 2;
+                }
+
+                public int Plus(in int other) => source + other;
+            }
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0103", source, testContext.CancellationToken);
 }
