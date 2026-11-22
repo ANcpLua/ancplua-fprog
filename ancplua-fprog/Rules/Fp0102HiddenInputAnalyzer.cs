@@ -14,8 +14,9 @@ namespace ancplua_fprog.Rules;
 /// <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
 /// static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
 /// defers binding to run time. Reported at the member's name token (inside any parentheses), or at
-/// <c>Random</c> in the object creation. A target-typed <c>new(...)</c> has no <c>Random</c> token
-/// and is not reported.
+/// <c>Random</c> in the object creation. A target-typed <c>new(...)</c> that creates a <c>Random</c>
+/// has no <c>Random</c> token; under the stricter reading it is still <c>new Random(...)</c> and is
+/// reported at its <c>new</c> keyword. The message names the parameter to take instead.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
@@ -23,7 +24,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0102",
         "Do not read hidden inputs in the functional core",
-        "Pass '{0}' in as a parameter instead of reading it");
+        "{0} instead of reading '{1}' here");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -48,9 +49,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
     {
         var operation = context.Operation;
 
-        // A target-typed new(...) has no Random token, so the row names no span for it.
-        if (operation.Syntax is ImplicitObjectCreationExpressionSyntax
-            || !IsHiddenInput(operation, context.CancellationToken)
+        if (!IsHiddenInput(operation, context.CancellationToken)
             || IsInsideNameOf(operation)
             || !CoreScope.IsInCore(context.ContainingSymbol))
         {
@@ -58,7 +57,47 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
         }
 
         var location = ReportLocation(operation.Syntax);
-        context.ReportDiagnostic(Diagnostic.Create(Rule, location, operation.Syntax.ToString()));
+        var (advice, member) = Describe(operation);
+        context.ReportDiagnostic(Diagnostic.Create(Rule, location, advice, member));
+    }
+
+    private const string RandomAdvice =
+        "Take the random value as a parameter (for example 'int roll' or 'double sample') produced by the shell";
+
+    /// <summary>What to write instead, and the member that was read, for the diagnostic message.</summary>
+    private static (string Advice, string Member) Describe(IOperation operation) => operation switch
+    {
+        IFieldReferenceOperation reference => (
+            "Take the value as a parameter (or make the field 'static readonly'; to change it, return the new value)",
+            reference.Field.ContainingType.Name + "." + reference.Field.Name),
+        IObjectCreationOperation or IDynamicObjectCreationOperation => (RandomAdvice, "new Random(...)"),
+        _ => DescribeMember(MemberOf(operation))
+    };
+
+    private static ISymbol? MemberOf(IOperation operation) => operation switch
+    {
+        IPropertyReferenceOperation reference => reference.Property,
+        IInvocationOperation invocation => invocation.TargetMethod,
+        IMethodReferenceOperation reference => reference.Method,
+        _ => operation.SemanticModel?.GetSymbolInfo(operation.Syntax).CandidateSymbols is { Length: > 0 } candidates
+            ? candidates[0]
+            : null
+    };
+
+    private static (string Advice, string Member) DescribeMember(ISymbol? member)
+    {
+        var typeName = member?.ContainingType?.Name ?? "";
+        var name = member is null ? "" : typeName + "." + member.Name;
+        return typeName switch
+        {
+            "DateTime" or "DateTimeOffset" or "TimeProvider" => (
+                "Take the current time as a 'DateTimeOffset now' parameter (or a 'TimeProvider clock' parameter)", name),
+            "Guid" => ("Take the new id as a 'Guid id' parameter", name),
+            "Environment" => (
+                "Take the value as a parameter (for example 'string newLine', or a settings record built by the shell)",
+                name),
+            _ => (RandomAdvice, name)
+        };
     }
 
     private static bool IsHiddenInput(IOperation operation, CancellationToken cancellationToken) => operation switch
@@ -156,6 +195,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
         MemberAccessExpressionSyntax memberAccess => ReportLocation(memberAccess.Name),
         MemberBindingExpressionSyntax memberBinding => ReportLocation(memberBinding.Name),
         ObjectCreationExpressionSyntax creation => ReportLocation(creation.Type),
+        ImplicitObjectCreationExpressionSyntax creation => creation.NewKeyword.GetLocation(),
         QualifiedNameSyntax qualified => ReportLocation(qualified.Right),
         AliasQualifiedNameSyntax aliasQualified => ReportLocation(aliasQualified.Name),
         SimpleNameSyntax name => name.Identifier.GetLocation(),

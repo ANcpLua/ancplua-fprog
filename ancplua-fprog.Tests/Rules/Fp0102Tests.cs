@@ -154,47 +154,85 @@ public sealed class Fp0102Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0102_TargetTypedNewRandom_NoReport() => VerifyAsync("""
+    public Task FP0102_TargetTypedNewRandomAtNewKeyword_Reports() => VerifyAsync("""
         using System;
 
         [Fprog.FunctionalCore]
         public static class Dice
         {
-            public static Random Create() => new(7);
+            public static Random Create() => {|FP0102:new|}(7);
         }
         """);
 
     [TestMethod]
-    public Task FP0102_TargetTypedNewRandomHasNoCatalogSpan_Reports() => VerifyAsync("""
+    public Task FP0102_TargetTypedNewOfOtherTypesAndRandomSubclass_NoReport() => VerifyAsync("""
+        using System;
+        using System.Collections.Generic;
+
+        [Fprog.FunctionalCore]
+        public static class Makers
+        {
+            public sealed class Seeded() : Random(42);
+
+            public static Seeded Subclass() => new();
+
+            public static List<int> Items() => new();
+
+            public static DateTime Epoch() => new(2000, 1, 1);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0102_UsingStaticDateTimeAndGuid_Reports() => VerifyAsync("""
+        using System;
+        using static System.DateTime;
+        using static System.Guid;
+        using Clock = System.DateTime;
+
+        [Fprog.FunctionalCore]
+        public static class Imported
+        {
+            public static DateTime Day() => {|FP0102:Today|} + (Clock.{|FP0102:UtcNow|} - Clock.MinValue);
+
+            public static Guid Id() => {|FP0102:NewGuid|}();
+
+            public static Func<Guid> Factory() => {|FP0102:NewGuid|};
+
+            public static DateTime Floor() => MaxValue < UnixEpoch ? MaxValue : UnixEpoch;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0102_TargetTypedNewRandomInStaticField_Reports() => VerifyAsync("""
         using System;
 
         [Fprog.FunctionalCore]
         public static class Dice
         {
-            private static readonly Random Rng = new();
+            private static readonly Random Rng = {|FP0102:new|}();
 
             public static int Roll() => Rng.{|FP0102:Next|}(1, 7);
         }
         """);
 
     [TestMethod]
-    public Task FP0102_TargetTypedNewRandomInLocalsArgumentsAndDynamicSeed_NoReport() => VerifyAsync("""
+    public Task FP0102_TargetTypedNewRandomInLocalsArgumentsAndDynamicSeed_Reports() => VerifyAsync("""
         using System;
 
         [Fprog.FunctionalCore]
         public static class Dice
         {
-            public static Random Seeded(dynamic seed) => new(seed);
+            public static Random Seeded(dynamic seed) => {|FP0102:new|}(seed);
 
-            public static Random[] Pair() => [new(1), new()];
+            public static Random[] Pair() => [{|FP0102:new|}(1), {|FP0102:new|}()];
 
             public static Random Pass(Random random) => random;
 
-            public static Random Argument() => Pass(new());
+            public static Random Argument() => Pass({|FP0102:new|}());
 
             public static Random Local()
             {
-                Random random = new(3);
+                Random random = {|FP0102:new|}(3);
                 return random;
             }
         }
