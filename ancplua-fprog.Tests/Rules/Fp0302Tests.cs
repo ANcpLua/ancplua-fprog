@@ -339,7 +339,45 @@ public sealed class Fp0302Tests(TestContext testContext)
         """);
 
     [TestMethod]
-    public Task FP0302_IndexersNotDeclaredOnTheDictionaryTypes_NoReport() => VerifyAsync("""
+    public Task FP0302_IndexersImplementingTheDictionaryInterfaces_Reports() => VerifyAsync("""
+        using System.Collections;
+        using System.Collections.Concurrent;
+        using System.Collections.Frozen;
+        using System.Collections.Generic;
+        using System.Collections.Immutable;
+
+        public sealed class Own : IReadOnlyDictionary<string, int>
+        {
+            public int this[string key] => key.Length;
+            public IEnumerable<string> Keys => [];
+            public IEnumerable<int> Values => [];
+            public int Count => 0;
+            public bool ContainsKey(string key) => false;
+            public bool TryGetValue(string key, out int value) { value = 0; return false; }
+            public IEnumerator<KeyValuePair<string, int>> GetEnumerator() => Enumerable().GetEnumerator();
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+            private static IEnumerable<KeyValuePair<string, int>> Enumerable() { yield break; }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Others
+        {
+            public static int Concurrent(ConcurrentDictionary<string, int> d) => {|FP0302:d["a"]|};
+
+            public static int Sorted(SortedDictionary<string, int> d) => {|FP0302:d["a"]|};
+
+            public static int Immutable(ImmutableDictionary<string, int> d) => {|FP0302:d["a"]|};
+
+            public static int SortedImmutable(ImmutableSortedDictionary<string, int> d) => {|FP0302:d["a"]|};
+
+            public static int Frozen(FrozenDictionary<string, int> d) => {|FP0302:d["a"]|};
+
+            public static int Custom(Own d) => {|FP0302:d["a"]|};
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_DictionaryInterfaceWritesAndOtherIndexers_NoReport() => VerifyAsync("""
         using System.Collections.Concurrent;
         using System.Collections.Generic;
         using System.Collections.Immutable;
@@ -347,11 +385,51 @@ public sealed class Fp0302Tests(TestContext testContext)
         [Fprog.FunctionalCore]
         public static class Others
         {
-            public static int Concurrent(ConcurrentDictionary<string, int> d) => d["a"];
+            public static ConcurrentDictionary<string, int> Set(ConcurrentDictionary<string, int> d)
+            {
+                d["a"] = 1;
+                return d;
+            }
 
-            public static int Sorted(SortedDictionary<string, int> d) => d["a"];
+            public static SortedDictionary<string, int> Seed() => new() { ["a"] = 1 };
 
-            public static int Immutable(ImmutableDictionary<string, int> d) => d["a"];
+            public static int Items(List<int> xs, ImmutableList<int> ys, int[] zs, string s)
+                => xs.Count > 0 && ys.Count > 0 && zs.Length > 0 && s.Length > 0 ? xs[0] + ys[0] + zs[0] + s[0] : 0;
+
+            public static int Total(ImmutableDictionary<string, int> d) => d.GetValueOrDefault("a");
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_MoreSystemParseMethods_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Parsing
+        {
+            public static System.Version V(string text) => System.Version.{|FP0302:Parse|}(text);
+
+            public static System.TimeSpan T(string text) => System.TimeSpan.{|FP0302:Parse|}(text);
+
+            public static bool B(string text) => bool.{|FP0302:Parse|}(text);
+
+            public static double D(System.ReadOnlySpan<char> text) => double.{|FP0302:Parse|}(text);
+
+            public static System.DayOfWeek E(string text) => (System.DayOfWeek)System.Enum.{|FP0302:Parse|}(typeof(System.DayOfWeek), text);
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0302_ParseInSubNamespacesOfSystemAndTryForms_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Parsing
+        {
+            public static System.Net.IPAddress Ip(string text) => System.Net.IPAddress.Parse(text);
+
+            public static System.Version? V(string text) => System.Version.TryParse(text, out var v) ? v : null;
+
+            public static System.DayOfWeek? E(string text) => System.Enum.TryParse<System.DayOfWeek>(text, out var d) ? d : null;
+
+            public static System.TimeSpan? T(string text)
+                => System.TimeSpan.TryParseExact(text, "c", null, out var t) ? t : null;
         }
         """);
 

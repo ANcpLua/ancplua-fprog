@@ -15,7 +15,12 @@ namespace ancplua_fprog.Rules;
 /// (not the <c>OrDefault</c> forms; the same operators of <c>System.Linq.ImmutableArrayExtensions</c>,
 /// which <c>xs.First()</c> on an <c>ImmutableArray&lt;T&gt;</c> binds to, count as well) and reads of the
 /// indexer declared on <c>Dictionary&lt;,&gt;</c>, <c>IDictionary&lt;,&gt;</c> or
-/// <c>IReadOnlyDictionary&lt;,&gt;</c>. Calls are reported at the method
+/// <c>IReadOnlyDictionary&lt;,&gt;</c>, including every indexer that implements the indexer of
+/// <c>IDictionary&lt;,&gt;</c> or <c>IReadOnlyDictionary&lt;,&gt;</c> (stricter reading: <c>ConcurrentDictionary</c>,
+/// <c>SortedDictionary</c>, <c>ImmutableDictionary</c> throw on a missing key as well), and the <c>ref readonly</c>
+/// key indexer of a dictionary type such as <c>FrozenDictionary&lt;,&gt;</c>.
+/// <c>T.Parse</c> on a type parameter constrained to <c>System.IParsable&lt;T&gt;</c> binds to
+/// <c>System.IParsable&lt;T&gt;.Parse</c>, a static method on a type in <c>System</c>, and is reported. Calls are reported at the method
 /// name token, indexer reads at the whole element access (for <c>d?[key]</c> including the receiver).
 /// Method groups are references, not calls, and are not reported.
 /// </summary>
@@ -25,7 +30,7 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0302",
         "Do not call partial members in the functional core",
-        "'{0}' fails for some inputs; use a total alternative such as TryParse, FirstOrDefault or TryGetValue");
+        "'{0}' throws for some inputs; write '{1}' instead and handle the failure case as a value");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -51,7 +56,7 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
 
         var name = NameToken(syntax.Expression);
         if (name.IsKind(SyntaxKind.IdentifierToken))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), method.Name));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), method.Name, TotalAlternative(method.Name)));
     }
 
     /// <summary>The method name token of the invoked expression, also when it is parenthesized: <c>(int.Parse)(s)</c>.</summary>
@@ -64,18 +69,67 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
         _ => default
     };
 
+    /// <summary>The total member to write instead of the partial one.</summary>
+    private static string TotalAlternative(string name) => name switch
+    {
+        "Parse" => "TryParse(text, out var value)",
+        "ElementAt" => "ElementAtOrDefault(index)",
+        _ => name + "OrDefault()"
+    };
+
     private static void AnalyzePropertyReference(OperationAnalysisContext context)
     {
         var reference = (IPropertyReferenceOperation)context.Operation;
         if (!reference.Property.IsIndexer
-            || !IsDictionaryType(reference.Property.OriginalDefinition.ContainingType)
             || IsWriteOnlyTarget(reference)
+            || !IsDictionaryIndexer(reference.Property)
             || !CoreScope.IsInCore(context.ContainingSymbol))
         {
             return;
         }
 
-        context.ReportDiagnostic(Diagnostic.Create(Rule, ElementAccessLocation(reference.Syntax), "this[]"));
+        context.ReportDiagnostic(Diagnostic.Create(
+            Rule, ElementAccessLocation(reference.Syntax), "this[key]", "TryGetValue(key, out var value)"));
+    }
+
+    /// <summary>
+    /// True for the indexer declared on one of the dictionary types, or for an indexer that implements
+    /// the indexer of <c>IDictionary&lt;,&gt;</c> or <c>IReadOnlyDictionary&lt;,&gt;</c>, or a <c>ref readonly</c>
+    /// indexer keyed by <c>TKey</c> on a type that implements one of them.
+    /// </summary>
+    private static bool IsDictionaryIndexer(IPropertySymbol indexer)
+    {
+        if (IsDictionaryType(indexer.OriginalDefinition.ContainingType))
+            return true;
+
+        var type = indexer.ContainingType;
+        if (type is null)
+            return false;
+
+        foreach (var contract in type.AllInterfaces)
+        {
+            if (!IsDictionaryType(contract.OriginalDefinition))
+                continue;
+
+            // FrozenDictionary<,>: the public indexer returns by ref and implements the interface indexer
+            // explicitly; it is the same key lookup and throws on a missing key as well.
+            if (indexer is { ReturnsByRefReadonly: true, Parameters.Length: 1 }
+                && SymbolEqualityComparer.Default.Equals(indexer.Parameters[0].Type, contract.TypeArguments[0]))
+            {
+                return true;
+            }
+
+            foreach (var member in contract.GetMembers("this[]"))
+            {
+                if (member is IPropertySymbol { IsIndexer: true }
+                    && SymbolEqualityComparer.Default.Equals(type.FindImplementationForInterfaceMember(member), indexer))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool IsPartialMethod(IMethodSymbol method) => method.Name switch
