@@ -27,7 +27,7 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0104",
         "Do not write through a parameter in the functional core",
-        "Return a new value instead of mutating the object passed in");
+        "Do not write to '{0}' through parameter '{1}': build a changed copy instead (`{1} with {{ Member = newValue }}` for a record, a new array or immutable collection for elements) and return it to the caller");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -106,7 +106,7 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
                 case IParameterReferenceOperation { Parameter: var parameter }:
                     // A struct parameter (Span<T> included) is not a reference-type parameter unless ref/out.
                     if (MayBeReference(parameter.Type) || parameter.RefKind is RefKind.Ref or RefKind.Out)
-                        Report(context, target, start);
+                        Report(context, target, start, parameter.Name);
                     return;
                 case IConditionalAccessInstanceOperation instance:
                     var access = EnclosingAccess(instance);
@@ -194,7 +194,7 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
         return null;
     }
 
-    private static void Report(OperationAnalysisContext context, IOperation target, int start)
+    private static void Report(OperationAnalysisContext context, IOperation target, int start, string parameter)
     {
         // The target expression as written: `(p.X) = 1` is reported at `(p.X)`.
         var syntax = target.Syntax;
@@ -202,6 +202,7 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
             syntax = parenthesized;
 
         var span = TextSpan.FromBounds(Math.Min(start, syntax.SpanStart), syntax.Span.End);
-        context.ReportDiagnostic(Diagnostic.Create(Rule, Location.Create(syntax.SyntaxTree, span)));
+        var location = Location.Create(syntax.SyntaxTree, span);
+        context.ReportDiagnostic(Diagnostic.Create(Rule, location, syntax.SyntaxTree.GetText(context.CancellationToken).ToString(span), parameter));
     }
 }
