@@ -670,6 +670,74 @@ public sealed class Fp0201Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0201_FieldsInUnionAndItsCasesInCore_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private static int {|FP0201:_created|};
+            private Shape() { }
+
+            public sealed record Circle : Shape
+            {
+                public double {|FP0201:Radius|};
+            }
+
+            public sealed record Square(double Side) : Shape
+            {
+                public readonly double Area = Side * Side;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldsInUnionOutsideCore_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private static int _created;
+            private Shape() { }
+
+            public sealed record Circle : Shape
+            {
+                public double Radius;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_FieldsInEveryPartOfPartialTypeReportOnce_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public partial class Ledger
+        {
+            private int {|FP0201:_debit|};
+        }
+
+        public partial class Ledger
+        {
+            private int {|FP0201:_credit|};
+            private readonly int _limit = 10;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0201_ReadonlyStructAndReadonlyRecordStructFields_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public readonly struct Money(decimal amount)
+        {
+            public readonly decimal Amount = amount;
+            public static readonly Money Zero = new(0m);
+            public const string Currency = "EUR";
+        }
+
+        [Fprog.FunctionalCore]
+        public readonly record struct Range(int Start, int End)
+        {
+            public readonly int Length = End - Start;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0201", source, testContext.CancellationToken);
 }
