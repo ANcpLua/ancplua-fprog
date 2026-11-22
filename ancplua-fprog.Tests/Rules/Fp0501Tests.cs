@@ -1396,6 +1396,85 @@ public sealed class Fp0501Tests(TestContext testContext)
         }
         """ + Shape);
 
+    // Third pass: catch-alls beside a case in an "or", and union values read from members.
+
+    [TestMethod]
+    public Task FP0501_NotNullEmptyPropertyOrObjectInTopLevelOr_Reports() => VerifyAsync("""
+        public static class Area
+        {
+            public static int NotNull(Shape shape) => shape switch
+            {
+                Shape.Circle or {|FP0501:not null|} => 1,
+                null => 0
+            };
+
+            public static int Statement(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Circle or {|FP0501:{ }|}:
+                        return 1;
+                }
+
+                return -1;
+            }
+
+            public static int Object(Shape shape)
+            {
+                switch (shape)
+                {
+                    case Shape.Square or {|FP0501:object|}:
+                        return 2;
+                }
+
+                return -1;
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_UnionValueReadFromPropertyOrMethod_Reports() => VerifyAsync("""
+        public sealed record Holder(Shape Shape)
+        {
+            public Shape Get() => Shape;
+        }
+
+        public static class Area
+        {
+            public static int Property(Holder holder) => holder.Shape switch
+            {
+                Shape.Circle => 1,
+                {|FP0501:_|} => 0
+            };
+
+            public static int Method(Holder holder)
+            {
+                switch (holder.Get())
+                {
+                    case Shape.Circle:
+                        return 1;
+                    {|FP0501:default|}:
+                        return 0;
+                }
+            }
+        }
+        """ + Shape);
+
+    [TestMethod]
+    public Task FP0501_DefaultLiteralAndNegatedCase_NoReport() => VerifyAsync("""
+        public static class Area
+        {
+            public static Shape? None() => default;
+
+            public static int Of(Shape shape) => shape switch
+            {
+                not Shape.Circle and not null => 2,
+                Shape.Circle => 1,
+                null => 0
+            };
+        }
+        """ + Shape);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);
 }
