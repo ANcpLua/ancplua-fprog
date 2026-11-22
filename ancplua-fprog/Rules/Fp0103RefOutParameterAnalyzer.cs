@@ -25,7 +25,7 @@ public sealed class Fp0103RefOutParameterAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0103",
         "Do not use ref or out parameters in the functional core",
-        "Return the result instead of writing through the '{0}' parameter");
+        "Remove the '{0}' modifier from parameter '{1}': return the value it carries in the result instead, as a tuple, a record or Option<T> (for Try-methods), and take a plain or 'in' parameter for input");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -71,6 +71,10 @@ public sealed class Fp0103RefOutParameterAnalyzer : DiagnosticAnalyzer
         if (!CoreScope.IsDeclaredInSource(parameter) || !CoreScope.IsInCore(parameter))
             return;
 
-        context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.Identifier.GetLocation(), parameter.Name));
+        context.ReportDiagnostic(Diagnostic.Create(
+            Rule,
+            syntax.Identifier.GetLocation(),
+            parameter.RefKind == RefKind.Out ? "out" : "ref",
+            parameter.Name));
     }
 }
