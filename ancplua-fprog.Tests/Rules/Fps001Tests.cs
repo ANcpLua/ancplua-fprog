@@ -1044,6 +1044,59 @@ public sealed class Fps001Tests(TestContext testContext)
         }
         """, Suppressed, DiagnosticResult.CompilerWarning("CS8509").WithLocation(1).WithIsSuppressed(true));
 
+    [TestMethod]
+    public Task FPS001_SwitchInLambdaAndLocalFunctionInsideMethod_Reports() => VerifyAsync(Shapes + """
+        public static class Geometry
+        {
+            public static System.Func<Shape, int> Coder()
+            {
+                System.Func<Shape, int> code = shape => shape {|#0:switch|}
+                {
+                    Shape.Circle => 1,
+                    Shape.Square => 2
+                };
+                return Twice;
+
+                int Twice(Shape shape) => code(shape) + shape {|#1:switch|}
+                {
+                    Shape.Circle or Shape.Square => 0
+                };
+            }
+        }
+        """, Suppressed, DiagnosticResult.CompilerWarning("CS8509").WithLocation(1).WithIsSuppressed(true));
+
+    [TestMethod]
+    public Task FPS001_OrArmWithRefutableSideIsNotOwnArm_NoReport() => VerifyAsync(Shapes + """
+        public static class Geometry
+        {
+            public static int Code(Shape shape) => shape {|#0:switch|}
+            {
+                Shape.Circle { Radius: > 0 } or Shape.Square => 1
+            };
+        }
+        """, NotSuppressed);
+
+    [TestMethod]
+    public Task FPS001_GenericUnionWithMissingCase_NoReport() => VerifyAsync("""
+        [Fprog.Union]
+        public abstract record Option<T>
+        {
+            private Option() { }
+
+            public sealed record Some(T Value) : Option<T>;
+
+            public sealed record None : Option<T>;
+        }
+
+        public static class Options
+        {
+            public static int Get(Option<int> option) => option {|#0:switch|}
+            {
+                Option<int>.Some(var value) => value
+            };
+        }
+        """, NotSuppressed);
+
     private Task VerifyAsync(string source, params DiagnosticResult[] expected)
         => FpAnalyzerTestHost.VerifySuppressionAsync("CS8509", source, testContext.CancellationToken, expected);
 }
