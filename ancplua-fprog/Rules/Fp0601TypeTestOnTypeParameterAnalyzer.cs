@@ -195,7 +195,7 @@ public sealed class Fp0601TypeTestOnTypeParameterAnalyzer : DiagnosticAnalyzer
     /// <summary>True for a value of an opaque type, also seen through conversions such as <c>(object)value</c>.</summary>
     private static bool IsOpaqueValue(IOperation? value)
     {
-        for (; value is not null; value = (value as IConversionOperation)?.Operand)
+        for (; value is not null; value = (value as IConversionOperation) is { OperatorMethod: null } conversion ? conversion.Operand : null)
         {
             if (IsOpaque(value.Type))
                 return true;

@@ -1042,6 +1042,39 @@ public sealed class Fp0601Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0601_TestOnUserDefinedConversionResult_NoReport() => VerifyAsync("""
+        public abstract class Maybe<T>
+        {
+            private Maybe() { }
+
+            public sealed class Some(T value) : Maybe<T>
+            {
+                public T Value { get; } = value;
+            }
+
+            public sealed class None : Maybe<T> { }
+
+            public static implicit operator Maybe<T>(T value) => new Some(value);
+        }
+
+        [Fprog.FunctionalCore]
+        public static class Inspect
+        {
+            public static bool HasSome<T>(T value) => (Maybe<T>)value is Maybe<T>.Some;
+
+            public static int Pick<T>(T value) => ((Maybe<T>)value) switch
+            {
+                Maybe<T>.Some => 1,
+                _ => 0
+            };
+
+            public static Maybe<T>.Some? AsSome<T>(T value) => ((Maybe<T>)value) as Maybe<T>.Some;
+
+            public static string Name<T>(T value) => ((Maybe<T>)value).GetType().Name;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0601", source, testContext.CancellationToken);
 }
