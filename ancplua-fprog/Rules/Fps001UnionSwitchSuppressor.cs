@@ -21,7 +21,7 @@ public sealed class Fps001UnionSwitchSuppressor : DiagnosticSuppressor
     private static readonly SuppressionDescriptor Rule = new(
         "FPS001",
         "CS8509",
-        "The switch expression handles every case of the union");
+        "Every case of the union has its own arm without a 'when' clause, so no non-null value of the union can fall through this switch expression");
 
     /// <inheritdoc />
     public override ImmutableArray<SuppressionDescriptor> SupportedSuppressions { get; } = [Rule];
