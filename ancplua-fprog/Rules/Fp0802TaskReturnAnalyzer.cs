@@ -99,6 +99,8 @@ public sealed class Fp0802TaskReturnAnalyzer : DiagnosticAnalyzer
 
         var reported = returnTypeSyntax is RefTypeSyntax refType ? refType.Type : returnTypeSyntax;
         var resultType = ResultType(symbol.ReturnType, taskTypes);
+        for (var depth = 0; resultType is not null && depth < MaxConstraintDepth && IsTaskType(resultType, taskTypes); depth++)
+            resultType = ResultType(resultType, taskTypes);
         context.ReportDiagnostic(Diagnostic.Create(
             Rule,
             reported.GetLocation(),
@@ -114,7 +116,7 @@ public sealed class Fp0802TaskReturnAnalyzer : DiagnosticAnalyzer
         MethodDeclarationSyntax method => method.Identifier.ValueText,
         LocalFunctionStatementSyntax localFunction => localFunction.Identifier.ValueText,
         OperatorDeclarationSyntax @operator => "operator " + @operator.OperatorToken.ValueText,
-        ConversionOperatorDeclarationSyntax conversion => "operator " + conversion.Type.ToString(),
+        ConversionOperatorDeclarationSyntax conversion => "operator " + conversion.Type,
         _ => node.ToString()
     };
 

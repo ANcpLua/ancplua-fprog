@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -1099,6 +1101,27 @@ public sealed class Fp0802Tests(TestContext testContext)
             public static {|FP0802:Task<{|CS0246:Missing|}>|} Half() => default;
         }
         """);
+
+    [TestMethod]
+    public Task FP0802_NestedTaskMessageNamesInnermostResult_Reports() => FpAnalyzerTestHost.VerifyRuleAsync(
+        "FP0802",
+        """
+        using System.Threading.Tasks;
+
+        [Fprog.FunctionalCore]
+        public static class Work
+        {
+            public static {|#0:Task<Task<int>>|} Nested() => Task.FromResult(Task.FromResult(1));
+
+            public static {|#1:ValueTask<Task>|} Effect() => new(Task.CompletedTask);
+        }
+        """,
+        testContext.CancellationToken,
+        new DiagnosticResult("FP0802", DiagnosticSeverity.Warning).WithLocation(0)
+            .WithArguments("Nested", "Task<Task<int>>", "the plain result 'int'"),
+        new DiagnosticResult("FP0802", DiagnosticSeverity.Warning).WithLocation(1)
+            .WithArguments("Effect", "ValueTask<Task>",
+                "a value that describes the effect (a record or a union case) for the shell to run"));
 
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0802", source, testContext.CancellationToken);
