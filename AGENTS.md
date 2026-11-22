@@ -1,29 +1,26 @@
-# ancplua-fprog: playbook
+# ancplua-fprog: maintainer contract
 
-@claude repo needs heav< cleanup and production setup
+Roslyn analyzers that check functional-programming rules in C#, shipped as the NuGet package
+`ANcpLua.Fprog.Analyzers`. This file is binding for everyone who changes the repository, human
+or agent. `README.md` is the user documentation; `docs/production-setup.md` records why the
+repository looks the way it does.
 
-You are building Roslyn analyzers that verify functional-programming rules in C#.
-This file is binding. `docs/SPEC.source.md` explains the ideas behind the rules; it was
-written by another model and its claims are **not verified**. `docs/ROSLYN.source.md` maps the
-rules to Roslyn APIs; its API names were checked against Roslyn 5.9.0, and its errata are listed
-at the top. Where either document differs from this file, this file wins.
-
-## Goal
-
-Implement as many rules from the catalog below as you can, each one correct.
-Correct means: the hidden tests for that rule pass and the rule reports nothing on the
-hidden clean corpus. A rule that is half done scores nothing, so finish rules one at a time.
+`docs/SPEC.source.md` explains the ideas behind the rules; it was written by another model and
+its claims are **not verified**. `docs/ROSLYN.source.md` maps the rules to Roslyn APIs; its API
+names were checked against Roslyn 5.9.0, and its errata are listed at the top. Where either
+document differs from this file, this file wins.
 
 ## Environment
 
 - .NET 11 SDK `11.0.100`, pinned in `global.json`. C# language version `preview`.
-- Newer compiler APIs may be missing from your training data. Before you rely on an API you
-  are unsure about, read its real signature:
+- Before you rely on a compiler API you are unsure about, read its real signature:
   `dotnet tool run ref assembly ~/.nuget/packages/microsoft.codeanalysis.csharp/<version>/lib/netstandard2.0/Microsoft.CodeAnalysis.CSharp.dll --type 'Microsoft.CodeAnalysis.CSharp.Syntax.SwitchExpressionSyntax'`
 - Tests run on MSTest with Microsoft.Testing.Platform. Reference assemblies come from
   `Basic.Reference.Assemblies.Net110`; nothing is downloaded at test time.
-- The analyzer's `Microsoft.CodeAnalysis.CSharp` version is pinned to the compiler in the pinned
-  SDK or lower. A newer one would not load in the compiler (CS9057). Do not change it.
+- The analyzer's `Microsoft.CodeAnalysis.CSharp` version stays at or below the compiler in the
+  oldest SDK the package supports. A newer one does not load in the compiler (CS9057). Raising
+  it raises the minimum SDK for every user: treat it as a breaking change.
+- `RefTrace` is not on nuget.org; `tools/feed` holds the package that `nuget.config` points to.
 
 ## Commands
 
@@ -31,13 +28,15 @@ hidden clean corpus. A rule that is half done scores nothing, so finish rules on
 | --- | --- |
 | `make tools` | Restores the pinned local tools `jb` and `ref` |
 | `make build` | Builds the solution with warnings as errors |
-| `make test` | Runs all visible tests |
+| `make test` | Runs all tests |
 | `make inspect` | ReSharper InspectCode; fails on any finding at warning level or above |
 | `make verify-dll` | RefTrace: no Workspaces dependency, no reflection or dynamic code in the analyzer DLL |
-| `make check` | All of the above. Your work is done only when this exits 0 |
+| `make check` | All of the above. A change is done only when this exits 0 |
+| `make pack` | Packs `ANcpLua.Fprog.Analyzers` into `artifacts/package` |
 | `make manifest` | Writes commit, SDK and tool versions to `artifacts/run-manifest.txt` |
 
-`mise run check` and `mise run test` do the same.
+`mise run check` and `mise run test` do the same. CI (`.github/workflows/check.yml`) runs the
+`make check` steps on every push, then packs and uploads the `.nupkg`.
 
 ## Scope
 
@@ -45,15 +44,17 @@ hidden clean corpus. A rule that is half done scores nothing, so finish rules on
   every type in an assembly annotated `[assembly: Fprog.FunctionalCore]`.
 - A **union** is a class or record annotated `[Fprog.Union]`. Its **cases** are the types that
   derive from it directly.
-- Match the attributes by metadata name (`Fprog.FunctionalCoreAttribute`, `Fprog.UnionAttribute`).
-  `FpAnalyzerTestHost` adds their source to every test compilation.
+- Match the attributes by metadata name (`Fprog.FunctionalCoreAttribute`, `Fprog.UnionAttribute`)
+  in any assembly. The package delivers them as source (`ancplua-fprog/contentFiles/FprogAttributes.cs`);
+  `FpAnalyzerTestHost` adds the same declarations to every test compilation.
 - Rules FP01xx–FP03xx and FP06xx–FP08xx apply only inside core. Union rules apply to every union.
 - Only members declared in source count. Compiler-synthesized members (record `Deconstruct`,
   copy constructors, `EqualityContract`, backing fields) are exempt.
 
 ## Rule catalog (binding)
 
-The **report at** column is the exact span the hidden tests mark. A wrong span fails the test.
+The **report at** column is the exact span a diagnostic covers. Tests mark it, and users
+suppress and navigate by it: changing a span is a breaking change.
 
 | ID | Rule | Report at |
 | --- | --- | --- |
@@ -78,10 +79,9 @@ The **report at** column is the exact span the hidden tests mark. A wrong span f
 | FP0801 | References `System.IO`, `System.Net*`, `System.Data*`, `System.Console`, `System.Diagnostics.Process`, or `System.Threading.Thread/Monitor/Lock/Mutex/Semaphore/SemaphoreSlim/Interlocked/Timer`, or uses a `lock` statement. `using` directives do not count | the name token of the referenced type, or the `lock` keyword |
 | FP0802 | A method or local function returns `Task`, `Task<T>`, `ValueTask` or `ValueTask<T>` | the return type |
 
-## Bonus rules
+### Candidate rules
 
-Not scored until the referee publishes an exact definition. Do not start them before every
-binding rule you can finish is finished.
+Not implemented. Each needs an exact definition and span in the catalog before work starts.
 
 - Smart constructors: a public constructor on a type that also offers `TryCreate`/`Parse`.
 - Boolean-flag records: a record with two or more `bool` state properties.
@@ -90,60 +90,48 @@ binding rule you can finish is finished.
 ## Diagnostic conventions
 
 - One `DiagnosticDescriptor` per ID, category `Functional`, default severity `Warning`,
-  enabled by default. Titles and messages are free; hidden tests check only ID and span.
+  enabled by default. Titles and messages may change; ID, category, default severity and span
+  are release surface.
 - Analyzers are stateless and thread-safe; call `EnableConcurrentExecution()` and
-  `ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None)`.
-- The analyzer project targets `netstandard2.0` and keeps `EnforceExtendedAnalyzerRules`.
+  `ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None)`. An analyzer must not
+  throw (AD0001) on any input, including incomplete code.
+- The analyzer project targets `netstandard2.0`, keeps `EnforceExtendedAnalyzerRules`, and does
+  not reference `Microsoft.CodeAnalysis.Workspaces` (`make verify-dll` checks this).
 - Type names use .NET casing with the rule number, for example `Fp0301ThrowAnalyzer` and
   `Fp0301Tests`. Diagnostic IDs and test method names keep the upper-case ID
   (`FP0301_<Case>_Reports`). InspectCode accepts both.
-- Record each new ID in `AnalyzerReleases.Unshipped.md` (RS2008). Fix that finding; do not suppress it.
 
-## Workflow
+## Changing a rule
 
-**Phase 0, one agent, sequential.** Add the shared helpers every rule needs: deciding whether
-a symbol is in core, and building the union model (union type, its cases). `make check` must pass
-before anyone starts phase 1.
-
-**Phase 1, parallel, one agent per rule.** Each agent owns exactly one rule and only its files:
-`ancplua-fprog/Rules/Fpxxxx*.cs`, `ancplua-fprog.Tests/Rules/FpxxxxTests.cs` and its own line in
-`AnalyzerReleases.Unshipped.md`. Shared helpers change only with a note in the commit message.
-
-For each rule:
-
-1. Read its row in the catalog. If the row is ambiguous for a case, choose the stricter reading
-   and write that case down as a test.
-2. Write tests first. Name every test method `FPxxxx_<Case>_Reports` or `FPxxxx_<Case>_NoReport`
-   and call `FpAnalyzerTestHost.VerifyRuleAsync("FPxxxx", source, ct)` with markup `{|FPxxxx:...|}`.
-   Hidden tests use the same method, so your analyzer class names are free. For FPS001 call
+1. Change its catalog row first. If the row is ambiguous for a case, choose the stricter
+   reading and write that case down as a test.
+2. Write the test before the fix. Name every test method `FPxxxx_<Case>_Reports` or
+   `FPxxxx_<Case>_NoReport` and call `FpAnalyzerTestHost.VerifyRuleAsync("FPxxxx", source, ct)`
+   with markup `{|FPxxxx:...|}`. For FPS001 call
    `FpAnalyzerTestHost.VerifySuppressionAsync("CS8509", source, ct, expected)` with markup
    `{|#0:switch|}` and `DiagnosticResult.CompilerWarning("CS8509").WithLocation(0).WithIsSuppressed(true)`.
-3. Include at least one `_NoReport` test with correct FP code that looks similar, for example a
-   local `StringBuilder` in a pure function (allowed) or the same code outside core.
-4. Implement until `make test` passes, then commit: `FPxxxx: <rule in a few words>`.
+3. Every false positive that is fixed gets a `_NoReport` test with the code that triggered it.
+4. Keep each rule in its own files: `ancplua-fprog/Rules/Fpxxxx*.cs` and
+   `ancplua-fprog.Tests/Rules/FpxxxxTests.cs`. Shared helpers live in `ancplua-fprog/Shared/`;
+   say in the commit message when you change one.
+5. Commit as `FPxxxx: <change in a few words>`.
 
-Finish with `make check` and `make manifest`.
+## Releases and versions
+
+- A new ID goes into `AnalyzerReleases.Unshipped.md` (RS2008). Fix that finding; do not suppress it.
+- At a release, move the rows from `Unshipped` to a `## Release <version>` section in
+  `AnalyzerReleases.Shipped.md`. A changed category or severity of a shipped rule goes into
+  `### Changed Rules`, a removed one into `### Removed Rules`.
+- `VersionPrefix` in `ancplua-fprog/ancplua-fprog.csproj` is the next version. Semantic
+  versioning: a new rule or a wider rule is a minor version while below 1.0 and a major version
+  after it, because it can break a build that treats warnings as errors.
+- CI publishes to nuget.org only from a `v<version>` tag that the owner pushes.
 
 ## Allowed and forbidden
 
-Allowed:
-
-- Copying code from GitHub or from the Roslyn sources. Put the source URL in a comment above it.
-- Spawning as many subagents as useful, within the token budget.
-
-Forbidden, and checked by the referee:
-
-- Adding or changing package references.
-- Editing protected files: `Makefile`, `mise.toml`, `global.json`, `nuget.config`, this file,
-  `CLAUDE.md`, `docs/SPEC.source.md`, `docs/ROSLYN.source.md`, `.config/dotnet-tools.json`, `tools/feed`, `eng/`,
-  `ancplua-fprog.Tests/FpAnalyzerTestHost.cs`, `ancplua-fprog.Tests/Fixtures/`.
-- Silencing findings: `#pragma warning disable`, `NoWarn`, `SuppressMessage`, ReSharper disable
-  comments or settings files, deleting or skipping tests to make `make check` pass.
-- Network access from tests or analyzers.
-
-## Scoring
-
-The referee runs `make score` with hidden tests and a clean corpus kept outside this repository.
-A rule scores 1 when it has hidden tests, all of them pass, and the corpus has no diagnostic
-with its ID. Highest score wins; on a tie, the shorter wall time wins. Analyzer crashes in the
-corpus (AD0001) are listed and break ties against you.
+- Copying code from GitHub or from the Roslyn sources is allowed. Put the source URL in a
+  comment above it.
+- Package references change only with a reason in the commit body; see the Roslyn pin above.
+- Do not silence findings: no `#pragma warning disable`, `NoWarn`, `SuppressMessage`, ReSharper
+  disable comments or settings files, and no deleted or skipped tests to make `make check` pass.
+- No network access from tests or analyzers.
