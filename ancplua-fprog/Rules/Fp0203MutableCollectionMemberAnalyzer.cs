@@ -20,7 +20,7 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0203",
         "Do not store mutable collections in records or readonly structs",
-        "Use an immutable collection from System.Collections.Immutable or System.Collections.Frozen");
+        "Change the type of '{0}' from '{1}' to {2}; build it with ToImmutableArray(), ToImmutableDictionary() or ToFrozenDictionary() and return a new value instead of mutating it");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -54,8 +54,56 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
 
         var location = symbol.Locations.IsEmpty ? null : symbol.Locations[0];
         if (location is { IsInSource: true })
-            context.ReportDiagnostic(Diagnostic.Create(Rule, location));
+            context.ReportDiagnostic(Diagnostic.Create(
+                Rule,
+                location,
+                symbol.Name,
+                Display(type),
+                Suggest(Unwrap(type))));
     }
+
+    private static ITypeSymbol Unwrap(ITypeSymbol type)
+        => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
+
+    /// <summary>The immutable replacement the message names for a forbidden member type.</summary>
+    private static string Suggest(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol array)
+            return $"ImmutableArray<{Display(array.ElementType)}>";
+
+        if (type is not INamedTypeSymbol named)
+            return DefaultSuggestion;
+
+        if (named.Name == "StringBuilder")
+            return "string";
+
+        var arguments = named.TypeArguments;
+        switch (named.Name)
+        {
+            case "Dictionary" or "IDictionary" or "IReadOnlyDictionary" or "ConcurrentDictionary"
+                or "SortedDictionary" or "SortedList" or "ReadOnlyDictionary" when arguments.Length == 2:
+                return $"ImmutableDictionary<{Display(arguments[0])}, {Display(arguments[1])}> "
+                       + $"or FrozenDictionary<{Display(arguments[0])}, {Display(arguments[1])}>";
+            case "HashSet" or "ISet" or "IReadOnlySet" or "SortedSet" when arguments.Length == 1:
+                return $"ImmutableHashSet<{Display(arguments[0])}> or FrozenSet<{Display(arguments[0])}>";
+            case "Queue" or "ConcurrentQueue" when arguments.Length == 1:
+                return $"ImmutableQueue<{Display(arguments[0])}>";
+            case "Stack" or "ConcurrentStack" when arguments.Length == 1:
+                return $"ImmutableStack<{Display(arguments[0])}>";
+        }
+
+        return arguments.Length == 1 && named.ContainingType is null
+            ? $"ImmutableArray<{Display(arguments[0])}>"
+            : DefaultSuggestion;
+    }
+
+    private const string DefaultSuggestion
+        = "an immutable type such as ImmutableArray<T>, ImmutableList<T> or ImmutableDictionary<TKey, TValue>";
+
+    private static string Display(ITypeSymbol type)
+        => type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 
     private static bool IsRecordOrReadOnlyStruct(INamedTypeSymbol? type)
         => type is { IsRecord: true } or { TypeKind: TypeKind.Struct, IsReadOnly: true };

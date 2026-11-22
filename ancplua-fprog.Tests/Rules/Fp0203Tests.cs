@@ -759,6 +759,34 @@ public sealed class Fp0203Tests(TestContext testContext)
             Func<int[]> Make);
         """);
 
+    [TestMethod]
+    public Task FP0203_UnionRecordAndItsCases_Reports() => VerifyAsync("""
+        using System.Collections.Generic;
+
+        [Fprog.FunctionalCore]
+        [Fprog.Union]
+        public abstract record Shape
+        {
+            private Shape() { }
+
+            public IReadOnlyList<string> {|FP0203:Tags|} { get; init; } = [];
+
+            public sealed record Polygon(IEnumerable<int> {|FP0203:Points|}) : Shape;
+
+            public sealed record Circle(double Radius) : Shape;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0203_TypeParameterConstrainedToCollection_NoReport() => VerifyAsync("""
+        using System;
+        using System.Collections.Generic;
+
+        [Fprog.FunctionalCore]
+        public sealed record Holder<T, TItems>(T Value, TItems Items, Memory<int> Buffer, ReadOnlyMemory<char> Text)
+            where TItems : List<T>;
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0203", source, testContext.CancellationToken);
 }
