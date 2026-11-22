@@ -45,8 +45,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: make verify-dll
 
+      # The account's artifact storage can run full; a failed upload must not fail the gate.
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
+        continue-on-error: true
         with:
           name: artifacts
           path: |
