@@ -673,7 +673,7 @@ public sealed class Fp0403Tests(TestContext testContext)
             public record {|#0:Ok|}(T Value) : Result<T>;
         }
         """,
-        "Ok", "record", "Result<T>", "Result", "add the 'sealed' modifier");
+        "Ok", "record", "Result", "add 'sealed' to case 'Ok'");
 
     [TestMethod]
     public Task FP0403_MessageSaysWhereToMoveTopLevelCase_Reports() => VerifyMessageAsync("""
@@ -682,8 +682,8 @@ public sealed class Fp0403Tests(TestContext testContext)
 
         public class {|#0:Circle|} : Shape { }
         """,
-        "Circle", "class", "Shape", "Shape",
-        "add the 'sealed' modifier, and move it into the body of 'Shape' (a 'partial' declaration of 'Shape' can hold it in another file)");
+        "Circle", "class", "Shape",
+        "add 'sealed' to case 'Circle', and move case 'Circle' into the body of union 'Shape' (a 'partial' declaration of 'Shape' can hold it in another file)");
 
     [TestMethod]
     public Task FP0403_MessageNamesWrongContainer_Reports() => VerifyMessageAsync("""
@@ -696,7 +696,7 @@ public sealed class Fp0403Tests(TestContext testContext)
             }
         }
         """,
-        "Circle", "class", "Shape", "Shape", "move it out of 'Round' into the body of 'Shape'");
+        "Circle", "class", "Shape", "move case 'Circle' out of 'Round' into the body of union 'Shape'");
 
     [TestMethod]
     public Task FP0403_MessageForAbstractCaseNamesItsSubtypes_Reports() => VerifyMessageAsync("""
@@ -706,8 +706,27 @@ public sealed class Fp0403Tests(TestContext testContext)
             public abstract class {|#0:Polygon|} : Shape { }
         }
         """,
-        "Polygon", "class", "Shape", "Shape",
+        "Polygon", "class", "Shape",
         "replace 'abstract' with 'sealed' and declare each subtype of 'Polygon' as its own sealed case of 'Shape'");
+
+    [TestMethod]
+    public Task FP0403_MessageForPositionalRecordWithBaseArguments_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract record Shape(string Kind);
+
+        public record {|#0:Circle|}(double R) : Shape("circle");
+        """,
+        "Circle", "record", "Shape",
+        "add 'sealed' to case 'Circle', and move case 'Circle' into the body of union 'Shape' (a 'partial' declaration of 'Shape' can hold it in another file)");
+
+    [TestMethod]
+    public Task FP0403_MessageForGenericCaseOutsideUnion_Reports() => VerifyMessageAsync("""
+        [Fprog.Union]
+        public abstract class Option<T> { }
+
+        public sealed class {|#0:Some|}<TValue> : Option<TValue> { }
+        """,
+        "Some", "class", "Option", "move case 'Some' into the body of union 'Option' (a 'partial' declaration of 'Option' can hold it in another file)");
 
     [TestMethod]
     public Task FP0403_CaseTwoLevelsDeepInsideCase_Reports() => VerifyAsync("""
