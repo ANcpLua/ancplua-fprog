@@ -1014,6 +1014,34 @@ public sealed class Fp0601Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0601_UnmanagedAndAllowsRefStructConstraintsNameNoType_Reports() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Inspect
+        {
+            public static bool IsNumber<T>(T value) where T : unmanaged => value {|FP0601:is|} int;
+
+            public static string Runtime<T>(T value) where T : unmanaged => value.{|FP0601:GetType|}().Name;
+
+            public static string Name<T>() where T : allows ref struct => {|FP0601:typeof(T)|}.Name;
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0601_ArrayAndConstructedValuesOfTAreNotValuesOfT_NoReport() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public static class Inspect
+        {
+            public static string ArrayName<T>(T[] items) => items.GetType().Name;
+
+            public static string ListName<T>(System.Collections.Generic.List<T> items) => items.GetType().Name;
+
+            public static System.Type ListType<T>() => typeof(System.Collections.Generic.List<T>);
+
+            public static string Element<T>() => nameof(T) + typeof(T[]).Name;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0601", source, testContext.CancellationToken);
 }
