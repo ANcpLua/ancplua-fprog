@@ -19,7 +19,8 @@ public sealed class Fp0101VoidMethodAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0101",
         "Do not return void in the functional core",
-        "'{0}' returns void; return a value instead");
+        "'{0}' returns void; return what it computes instead: the new state (a `with` copy or a new record), "
+        + "a `Result<T, TError>` for an outcome that can fail, or a static operator that returns the new value");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -67,6 +68,6 @@ public sealed class Fp0101VoidMethodAnalyzer : DiagnosticAnalyzer
         }
 
         if (CoreScope.IsDeclaredInSource(symbol) && CoreScope.IsInCore(symbol))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), symbol.Name));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), name.ValueText));
     }
 }

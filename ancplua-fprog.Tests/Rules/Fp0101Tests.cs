@@ -987,6 +987,81 @@ public sealed class Fp0101Tests(TestContext testContext)
         }
         """);
 
+    [TestMethod]
+    public Task FP0101_VoidLocalFunctionInTopLevelStatementsUnderAssemblyLevelCore_Reports() => VerifyAsync("""
+        [assembly: Fprog.FunctionalCore]
+
+        {|CS8805:Mark(1);|}
+        System.GC.KeepAlive(Twice(2));
+
+        static void {|FP0101:Mark|}(int value) => System.GC.KeepAlive(value);
+        static int Twice(int value) => value * 2;
+        """);
+
+    [TestMethod]
+    public Task FP0101_LocalFunctionInTopLevelStatementsOutsideCore_NoReport() => VerifyAsync("""
+        {|CS8805:Mark(1);|}
+
+        static void Mark(int value) => System.GC.KeepAlive(value);
+        """);
+
+    [TestMethod]
+    public Task FP0101_VoidCompoundAssignmentOperatorInExtensionBlockInCore_ReportsAtOperatorToken() => VerifyAsync("""
+        public sealed class Tally
+        {
+            public int Value { get; set; }
+        }
+
+        [Fprog.FunctionalCore]
+        public static class TallyExtensions
+        {
+            extension(Tally tally)
+            {
+                public void operator {|FP0101:+=|}(int amount) => tally.Value += amount;
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_LocalFunctionInsidePartialMethodImplementationInCore_ReportsOnce() => VerifyAsync("""
+        [Fprog.FunctionalCore]
+        public sealed partial class Part
+        {
+            public partial int Size();
+
+            public partial int Size()
+            {
+                Probe();
+                return 1;
+
+                static void {|FP0101:Probe|}() { }
+            }
+        }
+        """);
+
+    [TestMethod]
+    public Task FP0101_ValueReturningExplicitInterfaceAndGenericOverrideInCore_NoReport() => VerifyAsync("""
+        public interface ICounter
+        {
+            int Next(int value);
+        }
+
+        public abstract class Mapper
+        {
+            public abstract T Map<T>(T value);
+        }
+
+        [Fprog.FunctionalCore]
+        public sealed class Counter : Mapper, ICounter
+        {
+            int ICounter.Next(int value) => value + 1;
+
+            public override T Map<T>(T value) => value;
+
+            public static Counter operator ++(Counter counter) => counter;
+        }
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0101", source, testContext.CancellationToken);
 }
