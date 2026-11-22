@@ -15,7 +15,7 @@ public sealed class Fp0401AbstractUnionAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0401",
         "A union must be abstract",
-        "Union '{0}' is not abstract; declare it abstract so only its cases can be instantiated");
+        "Union '{0}' is not abstract; declare it as '{1} {0}'{2}, so that only its sealed nested cases can be instantiated");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -41,8 +41,20 @@ public sealed class Fp0401AbstractUnionAnalyzer : DiagnosticAnalyzer
             if (!location.IsInSource)
                 continue;
 
-            context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, location, type.Name, Declaration(type), Removal(type)));
             return;
         }
+    }
+
+    // The declaration to write instead, keeping the kind of the union.
+    private static string Declaration(INamedTypeSymbol type) => type.IsRecord ? "abstract record" : "abstract class";
+
+    // A static or sealed type cannot also be abstract, so the message names the modifier to delete.
+    private static string Removal(INamedTypeSymbol type)
+    {
+        if (type.IsStatic)
+            return " and remove 'static'";
+
+        return type.IsSealed ? " and remove 'sealed'" : "";
     }
 }

@@ -682,6 +682,62 @@ public sealed class Fp0401Tests(TestContext testContext)
         }
         """);
 
+    // [Union] through 'using Fprog;', the full attribute class name, and an empty argument list.
+    [TestMethod]
+    public Task FP0401_AttributeSpellings_Reports() => VerifyAsync("""
+        using Fprog;
+
+        [Union]
+        public class {|FP0401:First|}
+        {
+        }
+
+        [UnionAttribute]
+        public record {|FP0401:Second|};
+
+        [Fprog.Union()]
+        public sealed class {|FP0401:Third|}
+        {
+        }
+        """);
+
+    // The span is the identifier only, never the type parameter list.
+    [TestMethod]
+    public Task FP0401_GenericUnionSpanIsIdentifierOnly_Reports() => VerifyAsync("""
+        [Fprog.Union]
+        public record {|FP0401:Result|}<TValue, TError>
+        {
+            public sealed record Ok(TValue Value) : Result<TValue, TError>;
+        }
+        """);
+
+    // Decided: a union is a class or record (AGENTS.md, "Scope"). A struct or record struct cannot be
+    // abstract, and UnionAttribute only targets classes (CS0592), so FP0401 does not report it.
+    [TestMethod]
+    public Task FP0401_StructAndRecordStructWithUnionAttribute_NoReport() => VerifyAsync("""
+        [{|CS0592:Fprog.Union|}]
+        public struct Point
+        {
+        }
+
+        [{|CS0592:Fprog.Union|}]
+        public readonly record struct Pair(int A, int B);
+        """);
+
+    // Decided: a C# 15 'union' declaration is a struct, not a class or record, so it is not an Fprog
+    // union (AGENTS.md, "Scope") and FP0401 does not report it, with or without [Fprog.Union].
+    [TestMethod]
+    public Task FP0401_NativeUnionDeclaration_NoReport() => VerifyAsync("""
+        public sealed record Cat(string Name);
+
+        public sealed record Dog(string Name);
+
+        public union Pet(Cat, Dog);
+
+        [{|CS0592:Fprog.Union|}]
+        public union Animal(Cat, Dog);
+        """);
+
     private Task VerifyAsync(string source)
         => FpAnalyzerTestHost.VerifyRuleAsync("FP0401", source, testContext.CancellationToken);
 }
