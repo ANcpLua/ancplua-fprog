@@ -17,7 +17,7 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0301",
         "Do not throw in the functional core",
-        "Return an error value instead of throwing");
+        "Return a failure value instead of {0}: a Result<T, TError>, an Option<T>, or an error case of a [Fprog.Union] type, and let the caller match on it");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -42,14 +42,25 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
             || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
-        var keyword = context.Node switch
+        var (keyword, thrown) = context.Node switch
         {
-            ThrowStatementSyntax statement => statement.ThrowKeyword,
-            ThrowExpressionSyntax expression => expression.ThrowKeyword,
-            _ => default
+            ThrowStatementSyntax statement => (statement.ThrowKeyword, statement.Expression),
+            ThrowExpressionSyntax expression => (expression.ThrowKeyword, expression.Expression),
+            _ => (default, null)
         };
 
         if (keyword.IsKind(SyntaxKind.ThrowKeyword))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, keyword.GetLocation()));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, keyword.GetLocation(), Describe(context, thrown)));
+    }
+
+    // "rethrowing the caught exception" for `throw;`, else "throwing 'ArgumentNullException'" (or
+    // "throwing" when the thrown expression does not bind, as in incomplete code).
+    private static string Describe(SyntaxNodeAnalysisContext context, ExpressionSyntax? thrown)
+    {
+        if (thrown is null)
+            return "rethrowing the caught exception";
+
+        var type = context.SemanticModel.GetTypeInfo(thrown, context.CancellationToken).Type;
+        return type is null or IErrorTypeSymbol ? "throwing" : $"throwing '{type.Name}'";
     }
 }
