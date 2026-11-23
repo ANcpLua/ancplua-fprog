@@ -3,7 +3,7 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
-## 0.1.1
+## 0.2.0
 
 * Faster analysis of functional-core boundaries, mutation through aliases and union cases.
 * FP0501, FP0502 and FP0503 leave a constructed `closed` class or record to the compiler when it cannot list all
