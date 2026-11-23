@@ -133,8 +133,8 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0202 | A property with a `set` accessor (`init` is allowed) | the `set` keyword |
 | FP0203 | A record or readonly struct has a field or property of a mutable type: an array, `StringBuilder`, `Memory<T>`, `ArraySegment<T>`, any type from `System.Collections`, `.Generic` or `.ObjectModel` (interfaces included), or a nested `Builder` type of an immutable collection. The other types of `System.Collections.Immutable` and `.Frozen` are the collections to use | the member name (for positional records: the parameter name) |
 | FP0301 | A `throw` statement or `throw` expression, including `throw;`; a call to a static `Throw…` helper of an exception type; a call to a member annotated `[DoesNotReturn]` | the `throw` keyword; the method name |
-| FP0302 | Uses a partial member that has a total sibling (list below), as a call or as a method group | see list |
-| FP0303 | `null` as a result: (a) returns `null` or `default` from a method, local function or lambda whose return type is a reference type or nullable; (b) a method or local function writes a nullable type `T?` in its return type: the type itself, a tuple element or a type argument; (c) the null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
+| FP0302 | Uses a partial operation in the list below. Method entries cover calls and method groups | see list |
+| FP0303 | (a) A method, local function, lambda, getter or operator returns `null` or `default` through a result type that can hold null, including async results, yielded values, pointers and unconstrained type parameters. (b) A method, local function or operator writes `T?` anywhere in its return type, including tuple elements and type arguments. (c) The null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
 | FP0401 | A class or record in core is open: it carries neither `sealed`, `static` nor `closed`. Cases of a closed class belong to FP0403 | the type's name |
 | FP0403 | A case of a closed class carries neither `sealed` nor `closed` | the case's name |
 | FP0404 | Creates an empty value of a union struct: `default`, `default(U)` or `new U()` | that expression |
@@ -192,7 +192,7 @@ Culture-free types: `char`, `bool`, `Guid`, `Rune`, `Version`, `Uri`, every enum
 | A read of a dictionary indexer: the type is declared in `System.Collections` or below, implements `IDictionary<,>` or `IReadOnlyDictionary<,>` or derives from `KeyedCollection<,>`, and the indexer takes the key | the whole element access |
 | A positional element read, unless guarded: an array, `string`, `Span<T>`, `ReadOnlySpan<T>`, or a `System.Collections*` type through an `int`, `Index` or `Range` indexer | the whole element access |
 | `Nullable<T>.Value`, unless guarded | the `Value` name |
-| `/` or `%` on integer or `decimal` operands, unless the divisor is a constant other than zero or guarded | the operator token |
+| Integer or `decimal` division and remainder (`/`, `%`, `/=`, `%=`), unless the divisor is a constant other than zero or guarded | the operator token |
 | An explicit reference downcast or unboxing cast between named types (casts from `object`, `dynamic` and type parameters are FP0601) | the cast expression |
 
 A use is **guarded** when a condition that tests the same symbol stands before it: the condition of an enclosing
@@ -200,7 +200,8 @@ A use is **guarded** when a condition that tests the same symbol stands before i
 statement that precedes the use in the same or an enclosing block. The test is: for an element read, a read of
 `Length`, `Count`, `IsEmpty`, `IsDefaultOrEmpty` or `Any()` on the same collection, a comparison that involves the
 same index variable, or a list pattern on the collection; for a division, a comparison or pattern on the divisor;
-for `Value`, `HasValue` or a null test on the same nullable. The rule accepts the guard as written and leaves its
+for `Value`, `HasValue` or a null test on the same nullable. When several case labels share a switch section,
+each label needs a qualifying `when` to guard its body. The rule accepts the conditions as written and leaves their
 logic to the author.
 
 FP0302 is a list by nature. Each entry has a total sibling (`TryParse`, `FirstOrDefault`, `TryGetValue`, a list

@@ -20,7 +20,8 @@ public static class Reader
     public static bool ReadInto(string text, int[] slots)
         => int.TryParse(text, CultureInfo.InvariantCulture, out slots[0]); // expect: FP0104
 
-    public static int Bump(Counter counter) => Cells.Increment(ref counter.History[0]); // expect: FP0104, FP0801
+    public static int Bump(Counter counter)
+        => counter.History.Length > 0 ? Cells.Increment(ref counter.History[0]) : 0; // expect: FP0104, FP0801
 }
 
 public static class Cells

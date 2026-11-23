@@ -799,7 +799,6 @@ public sealed class Fp0301Tests(TestContext testContext)
     {
         return VerifyAsync("""
                            using System;
-                           using System.Runtime.ExceptionServices;
                            using System.Threading;
 
                            public static class ShellGuard
@@ -824,19 +823,6 @@ public sealed class Fp0301Tests(TestContext testContext)
                                public static int Cancel(CancellationToken ct)
                                {
                                    ct.ThrowIfCancellationRequested();
-                                   return 1;
-                               }
-
-                               public static int Dispatch(Exception e)
-                               {
-                                   ExceptionDispatchInfo.Throw(e);
-                                   ExceptionDispatchInfo.Capture(e).Throw();
-                                   return 1;
-                               }
-
-                               public static int Debugging()
-                               {
-                                   System.Diagnostics.Debug.Fail("x");
                                    return 1;
                                }
 
@@ -889,6 +875,84 @@ public sealed class Fp0301Tests(TestContext testContext)
                                    System.ArgumentOutOfRangeException.ThrowIfNegative(value);
                                    return value;
                                }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0301_DoesNotReturnAnnotationOnStaticInstanceAndLocalMethods_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Diagnostics.CodeAnalysis;
+                           using System.Runtime.ExceptionServices;
+
+                           public sealed class Validator
+                           {
+                               [DoesNotReturn]
+                               public static void Fail() => throw new InvalidOperationException();
+
+                               [DoesNotReturn]
+                               public void Reject<T>() => throw new InvalidOperationException();
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Domain
+                           {
+                               public static int Validate(Validator? validator, Exception error, int choice)
+                               {
+                                   switch (choice)
+                                   {
+                                       case 0: Validator.{|FP0301:Fail|}(); break;
+                                       case 1: validator?.{|FP0301:Reject|}<int>(); break;
+                                       case 2: ExceptionDispatchInfo.{|FP0301:Throw|}(error); break;
+                                       case 3: ExceptionDispatchInfo.Capture(error).{|FP0301:Throw|}(); break;
+                                       case 4: System.Diagnostics.Debug.{|FP0301:Fail|}("x"); break;
+                                       default: {|FP0301:Abort|}(); break;
+                                   }
+
+                                   return choice;
+
+                                   [DoesNotReturn]
+                                   static void Abort() => {|FP0301:throw|} new InvalidOperationException();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0301_DoesNotReturnMethodGroupLookalikeAndOutsideCore_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Diagnostics.CodeAnalysis;
+
+                           namespace Local
+                           {
+                               public sealed class DoesNotReturnAttribute : Attribute;
+                           }
+
+                           public static class Helpers
+                           {
+                               [DoesNotReturn]
+                               public static void Fail() => throw new Exception();
+
+                               [Local.DoesNotReturn]
+                               public static int Finish() => 1;
+
+                               public static int Outside()
+                               {
+                                   Fail();
+                                   return 0;
+                               }
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Domain
+                           {
+                               public static Action Failure() => Helpers.Fail;
+
+                               public static int Finish() => Helpers.Finish();
                            }
                            """);
     }

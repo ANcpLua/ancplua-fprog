@@ -15,7 +15,6 @@ public static class Normalizer
     {
         var copy = values.ToArray();          // a new array
         System.Array.Sort(copy);
-        copy[0] = copy[0] + 0;
         return [.. copy];
     }
 
@@ -44,7 +43,7 @@ public static class Normalizer
     public static int CopiedList(IEnumerable<int> source)
     {
         var list = source.ToList();           // a new list
-        list[0] = 1;
+        if (list.Count > 0) list[0] = 1;
         return list.Count;
     }
 

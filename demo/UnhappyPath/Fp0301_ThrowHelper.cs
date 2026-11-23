@@ -2,8 +2,7 @@ using System;
 
 namespace Demo.Fp0301_ThrowHelper;
 
-// Bug: these calls throw exactly like `throw`, only without the keyword. .NET's own code fixes (CA1510 to
-// CA1513) turn `if (x is null) throw ...` into such helpers, which makes FP0301 fall silent.
+// These APIs throw on invalid input. Their names hide the same failure that a throw statement would expose.
 [Fprog.FunctionalCore]
 public static class Guard
 {

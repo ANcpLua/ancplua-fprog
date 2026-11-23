@@ -61,11 +61,11 @@ Patches 3, 4, 8, 9 and 10 changed no existing test. 114 tests were added.
 ### What each change deliberately does not report
 
 - **1:** an indexer of a user type that implements a dictionary interface (it may be total), `JsonObject`, `ILookup`,
-  `KeyedCollection`, non-generic dictionaries.
+  and key indexers of non-generic dictionaries.
 - **2:** `nameof(int.Parse)`; invoking the delegate later. A group passed to a wrapper that catches the exception is
   reported, as the lambda form already was.
-- **3:** instance helpers (`CancellationToken.ThrowIfCancellationRequested`), `ExceptionDispatchInfo.Throw`, `Debug.Fail`,
-  helpers on types that are not exceptions. A user method `MyException.ThrowX` that never throws is reported.
+- **3:** FP0301 leaves conditional helpers such as `CancellationToken.ThrowIfCancellationRequested` to the core
+  boundary. It reports each static `Throw…` helper on an exception type.
 - **5:** a parameter written only in an initializer or in the base-constructor arguments (plain reassignment during
   construction, nothing is captured); records; a `ref` local bound to the parameter.
 - **7:** a `ref` argument for a `ref readonly` parameter, `in` arguments, `out var`, the method's own `out` parameter.
@@ -82,8 +82,6 @@ Each needs a decision about the catalog, or cannot be decided by a rule of this 
 
 | File | What passes | Why it was left |
 | --- | --- | --- |
-| `Fp0303_NullThroughALocal.cs` | `string? result = null; ...; return result;` | Needs data flow; a constant holding null is encoded as not reported. |
-| `Fp0302_OtherPartialMembers.cs` | `ParseExact`, `Convert.ToInt32`, `Max()`/`Average()` on an empty sequence, `xs[0]`, division, a hard cast | Outside the row's list; `ParseExact` and `BigInteger.Parse` are encoded as not reported. |
 | `Fp0203_ImmutableBuilderMember.cs` | a record holding `ImmutableArray<T>.Builder` (a `with` copy shares it) | The row allows the whole namespace, and the test is named "Decided". |
 | `Fp0101_VoidDelegates.cs` | `Action<T>` taken, called and returned | The row names methods and local functions. |
 | `Fp0601_CastThroughObject.cs` | `(string)(object)value`, a type test through an `object` local | Outside the row's list. |

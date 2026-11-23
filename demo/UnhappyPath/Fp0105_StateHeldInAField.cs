@@ -33,7 +33,7 @@ public sealed class Basket
 
     public int Bump()
     {
-        _totals[0]++; // expect: FP0105
-        return _totals[0];
+        if (_totals.Length == 0) return 0;
+        return ++_totals[0]; // expect: FP0105
     }
 }
