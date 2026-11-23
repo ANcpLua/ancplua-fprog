@@ -191,7 +191,8 @@ internal sealed class LocalAliases
         {
             if (UnwrapDeclaration(target) is not ITupleOperation tuple)
             {
-                Write(target, source);
+                // A user-defined conversion into the target hands over a value of its own.
+                Write(target, info.Conversion is { IsUserDefined: true } ? default : source);
                 return;
             }
 
@@ -227,9 +228,11 @@ internal sealed class LocalAliases
             if (loop is not { Syntax: CommonForEachStatementSyntax syntax, SemanticModel: { } model })
                 return;
 
-            var element = new Source(loop.Collection).Select(model.GetForEachStatementInfo(syntax).ElementType);
+            var iteration = model.GetForEachStatementInfo(syntax);
+            var element = new Source(loop.Collection).Select(iteration.ElementType);
             if (loop.LoopControlVariable is IVariableDeclaratorOperation variable)
-                AddAssignment(variable.Symbol, element);
+                // A user-defined conversion into the loop variable hands over a value of its own.
+                AddAssignment(variable.Symbol, iteration.ElementConversion.IsUserDefined ? default : element);
             else if (syntax is ForEachVariableStatementSyntax deconstruction)
                 Deconstruct(loop.LoopControlVariable, element, model.GetDeconstructionInfo(deconstruction));
         }

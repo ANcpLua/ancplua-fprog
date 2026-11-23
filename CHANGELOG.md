@@ -12,6 +12,10 @@ rule catalog in [AGENTS.md](AGENTS.md).
   construction with an object initializer that assigns `Value`.
 * FP0104 and FP0105 follow a value through a target-typed `?:` or `switch` expression, as in
   `Shape shape = pick ? square : triangle;`. A write through such a local is now reported.
+* FP0104 and FP0105 no longer report a write to a loop variable or deconstruction target that a user-defined
+  conversion created.
+* FP0502 reports an unhandled case also when a label has a catch-all on a property, as in
+  `case Paid { Payment: var payment }:`, and accepts an `and` pattern whose sides both cover the case.
 
 ## 0.1.0
 

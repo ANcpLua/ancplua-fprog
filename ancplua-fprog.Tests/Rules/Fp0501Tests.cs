@@ -1815,6 +1815,21 @@ public sealed class Fp0501Tests(TestContext testContext)
             : VerifyAsync(source + library);
     }
 
+    [TestMethod]
+    public Task FP0501_OnlyLeafNamedTwiceByTheUnion_NoReport()
+    {
+        return VerifyAsync("""
+                           public closed record Figure;
+                           public sealed record Point : Figure;
+                           public union Drawn(Figure, Point);
+
+                           public static class Format
+                           {
+                               public static int Tag(Drawn drawn) => drawn switch { Point => 1, null => 0 };
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);

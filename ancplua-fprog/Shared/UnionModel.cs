@@ -112,14 +112,22 @@ internal sealed class UnionModel(Compilation compilation)
         if (!direct.Any(static @case => @case.IsClosed))
             return direct;
 
+        // A union can name a closed class and one of its subtypes; each leaf counts once.
         var leaves = ImmutableArray.CreateBuilder<ITypeSymbol>();
+        var seen = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         foreach (var @case in direct)
         {
             if (@case is INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
                 && ClosedCases(closed, cancellationToken, out var isComplete) is var nested && isComplete)
-                leaves.AddRange(ExpandClosedCases(nested, cancellationToken));
-            else
+            {
+                foreach (var leaf in ExpandClosedCases(nested, cancellationToken))
+                    if (seen.Add(leaf))
+                        leaves.Add(leaf);
+            }
+            else if (seen.Add(@case))
+            {
                 leaves.Add(@case);
+            }
         }
 
         return leaves.ToImmutable();
@@ -147,11 +155,21 @@ internal sealed class UnionModel(Compilation compilation)
     public IEnumerable<SyntaxNode> GetCatchAlls(
         IOperation value, IPatternOperation pattern, CancellationToken cancellationToken)
     {
-        return GetCatchAlls(pattern, value, GetTupleWithUnionElement(value, cancellationToken), cancellationToken);
+        return GetCatchAlls(pattern, value, GetTupleWithUnionElement(value, cancellationToken), false, cancellationToken);
+    }
+
+    /// <summary>
+    ///     True when the pattern is a catch-all for the switched value itself. A catch-all on one of its
+    ///     properties or positions says nothing about the cases of the value.
+    /// </summary>
+    public bool CatchesSwitchedValue(IOperation value, IPatternOperation pattern, CancellationToken cancellationToken)
+    {
+        return GetCatchAlls(pattern, value, GetTupleWithUnionElement(value, cancellationToken), true, cancellationToken)
+            .Any();
     }
 
     private IEnumerable<SyntaxNode> GetCatchAlls(IPatternOperation pattern,
-        IOperation? input, ITypeSymbol? tuple, CancellationToken cancellationToken)
+        IOperation? input, ITypeSymbol? tuple, bool switchedValueOnly, CancellationToken cancellationToken)
     {
         var union = (input is not null ? GetUnionOfExpression(input, cancellationToken) : null)
                     ?? GetUnionType(pattern.InputType, cancellationToken);
@@ -170,7 +188,10 @@ internal sealed class UnionModel(Compilation compilation)
         {
             if (child is IPropertySubpatternOperation property)
             {
-                foreach (var catchAll in GetCatchAlls(property.Pattern, null, null, cancellationToken))
+                if (switchedValueOnly)
+                    continue;
+
+                foreach (var catchAll in GetCatchAlls(property.Pattern, null, null, false, cancellationToken))
                     yield return catchAll;
             }
             else if (child is IPatternOperation subpattern)
@@ -183,9 +204,10 @@ internal sealed class UnionModel(Compilation compilation)
                     : tupleInput is not null && position < tupleInput.Elements.Length
                         ? tupleInput.Elements[position]
                         : null;
-                foreach (var catchAll in GetCatchAlls(subpattern, subpatternInput,
-                             sameInput ? tuple : null, cancellationToken))
-                    yield return catchAll;
+                if (sameInput || !switchedValueOnly)
+                    foreach (var catchAll in GetCatchAlls(subpattern, subpatternInput,
+                                 sameInput ? tuple : null, switchedValueOnly, cancellationToken))
+                        yield return catchAll;
                 position++;
             }
         }
@@ -268,6 +290,9 @@ internal sealed class UnionModel(Compilation compilation)
             IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.Or } either
                 => CoversCase(either.LeftPattern, caseType)
                    || CoversCase(either.RightPattern, caseType),
+            IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } both
+                => CoversCase(both.LeftPattern, caseType)
+                   && CoversCase(both.RightPattern, caseType),
             _ => false
         };
     }

@@ -558,6 +558,91 @@ public sealed class Fp0502Tests(TestContext testContext)
             : VerifyAsync(source + library);
     }
 
+    [TestMethod]
+    public Task FP0502_CatchAllOnAPropertyOfACase_Reports()
+    {
+        return VerifyAsync("""
+                           public closed record Payment;
+                           public sealed record Card : Payment;
+                           public sealed record Cash : Payment;
+
+                           public closed record Order;
+                           public sealed record Paid(Payment Payment) : Order;
+                           public sealed record Open : Order;
+
+                           public static class Format
+                           {
+                               public static int Tag(Order order)
+                               {
+                                   {|FP0502:switch|} (order)
+                                   {
+                                       case Paid { Payment: var payment }: return payment is null ? 0 : 1;
+                                   }
+
+                                   return 2;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0502_AndPatternWhoseSidesCoverTheCase_NoReport()
+    {
+        return VerifyAsync("""
+                           public interface ILabel;
+                           public closed record Figure;
+                           public sealed record Point : Figure, ILabel;
+                           public sealed record Curve : Figure;
+
+                           public static class Format
+                           {
+                               public static int Tag(Figure figure)
+                               {
+                                   switch (figure)
+                                   {
+                                       case Point and ILabel: return 1;
+                                       case Curve: return 2;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0502_UnionNamingAClosedClassAndItsSubtype_Reports()
+    {
+        return VerifyAsync("""
+                           public closed record Figure;
+                           public sealed record Point : Figure;
+                           public union Drawn(Figure, Point);
+
+                           public static class Format
+                           {
+                               public static int Named(Drawn drawn)
+                               {
+                                   switch (drawn)
+                                   {
+                                       case Point: return 1;
+                                   }
+
+                                   return 0;
+                               }
+
+                               public static int Missing(Drawn drawn)
+                               {
+                                   {|FP0502:switch|} (drawn)
+                                   {
+                                       case null: return 1;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", source, testContext.CancellationToken);

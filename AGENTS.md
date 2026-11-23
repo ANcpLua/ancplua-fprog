@@ -254,9 +254,11 @@ pattern, a type pattern), so every report comes with a way out.
 
 A label handles a case when it has no `when` clause and its pattern accepts every value of the case. This includes
 a type or declaration pattern that names the case or one of its base types or interfaces, a recursive pattern of
-such a type whose subpatterns are all `_` or `var`, and an `or` pattern with such a side. A closed case with a
-complete case list is handled when each of its own cases is handled. FP0502 speaks when the statement has no
-catch-all. A statement with a catch-all gets FP0501 there.
+such a type whose subpatterns are all `_` or `var`, an `or` pattern with such a side, and an `and` pattern whose
+sides both do. A closed case with a complete case list is handled when each of its own cases is handled. FP0502
+speaks when the statement has no catch-all for the switched value. A statement with one gets FP0501 there. A
+catch-all on a property or position of a case, as in `case Holder { Child: var child }:`, gets FP0501 too and
+leaves the other cases to FP0502.
 
 ### Entry rule (FP0801, FP0802)
 
@@ -338,9 +340,9 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
   implementations and generic arguments are trusted.
 - FP0404 looks at expressions that name a union struct or receive it as their target type. Array elements and
   unassigned fields also hold the empty value when the union's `Value` is an auto-property. A hand-written union
-  struct with a computed `Value` defines its own default. In a referenced assembly the rule knows the auto-property
-  by the compiler's `[CompilerGenerated]` mark on its getter. A partial property carries no such mark, so there a
-  partial `Value` with an automatic getter is left to the author.
+  struct with a computed `Value` defines its own default. For a union read from emitted metadata the rule knows
+  the auto-property by the `[CompilerGenerated]` mark on its getter and takes that mark at its word. The compiler
+  leaves it off a partial property, so there a partial `Value` with an automatic getter is left to the author.
 - For a closed type with an incomplete case list, the compiler requires a catch-all in a switch expression.
   FP0501, FP0502 and FP0503 leave values of that type to the compiler. FP0601 applies the ordinary type-parameter
   checks to a type parameter constrained to it.

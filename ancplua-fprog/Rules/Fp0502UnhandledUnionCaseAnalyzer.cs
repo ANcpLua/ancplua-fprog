@@ -48,7 +48,7 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
             if (clause is not IPatternCaseClauseOperation label)
                 continue;
 
-            if (unions.GetCatchAlls(statement.Value, label.Pattern, cancellationToken).Any())
+            if (unions.CatchesSwitchedValue(statement.Value, label.Pattern, cancellationToken))
                 return;
 
             if (label.Guard is null)

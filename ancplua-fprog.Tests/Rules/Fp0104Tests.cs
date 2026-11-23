@@ -2445,6 +2445,66 @@ public sealed class Fp0104Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0104_WriteToValueFromUserDefinedConversion_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           public sealed class Entry { public int Count { get; set; } }
+
+                           public sealed class EntryCopy
+                           {
+                               public int Count { get; set; }
+                               public static implicit operator EntryCopy(Entry entry) => new EntryCopy { Count = entry.Count };
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Each(List<Entry> entries)
+                               {
+                                   var total = 0;
+                                   foreach (EntryCopy copy in entries)
+                                       total += ++copy.Count;
+
+                                   return total;
+                               }
+
+                               public static int Pair(Entry entry)
+                               {
+                                   var pair = (entry, 0);
+                                   EntryCopy stored;
+                                   (stored, _) = pair;
+                                   return ++stored.Count;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_WriteToLoopVariableOfTheElementType_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           public sealed class Entry { public int Count { get; set; } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Each(List<Entry> entries)
+                               {
+                                   var total = 0;
+                                   foreach (var entry in entries)
+                                       total += ++{|FP0104:entry.Count|};
+
+                                   return total;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);

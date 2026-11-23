@@ -38,7 +38,7 @@ public sealed class Fp0404EmptyUnionAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), union.Name));
     }
 
-    // An object initializer that sets Value fills the union it creates.
+    // With an object initializer that assigns Value, the author states what the union holds.
     private static bool AssignsValue(IOperation operation)
     {
         return operation is IObjectCreationOperation { Initializer: { } initializer }
@@ -50,21 +50,21 @@ public sealed class Fp0404EmptyUnionAnalyzer : DiagnosticAnalyzer
 
     private static bool HasAutoValue(INamedTypeSymbol union, CancellationToken cancellationToken)
     {
-        var field = union.GetMembers("<Value>k__BackingField").OfType<IFieldSymbol>().FirstOrDefault();
-        if (field is not { IsStatic: false, Type.SpecialType: SpecialType.System_Object })
+        var value = union.GetMembers("Value").OfType<IPropertySymbol>().FirstOrDefault(static property =>
+            property is { IsStatic: false, Type.SpecialType: SpecialType.System_Object });
+        if (value?.GetMethod is not { } accessor)
             return false;
 
-        if (field.AssociatedSymbol is IPropertySymbol { GetMethod: { } accessor })
-        {
-            var getter = accessor.PartialImplementationPart ?? accessor;
-            return getter.IsImplicitlyDeclared || getter.DeclaringSyntaxReferences.Any(reference =>
-                reference.GetSyntax(cancellationToken) is AccessorDeclarationSyntax { Body: null, ExpressionBody: null });
-        }
+        // Emitted metadata keeps no getter body. The compiler's mark on the getter tells an automatic one.
+        if (union.DeclaringSyntaxReferences.IsEmpty)
+            return IsCompilerGenerated(accessor);
 
-        // Metadata retains the field but does not associate it with the property.
-        // A computed getter using the field keyword also has a generated backing field.
-        return IsCompilerGenerated(field) && union.GetMembers("Value").OfType<IPropertySymbol>()
-            .Any(static property => property.GetMethod is { } getter && IsCompilerGenerated(getter));
+        // A computed getter that uses the field keyword has a backing field too, so the getter decides.
+        var getter = accessor.PartialImplementationPart ?? accessor;
+        return union.GetMembers().OfType<IFieldSymbol>().Any(static field =>
+                   field.AssociatedSymbol is IPropertySymbol { Name: "Value" })
+               && (getter.IsImplicitlyDeclared || getter.DeclaringSyntaxReferences.Any(reference =>
+                   reference.GetSyntax(cancellationToken) is AccessorDeclarationSyntax { Body: null, ExpressionBody: null }));
     }
 
     private static bool IsCompilerGenerated(ISymbol symbol)

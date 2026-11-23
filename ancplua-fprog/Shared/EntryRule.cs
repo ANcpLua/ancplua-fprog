@@ -33,8 +33,7 @@ internal static class EntryRule
         // A report counts for a span that it touches. The walk only visits what overlaps, so it looks one
         // character further on each side.
         private readonly TextSpan? _walkSpan = context.FilterSpan is { } requested
-            ? TextSpan.FromBounds(Math.Max(0, requested.Start - 1),
-                Math.Min(context.SemanticModel.SyntaxTree.Length, requested.End + 1))
+            ? Widen(requested, context.SemanticModel.SyntaxTree.Length)
             : null;
         private readonly Purity.ConfiguredApis _configured = purity.ForTree(context.SemanticModel.SyntaxTree);
         private readonly Dictionary<SyntaxTree, SemanticModel> _declarationModels = new();
@@ -43,6 +42,12 @@ internal static class EntryRule
         private readonly Dictionary<SyntaxNode, LocalAliases> _aliasesByBody = new();
         private readonly Dictionary<ILocalSymbol, bool> _localAnchors = new(SymbolEqualityComparer.Default);
         private readonly HashSet<ILocalSymbol> _checkingAnchors = new(SymbolEqualityComparer.Default);
+
+        private static TextSpan Widen(TextSpan requested, int length)
+        {
+            var end = requested.End < length ? requested.End + 1 : length;
+            return TextSpan.FromBounds(Math.Min(Math.Max(0, requested.Start - 1), end), end);
+        }
 
         public void Analyze()
         {
