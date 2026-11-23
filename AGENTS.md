@@ -82,8 +82,7 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 - A **union** is (a) a type whose `ITypeSymbol.IsUnion` is true, or (b) a class or record with the `closed`
   modifier at a constructed type where `GetClosedDerivedTypeInfo(ct).IsComplete` is true. Its **cases** are
   (a) its `ITypeSymbol.UnionCaseTypes`, (b) its direct subtypes. A closed case with a complete case list stands
-  for its own cases. A case list that names its own type again, as a closed class that is also a hand-written
-  union can, keeps that case as it is.
+  for its direct subtypes, also when it is a hand-written union itself.
 - A **union value** is an expression whose type is a union, `Nullable<T>` of a union, or a type parameter
   constrained to a closed class that counts as a union. A union value that a cast or an implicit conversion turned
   into a base type, an interface or `object` at the head of a `switch`, `is` or `as` still counts as that union value.
@@ -345,6 +344,9 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
 - For a closed type with an incomplete case list, the compiler requires a catch-all in a switch expression.
   FP0501, FP0502 and FP0503 leave values of that type to the compiler. FP0601 applies the ordinary type-parameter
   checks to a type parameter constrained to it.
+- FP0104 and FP0105 do not follow conditions. A local that can hold reached memory on one branch counts as
+  reached wherever it is written: `var result = add ? new List<int>(input) : input; if (add) result.Add(42);`
+  is reported, although the write only meets the copy. Write to the copy before the two values meet.
 - FP0302 guards are syntactic. FP0303 (b) relies on nullable annotations.
 - A record's copy constructor is protected by the language (CS8878), so a record union can be copied by a subtype
   that FP0403 reports in its own project.

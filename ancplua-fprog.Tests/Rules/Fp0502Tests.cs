@@ -512,6 +512,52 @@ public sealed class Fp0502Tests(TestContext testContext)
             DiagnosticResult.CompilerWarning("CS8655").WithLocation(0));
     }
 
+    // Link is a closed case of Root and a hand-written union. As a case it stands for its subtype End;
+    // what it holds in Value is not a Root.
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    [Timeout(5000)]
+    public Task FP0502_ClosedCaseThatIsAlsoAUnion_Reports(bool fromReference)
+    {
+        const string library = """
+
+            namespace Chains
+            {
+                using System.Runtime.CompilerServices;
+
+                public closed class Root;
+
+                [Union]
+                public closed class Link : Root, IUnion
+                {
+                    public Link(Link next) => Value = next;
+                    public Link(int value) => Value = value;
+                    public object? Value { get; }
+                }
+
+                public sealed class End() : Link(0);
+                public union Holder(Link, string);
+            }
+            """;
+        const string source = """
+            #nullable enable
+            using Chains;
+
+            public static class Format
+            {
+                public static int ByCase(Root value) { switch (value) { case Link: return 1; } return 0; }
+                public static int ByLeaf(Root value) { switch (value) { case End: return 1; } return 0; }
+                public static int Held(Holder value) { switch (value) { case Link: return 1; case string: return 2; } return 0; }
+                public static int Missing(Root value) { {|FP0502:switch|} (value) { case null: return 1; } return 0; }
+            }
+            """;
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0502", source, "#nullable enable" + library,
+                testContext.CancellationToken)
+            : VerifyAsync(source + library);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", source, testContext.CancellationToken);
