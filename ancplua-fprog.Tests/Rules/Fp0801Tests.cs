@@ -1,7 +1,10 @@
 using System.Linq;
 using System.Threading.Tasks;
+using ancplua_fprog.Rules;
 using ancplua_fprog.Tests.Shared;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -401,6 +404,68 @@ public sealed class Fp0801Tests(TestContext testContext)
                 }
             }
             """, "root = true\n[*.cs]\nfprog_pure_apis = Helpers.Pure", testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0801_CoreNestedInShellType_Reports()
+    {
+        return VerifyAsync("""
+                           public sealed class Outer
+                           {
+                               public static bool Exists() => System.IO.File.Exists("path");
+
+                               [Fprog.FunctionalCore]
+                               public static class Inner
+                               {
+                                   public static bool Exists() => System.IO.{|FP0801:File|}.Exists("path");
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public async Task FP0801_AssemblyCoreTopLevelStatement_Reports()
+    {
+        var compilation = TestCompilation.CreateProgram("""
+            [assembly: Fprog.FunctionalCore]
+            return System.IO.File.Exists("path") ? 0 : 1;
+            """);
+        var analyzer = new Fp0801ShellBoundaryAnalyzer();
+        var cancellationToken = testContext.CancellationToken;
+        var result = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(cancellationToken);
+        var diagnostic = result.GetAllDiagnostics(analyzer).Single();
+
+        Assert.AreEqual("FP0801", diagnostic.Id);
+        Assert.AreEqual("File", compilation.SyntaxTrees.First().GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan));
+    }
+
+    [TestMethod]
+    public async Task FP0801_FilterSpanUsesLocalAnchorOutsideTheSpan_Reports()
+    {
+        var compilation = TestCompilation.Create("""
+            [Fprog.FunctionalCore]
+            public static class Work
+            {
+                public static (string?, bool) Read()
+                {
+                    var reader = new System.IO.StreamReader("path");
+                    return (reader.ReadLine(), System.IO.File.Exists("path"));
+                }
+            }
+            """);
+        var method = compilation.GetMethodDeclaration("Read");
+        var span = method.DescendantNodes().OfType<ReturnStatementSyntax>().Single().Span;
+        var model = compilation.GetSemanticModel(method.SyntaxTree);
+        var analyzer = new Fp0801ShellBoundaryAnalyzer();
+        var cancellationToken = testContext.CancellationToken;
+
+        var whole = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, null, cancellationToken);
+        var part = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, span, cancellationToken);
+        var expected = whole.GetAllDiagnostics(analyzer).Where(d => span.IntersectsWith(d.Location.SourceSpan)).ToArray();
+
+        Assert.HasCount(1, expected);
+        Assert.AreEqual("File", method.SyntaxTree.GetText(cancellationToken).ToString(expected[0].Location.SourceSpan));
+        CollectionAssert.AreEqual(expected, part.GetAllDiagnostics(analyzer).ToArray());
     }
 
     [TestMethod]

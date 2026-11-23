@@ -1,4 +1,9 @@
+using System.Linq;
 using System.Threading.Tasks;
+using ancplua_fprog.Rules;
+using ancplua_fprog.Tests.Shared;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -138,6 +143,35 @@ public sealed class Fp0802Tests(TestContext testContext)
                                public static {|FP0802:Task|}<int> Create() => {|FP0802:Task|}.FromResult(1);
                            }
                            """);
+    }
+
+    [TestMethod]
+    public async Task FP0802_FilterSpanUsesLocalAnchorOutsideTheSpan_Reports()
+    {
+        var compilation = TestCompilation.Create("""
+            [Fprog.FunctionalCore]
+            public static class Work
+            {
+                public static int Read()
+                {
+                    var pending = System.Threading.Tasks.Task.FromResult(1);
+                    return pending.Result + System.Threading.Tasks.Task.FromResult(2).Result;
+                }
+            }
+            """);
+        var method = compilation.GetMethodDeclaration("Read");
+        var span = method.DescendantNodes().OfType<ReturnStatementSyntax>().Single().Span;
+        var model = compilation.GetSemanticModel(method.SyntaxTree);
+        var analyzer = new Fp0802AsyncBoundaryAnalyzer();
+        var cancellationToken = testContext.CancellationToken;
+
+        var whole = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, null, cancellationToken);
+        var part = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, span, cancellationToken);
+        var expected = whole.GetAllDiagnostics(analyzer).Where(d => span.IntersectsWith(d.Location.SourceSpan)).ToArray();
+
+        Assert.HasCount(1, expected);
+        Assert.AreEqual("Task", method.SyntaxTree.GetText(cancellationToken).ToString(expected[0].Location.SourceSpan));
+        CollectionAssert.AreEqual(expected, part.GetAllDiagnostics(analyzer).ToArray());
     }
 
     [TestMethod]

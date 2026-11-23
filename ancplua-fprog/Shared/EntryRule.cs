@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
+using Microsoft.CodeAnalysis.Text;
 
 namespace ancplua_fprog.Shared;
 
@@ -14,93 +15,138 @@ internal static class EntryRule
 {
     public static void Register(AnalysisContext context, DiagnosticDescriptor rule, PurityClass category)
     {
-        context.RegisterSemanticModelAction(modelContext => new TreeAnalysis(modelContext, rule, category).Analyze());
+        context.RegisterCompilationStartAction(start =>
+        {
+            var purity = new Purity.Model(start.Options.AnalyzerConfigOptionsProvider);
+            start.RegisterSemanticModelAction(model => new TreeAnalysis(model, rule, category, purity).Analyze());
+        });
     }
 
     private sealed class TreeAnalysis(
-        SemanticModelAnalysisContext context, DiagnosticDescriptor rule, PurityClass category)
+        SemanticModelAnalysisContext context, DiagnosticDescriptor rule, PurityClass category, Purity.Model purity)
     {
         private readonly SemanticModel _model = context.SemanticModel;
         private readonly CancellationToken _cancellationToken = context.CancellationToken;
-        private readonly AnalyzerConfigOptionsProvider _options = context.Options.AnalyzerConfigOptionsProvider;
-        private readonly Dictionary<MemberDeclarationSyntax, bool> _coreDeclarations = new();
+        private readonly TextSpan? _filterSpan = context.FilterSpan;
+        private readonly Purity.ConfiguredApis _configured = purity.ForTree(context.SemanticModel.SyntaxTree);
+        private readonly Dictionary<SyntaxTree, SemanticModel> _declarationModels = new();
+        private readonly Dictionary<SimpleNameSyntax, (ISymbol? Symbol, INamedTypeSymbol? WrittenType)> _names = new();
+        private readonly Dictionary<ISymbol, bool> _declarationAnchors = new(SymbolEqualityComparer.Default);
         private readonly Dictionary<SyntaxNode, LocalAliases> _aliasesByBody = new();
         private readonly Dictionary<ILocalSymbol, bool> _localAnchors = new(SymbolEqualityComparer.Default);
         private readonly HashSet<ILocalSymbol> _checkingAnchors = new(SymbolEqualityComparer.Default);
 
         public void Analyze()
         {
-            foreach (var node in _model.SyntaxTree.GetRoot(_cancellationToken).DescendantNodes(descendIntoChildren: VisitChildren))
+            var scopes = new Stack<SyntaxNode>();
+            scopes.Push(_model.SyntaxTree.GetRoot(_cancellationToken));
+            while (scopes.Count > 0)
             {
-                _cancellationToken.ThrowIfCancellationRequested();
-                if (node is AttributeListSyntax or UsingDirectiveSyntax || !IsInCore(node))
-                    continue;
-
-                switch (node)
+                var scope = scopes.Pop();
+                var topLevel = scope is GlobalStatementSyntax;
+                var core = IsTypeDeclaration(scope) && purity.Scope.Contains(_model.GetDeclaredSymbol(scope, _cancellationToken));
+                var descendants = _filterSpan is { } span
+                    ? scope.DescendantNodes(span, Descend)
+                    : scope.DescendantNodes(Descend);
+                foreach (var node in descendants)
                 {
-                    case SimpleNameSyntax name:
-                        AnalyzeName(name);
-                        break;
-                    case LockStatementSyntax statement when category == PurityClass.Shell:
-                        Report(statement.LockKeyword.GetLocation(), "lock");
-                        break;
-                    case AnonymousFunctionExpressionSyntax lambda:
-                        if (category == PurityClass.Async && lambda.AsyncKeyword.IsKind(SyntaxKind.AsyncKeyword))
-                            Report(lambda.AsyncKeyword.GetLocation(), "async");
-                        if (lambda is LambdaExpressionSyntax { Body: ExpressionSyntax body })
-                            ReportValueUse(body);
-                        break;
-                    case ImplicitObjectCreationExpressionSyntax creation:
-                        if (BoundaryType(creation) is { } type && !TargetIsAnchored(creation))
-                            Report(creation.NewKeyword.GetLocation(), DisplayName(type));
-                        break;
-                    case ElementAccessExpressionSyntax or ElementBindingExpressionSyntax:
-                        var access = (ExpressionSyntax)node;
-                        if (IndexerType(access) is { } indexerType && !IsAnchored(IndexerReceiver(access)))
-                            Report(access.GetLocation(), DisplayName(indexerType));
-                        break;
-                    case ArgumentSyntax argument
-                        when _model.GetOperation(argument, _cancellationToken) is IArgumentOperation:
-                        ReportValueUse(argument.Expression);
-                        break;
-                    case ReturnStatementSyntax { Expression: { } returned }:
-                        ReportValueUse(returned);
-                        break;
-                    case YieldStatementSyntax { Expression: { } yielded }:
-                        ReportValueUse(yielded);
-                        break;
-                    case ArrowExpressionClauseSyntax arrow:
-                        ReportValueUse(arrow.Expression);
-                        break;
-                    case CommonForEachStatementSyntax each:
-                        ReportValueUse(each.Expression);
-                        break;
-                    case UsingStatementSyntax usingStatement:
-                        if (usingStatement.Expression is { } resource)
-                            ReportValueUse(resource);
-                        ReportResources(usingStatement.Declaration);
-                        break;
-                    case LocalDeclarationStatementSyntax { UsingKeyword.RawKind: (int)SyntaxKind.UsingKeyword } local:
-                        ReportResources(local.Declaration);
-                        break;
-                    case AwaitExpressionSyntax awaitExpression:
-                        ReportValueUse(awaitExpression.Expression);
-                        break;
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    if (IsTypeDeclaration(node) || node is GlobalStatementSyntax)
+                        scopes.Push(node);
+                    else if (core || topLevel && purity.Scope.Contains(_model.GetEnclosingSymbol(node.SpanStart, _cancellationToken)))
+                        AnalyzeNode(node);
                 }
 
-                if (node is not ExpressionSyntax expression)
-                    continue;
+                bool Descend(SyntaxNode node)
+                {
+                    if (node == scope)
+                        return true;
+                    if (IsTypeDeclaration(node) || node is GlobalStatementSyntax)
+                        return false;
 
-                if (expression is InvocationExpressionSyntax invocation
-                    && _model.GetOperation(invocation, _cancellationToken) is
-                        IInvocationOperation { TargetMethod.MethodKind: MethodKind.DelegateInvoke })
-                    ReportValueUse(invocation.Expression);
-
-                AnalyzeOperator(expression);
-                if (ImplicitConversionType(expression) is { } conversionType
-                    && !IsAnchored(expression, includeConversion: false))
-                    Report(expression.GetLocation(), DisplayName(conversionType));
+                    // An unmarked type can still contain a separately marked nested type.
+                    return core || topLevel
+                        ? VisitChildren(node)
+                        : node is BaseNamespaceDeclarationSyntax or ExtensionBlockDeclarationSyntax;
+                }
             }
+        }
+
+        private static bool IsTypeDeclaration(SyntaxNode node)
+        {
+            return node is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax;
+        }
+
+        private void AnalyzeNode(SyntaxNode node)
+        {
+            switch (node)
+            {
+                case SimpleNameSyntax name:
+                    AnalyzeName(name);
+                    break;
+                case LockStatementSyntax statement when category == PurityClass.Shell:
+                    Report(statement.LockKeyword.GetLocation(), "lock");
+                    break;
+                case AnonymousFunctionExpressionSyntax lambda:
+                    if (category == PurityClass.Async && lambda.AsyncKeyword.IsKind(SyntaxKind.AsyncKeyword))
+                        Report(lambda.AsyncKeyword.GetLocation(), "async");
+                    if (lambda is LambdaExpressionSyntax { Body: ExpressionSyntax body })
+                        ReportValueUse(body);
+                    break;
+                case ImplicitObjectCreationExpressionSyntax creation:
+                    if (BoundaryType(creation) is { } type && !TargetIsAnchored(creation))
+                        Report(creation.NewKeyword.GetLocation(), DisplayName(type));
+                    break;
+                case ElementAccessExpressionSyntax or ElementBindingExpressionSyntax:
+                    var access = (ExpressionSyntax)node;
+                    if (IndexerType(access) is { } indexerType && !IsAnchored(IndexerReceiver(access)))
+                        Report(access.GetLocation(), DisplayName(indexerType));
+                    break;
+                case ArgumentSyntax argument:
+                    if (ValueUseType(argument.Expression) is { } argumentType
+                        && _model.GetOperation(argument, _cancellationToken) is IArgumentOperation
+                        && !IsAnchored(argument.Expression))
+                        Report(argument.Expression.GetLocation(), DisplayName(argumentType));
+                    break;
+                case ReturnStatementSyntax { Expression: { } returned }:
+                    ReportValueUse(returned);
+                    break;
+                case YieldStatementSyntax { Expression: { } yielded }:
+                    ReportValueUse(yielded);
+                    break;
+                case ArrowExpressionClauseSyntax arrow:
+                    ReportValueUse(arrow.Expression);
+                    break;
+                case CommonForEachStatementSyntax each:
+                    ReportValueUse(each.Expression);
+                    break;
+                case UsingStatementSyntax usingStatement:
+                    if (usingStatement.Expression is { } resource)
+                        ReportValueUse(resource);
+                    ReportResources(usingStatement.Declaration);
+                    break;
+                case LocalDeclarationStatementSyntax { UsingKeyword.RawKind: (int)SyntaxKind.UsingKeyword } local:
+                    ReportResources(local.Declaration);
+                    break;
+                case AwaitExpressionSyntax awaitExpression:
+                    ReportValueUse(awaitExpression.Expression);
+                    break;
+            }
+
+            if (node is not ExpressionSyntax expression)
+                return;
+
+            if (expression is InvocationExpressionSyntax invocation
+                && (InvocationName(invocation.Expression) is not { } target
+                    || BindName(target, _model).Symbol is not IMethodSymbol { MethodKind: not MethodKind.DelegateInvoke })
+                && _model.GetOperation(invocation, _cancellationToken) is
+                    IInvocationOperation { TargetMethod.MethodKind: MethodKind.DelegateInvoke })
+                ReportValueUse(invocation.Expression);
+
+            AnalyzeOperator(expression);
+            if (ImplicitConversionType(expression) is { } conversionType
+                && !IsAnchored(expression, includeConversion: false))
+                Report(expression.GetLocation(), DisplayName(conversionType));
         }
 
         private bool VisitChildren(SyntaxNode node)
@@ -110,26 +156,10 @@ internal static class EntryRule
                        || _model.GetOperation(node, _cancellationToken) is not INameOfOperation);
         }
 
-        private bool IsInCore(SyntaxNode node)
-        {
-            var declaration = node.FirstAncestorOrSelf<MemberDeclarationSyntax>(
-                static member => member is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax);
-            if (declaration is null)
-                return CoreScope.IsInCore(_model.GetEnclosingSymbol(node.SpanStart, _cancellationToken));
-
-            if (!_coreDeclarations.TryGetValue(declaration, out var core))
-            {
-                core = CoreScope.IsInCore(_model.GetDeclaredSymbol(declaration, _cancellationToken));
-                _coreDeclarations.Add(declaration, core);
-            }
-
-            return core;
-        }
-
         private void AnalyzeName(SimpleNameSyntax name)
         {
-            var symbol = _model.GetSymbolInfo(name, _cancellationToken).Symbol;
-            if (WrittenType(name, symbol, _model) is { } written)
+            var (symbol, written) = BindName(name, _model);
+            if (written is not null)
             {
                 Report(name.Identifier.GetLocation(), written.Name);
                 return;
@@ -144,12 +174,19 @@ internal static class EntryRule
                 Report(name.Identifier.GetLocation(), memberType.Name);
         }
 
-        private ITypeSymbol? WrittenType(SimpleNameSyntax name, ISymbol? symbol, SemanticModel model)
+        private (ISymbol? Symbol, INamedTypeSymbol? WrittenType) BindName(SimpleNameSyntax name, SemanticModel model)
         {
-            return !name.IsVar && symbol is INamedTypeSymbol type && Matches(type.OriginalDefinition, model.SyntaxTree)
+            if (_names.TryGetValue(name, out var binding))
+                return binding;
+
+            var symbol = model.GetSymbolInfo(name, _cancellationToken).Symbol;
+            var written = !name.IsVar && symbol is INamedTypeSymbol type && Matches(type.OriginalDefinition, model.SyntaxTree)
                    && !QualifiesTypeName(name, model)
                 ? type
                 : null;
+            binding = (symbol, written);
+            _names.Add(name, binding);
+            return binding;
         }
 
         private bool QualifiesTypeName(SimpleNameSyntax name, SemanticModel model)
@@ -168,7 +205,7 @@ internal static class EntryRule
         private bool HasWrittenTypeName(SyntaxNode? syntax, SemanticModel model)
         {
             return syntax is not null && syntax.DescendantNodesAndSelf().OfType<SimpleNameSyntax>()
-                .Any(name => WrittenType(name, model.GetSymbolInfo(name, _cancellationToken).Symbol, model) is not null);
+                .Any(name => BindName(name, model).WrittenType is not null);
         }
 
         private bool NameHasWrittenTypeArguments(SimpleNameSyntax name)
@@ -220,9 +257,18 @@ internal static class EntryRule
             if (symbol is not (IParameterSymbol or ILocalSymbol or IFieldSymbol or IPropertySymbol)
                 && !(returnType && symbol is IMethodSymbol))
                 return false;
-            if (!CoreScope.IsInCore(symbol))
-                return false;
 
+            if (!_declarationAnchors.TryGetValue(symbol, out var anchored))
+            {
+                anchored = purity.Scope.Contains(symbol) && HasDeclarationAnchor(symbol);
+                _declarationAnchors.Add(symbol, anchored);
+            }
+
+            return anchored;
+        }
+
+        private bool HasDeclarationAnchor(ISymbol symbol)
+        {
             // A boundary value in a using declaration enters at its initializer.
             if (symbol is ILocalSymbol { IsUsing: true } resource && Matches(resource.Type))
                 return true;
@@ -249,14 +295,25 @@ internal static class EntryRule
                     _ => null
                 };
 
-                var model = reference.SyntaxTree == _model.SyntaxTree
-                    ? _model
-                    : _model.Compilation.GetSemanticModel(reference.SyntaxTree);
-                if (HasWrittenTypeName(type, model))
+                if (type is not null && HasWrittenTypeName(type, DeclarationModel(reference.SyntaxTree)))
                     return true;
             }
 
             return false;
+        }
+
+        private SemanticModel DeclarationModel(SyntaxTree tree)
+        {
+            if (tree == _model.SyntaxTree)
+                return _model;
+
+            if (!_declarationModels.TryGetValue(tree, out var model))
+            {
+                model = _model.Compilation.GetSemanticModel(tree);
+                _declarationModels.Add(tree, model);
+            }
+
+            return model;
         }
 
         // The written type that a target-typed expression takes its type from. A collection expression hands that
@@ -316,9 +373,13 @@ internal static class EntryRule
 
         private void ReportValueUse(ExpressionSyntax expression)
         {
-            if (!expression.IsKind(SyntaxKind.NullLiteralExpression)
-                && BoundaryType(expression) is { } type && !IsAnchored(expression))
+            if (ValueUseType(expression) is { } type && !IsAnchored(expression))
                 Report(expression.GetLocation(), DisplayName(type));
+        }
+
+        private ITypeSymbol? ValueUseType(ExpressionSyntax expression)
+        {
+            return expression.IsKind(SyntaxKind.NullLiteralExpression) ? null : BoundaryType(expression);
         }
 
         private void ReportResources(VariableDeclarationSyntax? declaration)
@@ -356,6 +417,18 @@ internal static class EntryRule
                 or PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax or CastExpressionSyntax))
                 return null;
 
+            // These forms cannot bind to a user-defined operator. Resolve the other forms
+            // through the operation tree only when binding found a possible operator method.
+            if (expression.Kind() is SyntaxKind.SimpleAssignmentExpression or SyntaxKind.CoalesceAssignmentExpression
+                or SyntaxKind.CoalesceExpression or SyntaxKind.IsExpression or SyntaxKind.AsExpression
+                or SyntaxKind.SuppressNullableWarningExpression)
+                return null;
+
+            var binding = _model.GetSymbolInfo(expression, _cancellationToken);
+            if (binding.Symbol is IMethodSymbol { MethodKind: MethodKind.BuiltinOperator }
+                || binding.Symbol is null && binding.CandidateSymbols.IsEmpty)
+                return null;
+
             var method = _model.GetOperation(expression, _cancellationToken) switch
             {
                 IBinaryOperation binary => binary.OperatorMethod,
@@ -371,6 +444,9 @@ internal static class EntryRule
 
         private INamedTypeSymbol? ImplicitConversionType(ExpressionSyntax expression)
         {
+            if (SyntaxFacts.IsInTypeOnlyContext(expression))
+                return null;
+
             var conversion = _model.GetConversion(expression, _cancellationToken);
             return conversion.IsImplicit && conversion.IsUserDefined
                    && conversion.MethodSymbol?.ContainingType is { } declaring && Matches(declaring)
@@ -420,7 +496,8 @@ internal static class EntryRule
 
         private bool Matches(ITypeSymbol? type, SyntaxTree? tree = null)
         {
-            return type is not null && Purity.Classify(type, _options, tree ?? _model.SyntaxTree) == category;
+            return type is not null
+                   && purity.Classify(type, tree is null || tree == _model.SyntaxTree ? _configured : purity.ForTree(tree)) == category;
         }
 
         // A candidate at the receiver anchors its use even if its own report is subsumed by an earlier entry.
@@ -465,8 +542,8 @@ internal static class EntryRule
 
         private bool NameAnchors(SimpleNameSyntax name, ExpressionSyntax? receiver)
         {
-            var symbol = _model.GetSymbolInfo(name, _cancellationToken).Symbol;
-            return WrittenType(name, symbol, _model) is not null || MemberType(symbol, receiver) is not null
+            var (symbol, written) = BindName(name, _model);
+            return written is not null || MemberType(symbol, receiver) is not null
                    || DeclarationAnchors(symbol) || NameHasWrittenTypeArguments(name) || IsAnchored(receiver)
                    || (symbol is ILocalSymbol local && LocalAssignmentsAnchor(local, name));
         }
@@ -625,7 +702,8 @@ internal static class EntryRule
 
         private void Report(Location location, string subject)
         {
-            context.ReportDiagnostic(Diagnostic.Create(rule, location, subject));
+            if (_filterSpan is not { } span || span.IntersectsWith(location.SourceSpan))
+                context.ReportDiagnostic(Diagnostic.Create(rule, location, subject));
         }
     }
 }

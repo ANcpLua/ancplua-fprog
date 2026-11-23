@@ -69,8 +69,11 @@ public sealed class PurityTests
         var compilation = TestCompilation.Create(Source);
         var tree = compilation.SyntaxTrees.First();
         var options = new ConfigProvider("", tree, "System.Threading.Tasks");
+        var type = compilation.GetNamedType(metadataName);
+        var model = new Purity.Model(options);
 
-        Assert.AreEqual(expected, Purity.Classify(compilation.GetNamedType(metadataName), options, tree).ToString());
+        Assert.AreEqual(expected, Purity.Classify(type, options, tree).ToString());
+        Assert.AreEqual(expected, model.Classify(type, model.ForTree(tree)).ToString());
     }
 
     [TestMethod]
@@ -86,9 +89,12 @@ public sealed class PurityTests
         var type = compilation.GetNamedType(metadataName);
         var trees = compilation.SyntaxTrees.ToArray();
         var options = new ConfigProvider(" Helpers.Parse , Helpers.Edge.Trusted ", trees[1], "Helpers.Edge");
+        var model = new Purity.Model(options);
 
         Assert.AreEqual(globalExpected, Purity.Classify(type, options, trees[0]).ToString());
         Assert.AreEqual(localExpected, Purity.Classify(type, options, trees[1]).ToString());
+        Assert.AreEqual(globalExpected, model.Classify(type, model.ForTree(trees[0])).ToString());
+        Assert.AreEqual(localExpected, model.Classify(type, model.ForTree(trees[1])).ToString());
     }
 
     private sealed class ConfigProvider(string global, SyntaxTree localTree, string local) : AnalyzerConfigOptionsProvider

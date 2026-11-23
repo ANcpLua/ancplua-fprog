@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 
 namespace ancplua_fprog.Shared;
@@ -18,12 +19,44 @@ internal static class CoreScope
         if (type is null)
             return false;
 
+        return HasMarkedType(type) || type.ContainingAssembly is { } assembly && HasMarkedAssembly(assembly);
+    }
+
+    private static bool HasMarkedType(INamedTypeSymbol type)
+    {
         for (var current = type; current is not null; current = current.ContainingType)
             if (FprogAttributes.Contains(current.GetAttributes(), FprogAttributes.FunctionalCore))
                 return true;
 
-        return type.ContainingAssembly is { } assembly
-               && FprogAttributes.Contains(assembly.GetAttributes(), FprogAttributes.FunctionalCore);
+        return false;
+    }
+
+    private static bool HasMarkedAssembly(IAssemblySymbol assembly)
+    {
+        return FprogAttributes.Contains(assembly.GetAttributes(), FprogAttributes.FunctionalCore);
+    }
+
+    internal sealed class Model
+    {
+        private readonly ConcurrentDictionary<INamedTypeSymbol, bool> _types = new(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<IAssemblySymbol, bool> _assemblies = new(SymbolEqualityComparer.Default);
+
+        public bool Contains(ISymbol? symbol)
+        {
+            var type = symbol as INamedTypeSymbol ?? symbol?.ContainingType;
+            if (type is null)
+                return false;
+
+            if (type.ContainingAssembly is { } assembly && ContainsAssembly(assembly))
+                return true;
+
+            return _types.GetOrAdd(type.OriginalDefinition, static definition => HasMarkedType(definition));
+        }
+
+        private bool ContainsAssembly(IAssemblySymbol assembly)
+        {
+            return _assemblies.GetOrAdd(assembly, static candidate => HasMarkedAssembly(candidate));
+        }
     }
 
     /// <summary>
