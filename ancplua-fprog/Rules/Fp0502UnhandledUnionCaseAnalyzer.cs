@@ -2,65 +2,62 @@ using System.Collections.Immutable;
 using System.Linq;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Rules;
 
-/// <summary>FP0502 reports cases without an unguarded case arm in a switch expression.</summary>
+/// <summary>FP0502 requires an unguarded label for each case of a union in a switch statement.</summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
 {
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0502",
-        "Handle every case of a union in a switch expression",
-        "The switch expression over '{0}' does not handle every case with an arm that has no 'when' clause: {1}");
+        "Handle every case of a union in a switch statement",
+        "Add unguarded labels to handle every case of '{0}': {1}");
 
-    /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 
-    /// <inheritdoc />
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterOperationAction(Analyze, OperationKind.SwitchExpression);
+        context.RegisterOperationAction(Analyze, OperationKind.Switch);
     }
 
     private static void Analyze(OperationAnalysisContext context)
     {
-        var switchExpression = (ISwitchExpressionOperation)context.Operation;
-        if (switchExpression.Syntax is not SwitchExpressionSyntax syntax
-            || UnionModel.GetUnionType(switchExpression.Value.Type) is not { IsClosed: true } union)
+        var statement = (ISwitchOperation)context.Operation;
+        var compilation = context.Compilation;
+        var cancellationToken = context.CancellationToken;
+        if (statement.Syntax is not SwitchStatementSyntax syntax
+            || UnionModel.GetUnionOfExpression(statement.Value, compilation) is not { } union)
             return;
 
-        var missing = UnionModel.GetCases(union, context.CancellationToken)
-            .Where(@case => !switchExpression.Arms.Any(
-                arm => arm.Guard is null && NamesCase(context.Compilation, arm.Pattern, @case)))
-            .ToArray();
-        if (missing.Length == 0)
-            return;
-
-        context.ReportDiagnostic(Diagnostic.Create(
-            Rule, syntax.SwitchKeyword.GetLocation(), union.Name, string.Join(", ", missing.Select(@case => @case.Name))));
-    }
-
-    private static bool NamesCase(Compilation compilation, IPatternOperation pattern, ITypeSymbol caseType)
-    {
-        if (pattern is IBinaryPatternOperation binary)
-            return NamesCase(compilation, binary.LeftPattern, caseType)
-                   || NamesCase(compilation, binary.RightPattern, caseType);
-
-        var matchedType = pattern switch
+        var patterns = ImmutableArray.CreateBuilder<IPatternOperation>();
+        foreach (var section in statement.Cases)
+        foreach (var clause in section.Clauses)
         {
-            ITypePatternOperation type => type.MatchedType,
-            IDeclarationPatternOperation declaration => declaration.MatchedType,
-            IRecursivePatternOperation recursive => recursive.MatchedType,
-            _ => null
-        };
+            if (clause is IDefaultCaseClauseOperation)
+                return;
 
-        return matchedType is not null && compilation.ClassifyConversion(caseType, matchedType).IsIdentity;
+            if (clause is not IPatternCaseClauseOperation label)
+                continue;
+
+            if (UnionModel.GetCatchAlls(compilation, statement.Value, label.Pattern, cancellationToken).Any())
+                return;
+
+            if (label.Guard is null)
+                patterns.Add(label.Pattern);
+        }
+
+        var missing = UnionModel.GetLeafCases(union, cancellationToken)
+            .Where(@case => !patterns.Any(pattern => UnionModel.CoversCase(compilation, pattern, @case)))
+            .Select(@case => @case.Name)
+            .ToArray();
+        if (missing.Length > 0)
+            context.ReportDiagnostic(Diagnostic.Create(
+                Rule, syntax.SwitchKeyword.GetLocation(), union.Name, string.Join(", ", missing)));
     }
 }

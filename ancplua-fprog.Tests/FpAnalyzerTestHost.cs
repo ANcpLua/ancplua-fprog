@@ -65,6 +65,14 @@ internal static class FpAnalyzerTestHost
         return test.RunAsync(cancellationToken);
     }
 
+    public static Task VerifyCompilerAsync(string source, CancellationToken cancellationToken,
+        params DiagnosticResult[] expected)
+    {
+        var test = CreateTest(new RuleTest([]), source, expected);
+        test.CompilerDiagnostics = CompilerDiagnostics.Warnings;
+        return test.RunAsync(cancellationToken);
+    }
+
     /// <summary>Runs a single analyzer type. Useful while developing one rule.</summary>
     public static Task VerifyAsync<TAnalyzer>(
         string source,

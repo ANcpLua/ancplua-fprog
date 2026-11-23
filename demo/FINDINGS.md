@@ -94,8 +94,6 @@ Each needs a decision about the catalog, or cannot be decided by a rule of this 
 | `Fp0102_ClockAndRandomnessNotInTheList.cs` | an injected `TimeProvider` (`clock.GetUtcNow()`), `Stopwatch`, `RandomNumberGenerator`, `TimeZoneInfo.Local`, `ToString("C")`, `string.GetHashCode()` (three process runs, three values) | The row is a closed list. Two visible tests encode the injected `TimeProvider` as correct, so this may be intended. |
 | `Fp0102_StaticMutableProperty.cs` | a mutable static auto-property of a non-core type | The row says "static field". |
 | `Fp0802_BlockingOnTask.cs` | `pending.Result`, `GetAwaiter().GetResult()`, `async IAsyncEnumerable` | The row looks at the return type of methods; tests encode async streams as allowed. |
-| `Fp0502_SwitchStatementAndIfChain.cs` | a switch statement that forgets a case, `case not Card:`, an `is` chain | FP0502 is defined for switch expressions; visible tests encode statements and `is` as not reported. |
-| `Fp0501_TupleUpcastAndNativeUnion.cs` | `(state, input) switch { ..., _ => state }`, a cast to `object`, a C# 15 `union` | Matching still checks the original top-level positions of closed values. |
 | `Fp0303_NullThroughALocal.cs` | `string? result = null; ...; return result;` | Needs data flow; a constant holding null is encoded as not reported. |
 | `Fp0302_OtherPartialMembers.cs` | `ParseExact`, `Convert.ToInt32`, `Max()`/`Average()` on an empty sequence, `xs[0]`, division, a hard cast | Outside the row's list; `ParseExact` and `BigInteger.Parse` are encoded as not reported. |
 | `Fp0203_ImmutableBuilderMember.cs` | a record holding `ImmutableArray<T>.Builder` (a `with` copy shares it) | The row allows the whole namespace, and the test is named "Decided". |

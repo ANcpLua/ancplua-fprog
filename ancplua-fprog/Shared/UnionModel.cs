@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Shared;
@@ -60,7 +61,7 @@ internal static class UnionModel
     }
 
     /// <summary>Finds the original value through parentheses, upcasts and boxing.</summary>
-    public static IOperation ValueBeforeUpcast(IOperation value, Compilation compilation)
+    private static IOperation ValueBeforeUpcast(IOperation value, Compilation compilation)
     {
         while (GetUpcastOperand(value, compilation) is { } operand)
             value = operand;
@@ -108,10 +109,133 @@ internal static class UnionModel
         }
     }
 
-    public static bool AlwaysConvertsTo(Compilation compilation, ITypeSymbol source, ITypeSymbol target)
+    private static bool AlwaysConvertsTo(Compilation compilation, ITypeSymbol source, ITypeSymbol? target)
     {
-        return compilation.ClassifyConversion(source, target) is
+        return target is not null && compilation.ClassifyConversion(source, target) is
             { IsIdentity: true } or { IsImplicit: true, IsReference: true } or { IsImplicit: true, IsBoxing: true };
+    }
+
+    public static INamedTypeSymbol? GetTupleWithUnionElement(IOperation value, Compilation compilation)
+    {
+        var original = ValueBeforeUpcast(value, compilation);
+        if (original.Type is not INamedTypeSymbol { IsTupleType: true } tuple)
+            return null;
+
+        return tuple.TupleElements.Any(static element => GetUnionType(element.Type) is not null)
+               || original is ITupleOperation tupleValue
+               && tupleValue.Elements.Any(element => GetUnionOfExpression(element, compilation) is not null)
+            ? tuple
+            : null;
+    }
+
+    public static IEnumerable<SyntaxNode> GetCatchAlls(
+        Compilation compilation, IOperation value, IPatternOperation pattern, CancellationToken cancellationToken)
+    {
+        return GetCatchAlls(compilation, pattern, value, GetTupleWithUnionElement(value, compilation), cancellationToken);
+    }
+
+    private static IEnumerable<SyntaxNode> GetCatchAlls(Compilation compilation, IPatternOperation pattern,
+        IOperation? input, ITypeSymbol? tuple, CancellationToken cancellationToken)
+    {
+        var union = (input is not null ? GetUnionOfExpression(input, compilation) : null)
+                    ?? GetUnionType(pattern.InputType);
+        if (union is not null || tuple is not null)
+        {
+            var syntax = GetPatternSyntax(pattern);
+            if (syntax is VarPatternSyntax || IsCatchAll(compilation, pattern, union, tuple, cancellationToken))
+                yield return syntax;
+        }
+
+        var tupleInput = pattern is IRecursivePatternOperation && input is not null
+            ? ValueBeforeUpcast(input, compilation) as ITupleOperation
+            : null;
+        var position = 0;
+        foreach (var child in pattern.ChildOperations)
+        {
+            if (child is IPropertySubpatternOperation property)
+            {
+                foreach (var catchAll in GetCatchAlls(compilation, property.Pattern, null, null, cancellationToken))
+                    yield return catchAll;
+            }
+            else if (child is IPatternOperation subpattern)
+            {
+                // Logical subpatterns keep the governing value unless the left side of an and narrows it.
+                var sameInput = pattern is IBinaryPatternOperation or INegatedPatternOperation
+                                && SymbolEqualityComparer.Default.Equals(pattern.InputType, subpattern.InputType);
+                var subpatternInput = sameInput
+                    ? input
+                    : tupleInput is not null && position < tupleInput.Elements.Length
+                        ? tupleInput.Elements[position]
+                        : null;
+                foreach (var catchAll in GetCatchAlls(compilation, subpattern, subpatternInput,
+                             sameInput ? tuple : null, cancellationToken))
+                    yield return catchAll;
+                position++;
+            }
+        }
+    }
+
+    private static bool IsCatchAll(Compilation compilation, IPatternOperation pattern, INamedTypeSymbol? union,
+        ITypeSymbol? tuple, CancellationToken cancellationToken)
+    {
+        switch (pattern)
+        {
+            case IDiscardPatternOperation:
+            case IDeclarationPatternOperation { MatchesNull: true }:
+            case INegatedPatternOperation:
+            case IRecursivePatternOperation
+                { Syntax: RecursivePatternSyntax { Type: null, PositionalPatternClause: null, PropertyPatternClause.Subpatterns.Count: 0 } }:
+                return true;
+        }
+
+        var tested = pattern switch
+        {
+            ITypePatternOperation type => type.MatchedType,
+            IDeclarationPatternOperation declaration => declaration.MatchedType,
+            IRecursivePatternOperation
+                { Syntax: RecursivePatternSyntax { PositionalPatternClause: null, PropertyPatternClause.Subpatterns.Count: 0 } } recursive
+                => recursive.MatchedType,
+            _ => null
+        };
+
+        if (tested is null)
+            return false;
+
+        if (union is null)
+            return tuple is not null && AlwaysConvertsTo(compilation, tuple, tested);
+
+        if (AlwaysConvertsTo(compilation, union, tested)
+            || AlwaysConvertsTo(compilation, pattern.InputType, tested))
+            return true;
+
+        var cases = GetCases(union, cancellationToken);
+        if (cases.Length == 1 && SymbolEqualityComparer.Default.Equals(cases[0], tested))
+            return false;
+
+        var leaves = GetLeafCases(union, cancellationToken).ToArray();
+        return leaves.Length > 0
+               && !(leaves.Length == 1 && SymbolEqualityComparer.Default.Equals(leaves[0], tested))
+               && leaves.All(@case => AlwaysConvertsTo(compilation, @case, tested));
+    }
+
+    private static SyntaxNode GetPatternSyntax(IPatternOperation pattern)
+    {
+        var syntax = pattern.Syntax;
+        while (UnwrapPattern(syntax) is { } inner)
+            syntax = inner;
+
+        return syntax is VariableDesignationSyntax { Parent: VarPatternSyntax variable } ? variable : syntax;
+    }
+
+    private static SyntaxNode? UnwrapPattern(SyntaxNode syntax)
+    {
+        return syntax switch
+        {
+            ParenthesizedPatternSyntax parenthesized => parenthesized.Pattern,
+            ParenthesizedExpressionSyntax parenthesized => parenthesized.Expression,
+            ConstantPatternSyntax constant => constant.Expression,
+            _ => null
+        };
     }
 
     public static bool CoversCase(Compilation compilation, IPatternOperation pattern, ITypeSymbol caseType)

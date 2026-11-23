@@ -268,9 +268,8 @@ public sealed class Fp0501Tests(TestContext testContext)
                            """ + Shape);
     }
 
-    // A listed form beside a case test in an "and" catches nothing beyond that case.
     [TestMethod]
-    public Task FP0501_CatchAllOnOneSideOfTopLevelAnd_NoReport()
+    public Task FP0501_CatchAllBeforeTheNarrowingSideOfAnd_Reports()
     {
         return VerifyAsync("""
                            public static class Area
@@ -278,7 +277,7 @@ public sealed class Fp0501Tests(TestContext testContext)
                                public static int Of(Shape shape) => shape switch
                                {
                                    Shape.Circle and var circle => circle.GetHashCode(),
-                                   not null and Shape.Square => 2
+                                   {|FP0501:not null|} and Shape.Square => 2
                                };
 
                                public static int Empty(Shape shape) => shape switch
@@ -343,9 +342,8 @@ public sealed class Fp0501Tests(TestContext testContext)
                            """ + Shape);
     }
 
-    // One side of the "and" narrows to a case (or excludes one), so the other side catches nothing more.
     [TestMethod]
-    public Task FP0501_AndWithNarrowingSide_NoReport()
+    public Task FP0501_CatchAllStillUsesTheInputTypeAtThatPosition_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -353,7 +351,7 @@ public sealed class Fp0501Tests(TestContext testContext)
                            {
                                public static int Of(Shape shape) => shape switch
                                {
-                                   (Shape.Circle or Shape.Square) and var known => known.GetHashCode()
+                                   (Shape.Circle or Shape.Square) and {|FP0501:var known|} => known.GetHashCode()
                                };
 
                                public static double Named(Shape shape) => shape switch
@@ -365,12 +363,12 @@ public sealed class Fp0501Tests(TestContext testContext)
                                public static int Rest(Shape shape) => shape switch
                                {
                                    Shape.Circle => 1,
-                                   { } rest and not Shape.Circle => rest.GetHashCode()
+                                   {|FP0501:{ } rest|} and {|FP0501:not Shape.Circle|} => rest.GetHashCode()
                                };
 
                                public static int Grouped(Shape shape) => shape switch
                                {
-                                   (Shape.Circle or _) and Shape.Square => 2,
+                                   (Shape.Circle or {|FP0501:_|}) and Shape.Square => 2,
                                    Shape.Circle => 1
                                };
 
@@ -378,9 +376,9 @@ public sealed class Fp0501Tests(TestContext testContext)
                                {
                                    switch (shape)
                                    {
-                                       case not null and Shape.Square and var square:
+                                       case {|FP0501:not null|} and Shape.Square and var square:
                                            return square.ToString();
-                                       case (Shape.Circle or Shape.Square) and var known:
+                                       case (Shape.Circle or Shape.Square) and {|FP0501:var known|}:
                                            return known.ToString();
                                        case null:
                                            return "none";
@@ -746,7 +744,7 @@ public sealed class Fp0501Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0501_CatchAllInsideSubpattern_NoReport()
+    public Task FP0501_CatchAllInsideNonUnionSubpattern_NoReport()
     {
         return VerifyAsync("""
                            public static class Area
@@ -754,8 +752,7 @@ public sealed class Fp0501Tests(TestContext testContext)
                                public static int Of(Shape shape) => shape switch
                                {
                                    Shape.Circle { Radius: _ } => 1,
-                                   Shape.Square(var side) => (int)side,
-                                   not Shape.Circle => 2
+                                   Shape.Square(var side) => (int)side
                                };
                            }
                            """ + Shape);
@@ -1472,7 +1469,7 @@ public sealed class Fp0501Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0501_SwitchOverBoxedValueOrTupleOfUnions_NoReport()
+    public Task FP0501_SwitchOverBoxedValueOrTupleOfUnions_Reports()
     {
         return VerifyAsync("""
                            public static class Area
@@ -1480,23 +1477,23 @@ public sealed class Fp0501Tests(TestContext testContext)
                                public static int Boxed(Shape shape) => ((object)shape) switch
                                {
                                    Shape.Circle => 1,
-                                   _ => 0
+                                   {|FP0501:_|} => 0
                                };
 
                                public static int Both(Shape left, Shape right) => (left, right) switch
                                {
-                                   (Shape.Circle, _) => 1,
-                                   (_, Shape.Circle) => 2,
-                                   _ => 0
+                                   (Shape.Circle, {|FP0501:_|}) => 1,
+                                   ({|FP0501:_|}, Shape.Circle) => 2,
+                                   {|FP0501:_|} => 0
                                };
 
                                public static int Statement(Shape left, Shape right)
                                {
                                    switch (left, right)
                                    {
-                                       case (Shape.Square, var other):
+                                       case (Shape.Square, {|FP0501:var other|}):
                                            return other.GetHashCode();
-                                       default:
+                                       {|FP0501:default|}:
                                            return 0;
                                    }
                                }
@@ -1547,6 +1544,109 @@ public sealed class Fp0501Tests(TestContext testContext)
                                };
                            }
                            """ + Shape);
+    }
+
+    [TestMethod]
+    public Task FP0501_NativeUnionAndNullableNativeUnion_Reports()
+    {
+        return VerifyAsync("""
+                           public union Choice(string, int);
+
+                           public static class Format
+                           {
+                               public static int Tag(Choice value) => value switch
+                               {
+                                   string => 1,
+                                   {|FP0501:_|} => 0
+                               };
+
+                               public static int Maybe(Choice? value) => value switch
+                               {
+                                   null => -1,
+                                   string => 1,
+                                   {|FP0501:var other|} => 0
+                               };
+
+                               public static int Boxed(Choice value) => (object)value switch
+                               {
+                                   {|FP0501:object|} => 0
+                               };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0501_CatchAllInsidePropertiesAndPositionalPatterns_Reports()
+    {
+        return VerifyAsync("""
+                           public sealed record Drawing(Shape Shape, (int Copies, Shape Print) PrintJob);
+
+                           public static class Samples
+                           {
+                               public static int ByProperty(Drawing drawing) => drawing switch
+                               {
+                                   { Shape: {|FP0501:var selected|} } => selected.GetHashCode()
+                               };
+
+                               public static int ByPosition(Drawing drawing) => drawing switch
+                               {
+                                   Drawing(Shape.Circle, (_, Shape.Square)) => 1,
+                                   Drawing({|FP0501:_|}, (_, {|FP0501:not Shape.Circle|})) => 2,
+                                   _ => 0
+                               };
+                           }
+                           """ + Shape);
+    }
+
+    [TestMethod]
+    public Task FP0501_SharedInterfaceOfCases_Reports()
+    {
+        return VerifyAsync("""
+                           public interface IStamped;
+                           public closed record Proof;
+                           public sealed record Ticket : Proof, IStamped;
+                           public sealed record Receipt : Proof, IStamped;
+
+                           public static class Samples
+                           {
+                               public static int Tag(Proof proof) => proof switch
+                               {
+                                   {|FP0501:IStamped stamped|} => 1
+                               };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0501_NativeCasesAndEmptyValue_NoReport()
+    {
+        return VerifyAsync("""
+                           public union Choice(string, int);
+
+                           public static class Format
+                           {
+                               public static int Tag(Choice value) => value switch
+                               {
+                                   string => 1,
+                                   int => 2,
+                                   null => -1
+                               };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0501_ExplicitOnlyCaseInClosedHierarchy_NoReport()
+    {
+        return VerifyAsync("""
+                           public closed class Shape;
+                           public sealed class Circle : Shape;
+
+                           public static class Format
+                           {
+                               public static int Tag(Shape shape) => shape switch { Circle => 1 };
+                           }
+                           """);
     }
 
     private Task VerifyAsync(string source)
