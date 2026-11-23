@@ -73,7 +73,7 @@ public sealed class UnionModelTests(TestContext testContext)
         var unions = new UnionModel(compilation);
         var union = unions.GetUnionType(nullable, testContext.CancellationToken);
         Assert.IsNotNull(union);
-        AssertCases(["int", "string"], unions.GetCases(union, testContext.CancellationToken).Direct);
+        AssertCases(["int", "string"], unions.GetCases(union.Value, testContext.CancellationToken).Direct);
     }
 
     [TestMethod]
@@ -137,7 +137,7 @@ public sealed class UnionModelTests(TestContext testContext)
         AssertCases(["Domain.Marked<System.Collections.Generic.List<int>>", "Domain.Extra<int>"], withList.Leaves);
 
         var result = compilation.GetNamedType("Domain.Result`1");
-        Assert.AreEqual<ITypeSymbol>(result, unions.GetUnionType(result, cancellationToken)!);
+        Assert.AreEqual<ITypeSymbol>(result, unions.GetUnionType(result, cancellationToken)!.Value.Type);
         AssertCases(["Domain.Ok<T>", "Domain.Err<T>"], unions.GetCases(result, cancellationToken).Leaves);
     }
 
@@ -187,7 +187,7 @@ public sealed class UnionModelTests(TestContext testContext)
 
         var operation = compilation.GetSwitchExpression("Run");
         Assert.AreEqual(expected,
-            new UnionModel(compilation).GetUnionOfExpression(operation.Value, testContext.CancellationToken)?.Name);
+            new UnionModel(compilation).GetUnionOfExpression(operation.Value, testContext.CancellationToken)?.Type.Name);
     }
 
     [TestMethod]

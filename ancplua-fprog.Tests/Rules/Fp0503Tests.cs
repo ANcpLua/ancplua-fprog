@@ -160,6 +160,39 @@ public sealed class Fp0503Tests(TestContext testContext)
                            """ + Shapes);
     }
 
+    // Link<T> has a subtype that only exists at Link<List<T>>, so the compiler cannot list the subtypes of the
+    // constraint. FP0601 covers the test in core.
+    [TestMethod]
+    public Task FP0503_TypeParameterConstrainedToIncompleteClosedUnionClass_NoReport()
+    {
+        return VerifyAsync("""
+            #nullable enable
+            using Chains;
+
+            public static class Format
+            {
+                public static bool IsEnd<T, V>(V value) where V : Link<T> => value is End<T>;
+            }
+
+            namespace Chains
+            {
+                using System.Collections.Generic;
+                using System.Runtime.CompilerServices;
+
+                [Union]
+                public closed class Link<T> : IUnion
+                {
+                    public Link(int number) => Value = number;
+                    public Link(string text) => Value = text;
+                    public object? Value { get; }
+                }
+
+                public sealed class End<T>() : Link<T>(0);
+                public sealed class Extra<T>() : Link<List<T>>(0);
+            }
+            """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0503", source, testContext.CancellationToken);

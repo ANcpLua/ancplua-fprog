@@ -1613,7 +1613,27 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_WriteThroughCyclicTupleProjection_Reports()
+    public Task FP0104_WriteThroughTupleSlotKeptAroundACycle_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Write(Box box)
+                               {
+                                   var pair = (box, new Box());
+                                   var copy = pair;
+                                   pair = (copy.Item1, new Box());
+                                   ({|FP0104:pair.Item1.Count|}, pair.Item2.Count) = (1, 2);
+                                   return box.Count;
+                               }
+                           }
+                           """);
+    }
+
+    // The second slot is refilled from the first, which holds a new Box in every assignment.
+    [TestMethod]
+    public Task FP0104_WriteThroughTupleSlotRefilledWithAFreshValue_NoReport()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -1624,7 +1644,8 @@ public sealed class Fp0104Tests(TestContext testContext)
                                    var pair = (new Box(), box);
                                    var copy = pair;
                                    pair = (new Box(), copy.Item1);
-                                   (copy.Item1.Count, {|FP0104:pair.Item2.Count|}) = (1, 2);
+                                   var (_, second) = pair;
+                                   second.Count = 2;
                                    return box.Count;
                                }
                            }

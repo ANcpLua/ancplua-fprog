@@ -1486,6 +1486,39 @@ public sealed class Fp0601Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0601_TypeParameterConstrainedToIncompleteClosedUnionClass_Reports()
+    {
+        return VerifyAsync("""
+            #nullable enable
+            using Chains;
+
+            [Fprog.FunctionalCore]
+            public static class Format
+            {
+                public static bool IsEnd<T, V>(V value) where V : Link<T> => value {|FP0601:is|} End<T>;
+                public static int Tag<T, V>(V value) where V : Link<T> => value switch { {|FP0601:End<T>|} => 1, _ => 2 };
+            }
+
+            namespace Chains
+            {
+                using System.Collections.Generic;
+                using System.Runtime.CompilerServices;
+
+                [Union]
+                public closed class Link<T> : IUnion
+                {
+                    public Link(int number) => Value = number;
+                    public Link(string text) => Value = text;
+                    public object? Value { get; }
+                }
+
+                public sealed class End<T>() : Link<T>(0);
+                public sealed class Extra<T>() : Link<List<T>>(0);
+            }
+            """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0601", source, testContext.CancellationToken);

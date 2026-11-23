@@ -86,6 +86,9 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 - A **union value** is an expression whose type is a union, `Nullable<T>` of a union, or a type parameter
   constrained to a closed class that counts as a union. A union value that a cast or an implicit conversion turned
   into a base type, an interface or `object` at the head of a `switch`, `is` or `as` still counts as that union value.
+- A closed class can be a hand-written union as well. A value of that type is matched by what it holds, so its
+  cases are its `UnionCaseTypes`. As a case of another union, and as the constraint of a type parameter, it stands
+  for its direct subtypes: a value of `V where V : Link<int>` is one of the subtypes of `Link<int>`.
 - Where the rules apply:
   - inside core: FP0101 to FP0303, FP0401, FP0601 to FP0802;
   - on direct subtypes of every closed class: FP0403;
@@ -148,7 +151,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0401 | A class or record in core is open: it carries neither `sealed`, `static` nor `closed`. Cases of a closed class belong to FP0403 | the type's name |
 | FP0403 | A direct subtype of a closed class carries neither `sealed` nor `closed` | the case's name |
 | FP0404 | Creates the empty value of a union struct whose `Value` is an auto-property. This covers `default`, `default(U)`, and calls to the implicit parameterless constructor with `new U()` or target-typed `new()`, unless an object initializer assigns `Value` | that expression |
-| FP0501 | A `switch` expression arm or `switch` statement label over a union value is a catch-all: `_`, `var x`, `default:`, a property pattern without subpatterns `{ }`, any `not` pattern, or a type pattern (with or without a designation) whose type every case converts to (the union itself, a shared base type or interface, `object`). The input type or a type it always converts to also counts, including for constrained parameters. A pattern naming the only case explicitly is allowed. Every pattern position whose input is a union value counts, including tuple elements, positional and property subpatterns and the sides of logical patterns. A top-level catch-all over a tuple with a union element also counts | that pattern, or the `default` keyword |
+| FP0501 | A `switch` expression arm or `switch` statement label over a union value is a catch-all: `_`, `var x`, `default:`, a property pattern without subpatterns `{ }`, any `not` pattern, or a type pattern (with or without a designation) whose type every case converts to (the union itself, a shared base type or interface, `object`). The input type or a type it always converts to also counts, including for constrained parameters. A pattern naming the only case explicitly is allowed, also when that case is `object` or an interface. Every pattern position whose input is a union value counts, including tuple elements, positional and property subpatterns and the sides of logical patterns. A top-level catch-all over a tuple with a union element also counts | that pattern, or the `default` keyword |
 | FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below) | the `switch` keyword |
 | FP0503 | Picks one case out of a union value outside a `switch`: an `is` expression whose pattern names a type, or an `as` expression | the type or pattern to the right of `is`; the type to the right of `as` |
 | FP0601 | Inspects a runtime type that the static type hides. The inspected value has static type `object`, `dynamic`, a type parameter or `Nullable<T>` of a type parameter. Union values are exempt and keep their identity through upcasts at the head of `switch`, `is` or `as`. Reports `is` and `as` type tests, type patterns in switches, explicit reference downcasts, unboxing casts, casts from `dynamic` to a more specific type, and calls to `Object.GetType()` or its dynamic equivalent. Tests for null alone are allowed. An `object` parameter of a member that overrides or implements a member declared outside core (`Equals(object)`, `CompareTo(object)`) may be inspected within that member. Also reports `typeof(T)` and `typeof(T?)` of a type parameter and every written use of `dynamic` | the `is` or `as` keyword, the switch pattern, the cast or `typeof` expression, the `GetType` name, the `dynamic` identifier |
@@ -231,7 +234,9 @@ pattern, a type pattern), so every report comes with a way out.
   something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; something reached after a
   conversion that keeps the reference; or a local that stands for something reached. A local stands for it when
   each of its assignments is such an expression: declared locals, `ref` locals, `foreach` variables, pattern
-  variables at any depth, deconstruction variables.
+  variables at any depth, deconstruction variables. Each element of a tuple local is followed on its own, also
+  around a cycle of assignments: in `pair = (new Cell(), copy.Item1)` the second element continues with the first
+  element of `copy`.
 - A conversion **keeps the reference** when it is an identity or reference conversion, wraps a struct in
   `Nullable<T>` or unwraps it, or converts a tuple whose selected element is converted that way: in
   `(IList<int> Values, int Kind) chosen = useFixed ? (fixedScores, 0) : (openScores, 1);`, `chosen.Values` is
@@ -354,6 +359,9 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
 - FP0104 and FP0105 do not follow conditions. A local that can hold reached memory on one branch counts as
   reached wherever it is written: `var result = add ? new List<int>(input) : input; if (add) result.Add(42);`
   is reported, although the write only meets the copy. Write to the copy before the two values meet.
+- FP0104 and FP0105 do not follow the order of statements either. A local, or one element of a tuple local, that
+  is assigned a fresh value anywhere no longer stands for reached memory, also where it is read before that
+  assignment: `var a = input; var b = a; a = new Cell(); b.X++;` passes. Give the fresh value a local of its own.
 - FP0302 guards are syntactic. FP0303 (b) relies on nullable annotations.
 - A record's copy constructor is protected by the language (CS8878), so a record union can be copied by a subtype
   that FP0403 reports in its own project.

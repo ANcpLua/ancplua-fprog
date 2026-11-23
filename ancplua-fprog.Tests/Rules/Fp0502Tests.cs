@@ -643,6 +643,78 @@ public sealed class Fp0502Tests(TestContext testContext)
                            """);
     }
 
+    // A value of V is an End<int>: the subtype of the constraint, not what a Link<int> holds in Value.
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0502_TypeParameterConstrainedToClosedUnionClass_Reports(bool fromReference)
+    {
+        const string library = """
+
+            namespace Chains
+            {
+                using System.Collections.Generic;
+                using System.Runtime.CompilerServices;
+
+                public closed class Root<T>;
+
+                [Union]
+                public closed class Link<T> : Root<T>, IUnion
+                {
+                    public Link(int number) => Value = number;
+                    public Link(string text) => Value = text;
+                    public object? Value { get; }
+                }
+
+                public sealed class End<T>() : Link<T>(0);
+                public sealed class Extra<T>() : Link<List<T>>(0);
+            }
+            """;
+        const string source = """
+            #nullable enable
+            using Chains;
+
+            public static class Format
+            {
+                public static int BySubtype<V>(V value) where V : Link<int>
+                {
+                    switch (value)
+                    {
+                        case End<int>: return 1;
+                    }
+
+                    return 0;
+                }
+
+                public static int ByContent<V>(V value) where V : Link<int>
+                {
+                    {|FP0502:switch|} (value)
+                    {
+                        case int: return 1;
+                        case string: return 2;
+                    }
+
+                    return 0;
+                }
+
+                public static int Content(Link<int> value)
+                {
+                    switch (value)
+                    {
+                        case int: return 1;
+                        case string: return 2;
+                    }
+
+                    return 0;
+                }
+            }
+            """;
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0502", source, "#nullable enable" + library,
+                testContext.CancellationToken)
+            : VerifyAsync(source + library);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", source, testContext.CancellationToken);

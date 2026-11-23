@@ -61,6 +61,6 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
             .ToArray();
         if (missing.Length > 0)
             context.ReportDiagnostic(Diagnostic.Create(
-                Rule, syntax.SwitchKeyword.GetLocation(), union.Name, string.Join(", ", missing)));
+                Rule, syntax.SwitchKeyword.GetLocation(), union.Type.Name, string.Join(", ", missing)));
     }
 }

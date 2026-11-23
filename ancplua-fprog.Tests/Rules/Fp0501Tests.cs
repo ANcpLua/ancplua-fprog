@@ -1830,6 +1830,32 @@ public sealed class Fp0501Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0501_OnlyCaseIsObjectOrAnInterface_NoReport()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           using System.Runtime.CompilerServices;
+
+                           public union One<T>(T);
+
+                           public static class Format
+                           {
+                               public static int Any(One<object> one) => one switch { object => 1, null => 0 };
+
+                               public static int Wrapped(One<IUnion> one)
+                               {
+                                   switch (one)
+                                   {
+                                       case IUnion: return 1;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);

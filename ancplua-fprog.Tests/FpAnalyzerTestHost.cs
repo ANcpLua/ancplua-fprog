@@ -70,13 +70,13 @@ internal static class FpAnalyzerTestHost
         CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
-        return VerifyRuleCoreAsync(ruleId, source, analyzerConfig, cancellationToken, expected);
+        return VerifyRuleCoreAsync(ruleId, source, analyzerConfig, expected, cancellationToken);
     }
 
     public static Task VerifyRuleWithMemorySafetyPreviewAsync(
         string ruleId, string source, CancellationToken cancellationToken)
     {
-        return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, [], MemorySafetyPreview);
+        return VerifyRuleCoreAsync(ruleId, source, null, [], cancellationToken, MemorySafetyPreview);
     }
 
     /// <summary>Runs a rule against a consumer of a library compiled to an in-memory DLL.</summary>
@@ -84,7 +84,7 @@ internal static class FpAnalyzerTestHost
         string ruleId, string source, string librarySource, CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
-        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, false, cancellationToken, expected);
+        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, false, expected, cancellationToken);
     }
 
     /// <summary>Runs a rule against a consumer of a metadata-only reference assembly.</summary>
@@ -92,22 +92,22 @@ internal static class FpAnalyzerTestHost
         string ruleId, string source, string librarySource, CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
-        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, true, cancellationToken, expected);
+        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, true, expected, cancellationToken);
     }
 
     private static Task VerifyRuleWithReferencedAssemblyAsync(
-        string ruleId, string source, string librarySource, bool metadataOnly, CancellationToken cancellationToken,
-        DiagnosticResult[] expected)
+        string ruleId, string source, string librarySource, bool metadataOnly, DiagnosticResult[] expected,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var library = TestCompilation.Create(librarySource, "ReferencedTypes");
         var reference = TestCompilation.ToImageReference(library, metadataOnly);
-        return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, expected, reference: reference);
+        return VerifyRuleCoreAsync(ruleId, source, null, expected, cancellationToken, reference: reference);
     }
 
     private static Task VerifyRuleCoreAsync(
-        string ruleId, string source, string? analyzerConfig, CancellationToken cancellationToken,
-        DiagnosticResult[] expected, CSharpParseOptions? parseOptions = null, MetadataReference? reference = null)
+        string ruleId, string source, string? analyzerConfig, DiagnosticResult[] expected,
+        CancellationToken cancellationToken, CSharpParseOptions? parseOptions = null, MetadataReference? reference = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
         var analyzers = AllAnalyzers.Value;

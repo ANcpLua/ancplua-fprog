@@ -13,14 +13,14 @@ namespace ancplua_fprog.Shared;
 internal sealed class UnionModel(Compilation compilation)
 {
     private readonly Dictionary<INamedTypeSymbol, CaseSet> _casesByType = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<INamedTypeSymbol, CaseSet> _casesBySubtype = new(SymbolEqualityComparer.Default);
 
-    public INamedTypeSymbol? GetUnionType(ITypeSymbol? type, CancellationToken cancellationToken)
+    public Union? GetUnionType(ITypeSymbol? type, CancellationToken cancellationToken)
     {
         return type switch
         {
-            INamedTypeSymbol { IsUnion: true } union => union,
-            INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
-                when GetCases(closed, cancellationToken).IsComplete => closed,
+            INamedTypeSymbol { IsUnion: true } union => new Union(union, false),
+            INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed => AsClosedClass(closed, cancellationToken),
             INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
                 => GetUnionType(nullable.TypeArguments[0], cancellationToken),
             ITypeParameterSymbol parameter => GetClosedConstraint(parameter, null, cancellationToken),
@@ -28,14 +28,22 @@ internal sealed class UnionModel(Compilation compilation)
         };
     }
 
-    private INamedTypeSymbol? GetClosedConstraint(
+    private Union? AsClosedClass(INamedTypeSymbol closed, CancellationToken cancellationToken)
+    {
+        var union = new Union(closed, true);
+        return GetCases(union, cancellationToken).IsComplete ? union : null;
+    }
+
+    // A value of a type parameter is an instance of a subtype of its constraint. Its cases are the subtypes
+    // of a closed constraint, also when that class is a hand-written union with a case list of its own.
+    private Union? GetClosedConstraint(
         ITypeParameterSymbol parameter, HashSet<ITypeParameterSymbol>? visited, CancellationToken cancellationToken)
     {
         foreach (var constraint in parameter.ConstraintTypes)
         {
             if (constraint is INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
-                && GetCases(closed, cancellationToken).IsComplete)
-                return closed;
+                && AsClosedClass(closed, cancellationToken) is { } constrained)
+                return constrained;
 
             if (constraint is ITypeParameterSymbol other)
             {
@@ -48,7 +56,7 @@ internal sealed class UnionModel(Compilation compilation)
         return null;
     }
 
-    public INamedTypeSymbol? GetUnionOfExpression(IOperation value, CancellationToken cancellationToken)
+    public Union? GetUnionOfExpression(IOperation value, CancellationToken cancellationToken)
     {
         var union = GetUnionType(value.Type, cancellationToken);
         while (GetUpcastOperand(value) is { } operand)
@@ -80,17 +88,26 @@ internal sealed class UnionModel(Compilation compilation)
         };
     }
 
-    public CaseSet GetCases(INamedTypeSymbol union, CancellationToken cancellationToken)
+    /// <summary>The cases of a type as a switch on a value of that type sees them.</summary>
+    public CaseSet GetCases(INamedTypeSymbol type, CancellationToken cancellationToken)
     {
+        return GetCases(new Union(type, !type.IsUnion), cancellationToken);
+    }
+
+    public CaseSet GetCases(Union union, CancellationToken cancellationToken)
+    {
+        var known = union.BySubtypes ? _casesBySubtype : _casesByType;
         lock (_casesByType)
         {
-            if (_casesByType.TryGetValue(union, out var known))
-                return known;
+            if (known.TryGetValue(union.Type, out var cases))
+                return cases;
 
             var isComplete = true;
-            var direct = union.IsUnion ? union.UnionCaseTypes : ClosedCases(union, cancellationToken, out isComplete);
-            var cases = new CaseSet(direct, isComplete ? ExpandClosedCases(direct, cancellationToken) : [], isComplete);
-            _casesByType.Add(union, cases);
+            var direct = union.BySubtypes
+                ? ClosedCases(union.Type, cancellationToken, out isComplete)
+                : union.Type.UnionCaseTypes;
+            cases = new CaseSet(direct, isComplete ? ExpandClosedCases(direct, cancellationToken) : [], isComplete);
+            known.Add(union.Type, cases);
             return cases;
         }
     }
@@ -213,7 +230,7 @@ internal sealed class UnionModel(Compilation compilation)
         }
     }
 
-    private bool IsCatchAll(IPatternOperation pattern, INamedTypeSymbol? union,
+    private bool IsCatchAll(IPatternOperation pattern, Union? switched,
         ITypeSymbol? tuple, CancellationToken cancellationToken)
     {
         switch (pattern)
@@ -239,21 +256,19 @@ internal sealed class UnionModel(Compilation compilation)
         if (tested is null)
             return false;
 
-        if (union is null)
+        if (switched is not { } union)
             return tuple is not null && AlwaysConvertsTo(tuple, tested);
 
-        if (AlwaysConvertsTo(union, tested)
-            || AlwaysConvertsTo(pattern.InputType, tested))
-            return true;
-
+        // Naming the only case is explicit, also when everything converts to that case, as with object.
         var cases = GetCases(union, cancellationToken);
-        if (cases.Direct.Length == 1 && SymbolEqualityComparer.Default.Equals(cases.Direct[0], tested))
+        var leaves = cases.Leaves;
+        if (cases.Direct.Length == 1 && SymbolEqualityComparer.Default.Equals(cases.Direct[0], tested)
+            || leaves.Length == 1 && SymbolEqualityComparer.Default.Equals(leaves[0], tested))
             return false;
 
-        var leaves = cases.Leaves;
-        return leaves.Length > 0
-               && !(leaves.Length == 1 && SymbolEqualityComparer.Default.Equals(leaves[0], tested))
-               && leaves.All(@case => AlwaysConvertsTo(@case, tested));
+        return AlwaysConvertsTo(union.Type, tested)
+               || AlwaysConvertsTo(pattern.InputType, tested)
+               || leaves.Length > 0 && leaves.All(@case => AlwaysConvertsTo(@case, tested));
     }
 
     private static SyntaxNode GetPatternSyntax(IPatternOperation pattern)
@@ -300,6 +315,18 @@ internal sealed class UnionModel(Compilation compilation)
     private static bool IsUnconditionalSubpattern(IPatternOperation pattern)
     {
         return pattern is IDiscardPatternOperation or IDeclarationPatternOperation { MatchesNull: true };
+    }
+
+    /// <summary>A union as a switch sees it: the type, and which of its case lists applies.</summary>
+    public readonly struct Union(INamedTypeSymbol type, bool bySubtypes)
+    {
+        public INamedTypeSymbol Type { get; } = type;
+
+        /// <summary>
+        ///     True when the cases are the direct subtypes of a closed class. False when they are the case
+        ///     types of a <c>union</c> declaration or a hand-written union.
+        /// </summary>
+        public bool BySubtypes { get; } = bySubtypes;
     }
 
     public sealed class CaseSet(ImmutableArray<ITypeSymbol> direct, ImmutableArray<ITypeSymbol> leaves, bool isComplete)

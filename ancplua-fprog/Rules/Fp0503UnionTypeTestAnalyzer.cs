@@ -54,7 +54,7 @@ public sealed class Fp0503UnionTypeTestAnalyzer : DiagnosticAnalyzer
             _ => null
         };
         if (pattern is not null)
-            context.ReportDiagnostic(Diagnostic.Create(Rule, pattern.GetLocation(), union.Name));
+            context.ReportDiagnostic(Diagnostic.Create(Rule, pattern.GetLocation(), union.Type.Name));
     }
 
     private static bool NamesType(IPatternOperation pattern)

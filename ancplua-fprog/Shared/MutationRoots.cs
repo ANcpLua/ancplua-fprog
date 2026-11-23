@@ -17,7 +17,7 @@ internal sealed class MutationRoots(
     private Dictionary<LocalRead, Match>? _resolved;
     private Dictionary<ILocalSymbol, bool>? _acyclicLocals;
     private Dictionary<IOperation, bool>? _acyclicValues;
-    private HashSet<ILocalSymbol>? _active;
+    private HashSet<LocalRead>? _active;
 
     // A cycle can preserve an alias, provided an assignment in the cycle establishes a root and
     // no assignment leaves it. A root in construction is also a known source, exempt from reporting.
@@ -175,8 +175,11 @@ internal sealed class MutationRoots(
     private Match ReadCyclicLocal(
         ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
     {
-        var active = _active ??= new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
-        if (!active.Add(local))
+        // The same local read through another projection is another question: one slot of a tuple can
+        // keep its alias around a cycle while the other slot is replaced by a fresh value.
+        var read = new LocalRead(local, shared, reads, storage);
+        var active = _active ??= [];
+        if (!active.Add(read))
             return new Match(null, start);
 
         try
@@ -185,7 +188,7 @@ internal sealed class MutationRoots(
         }
         finally
         {
-            active.Remove(local);
+            active.Remove(read);
         }
     }
 
