@@ -11,7 +11,7 @@ tree holds two uncommitted files: an updated `AGENTS.md` and this work order.
   of "Reached from a parameter" (memory the caller owns), the anchor paragraph of the entry rule, and the test
   conventions. `git diff AGENTS.md` shows each change.
 - Roslyn 5.12.0 is on NuGet and is the compiler inside SDK 11.0.100. Until now the analyzers compiled against
-  5.9.0 and the tests ran on the 5.9.0 compiler, while every real build ran them inside 5.12.0. This work order
+  an earlier Roslyn release and the test host used that compiler, while real builds ran inside 5.12.0. This work order
   puts all three on the same version.
 - An independent check of your last result found the catalog implemented faithfully on about a hundred probed
   forms, and two places where the rules and the intent differ. Packages B and C close them.
@@ -22,7 +22,7 @@ Measured on a copy of this branch, so you know what to expect:
 | --- | --- |
 | The three package pins moved to 5.12.0, nothing else changed | `make check` exits 0 with 1,031 tests; the demo ends with `RESULT: everything as expected` |
 | The project-wide `RSEXPERIMENTAL006` suppression removed | exactly two errors, both in `Rules/Fp0107UnsafeCodeAnalyzer.cs` (lines 29 and 60: `SyntaxKind.UnsafeExpression`, `UnsafeExpressionSyntax`) |
-| A syntax node action over a setter and a `throw` inside a union body | 5.9.0 delivers each node three times (member, union type, namespace); 5.12.0 delivers it once |
+| A syntax node action over a setter and a `throw` inside a union body | The earlier compiler delivers each node three times (member, union type, namespace). 5.12.0 delivers it once. |
 | A syntax node action on `Parameter` over a partial constructor | both versions deliver the implementing part only |
 | `ITypeSymbol.UnionCaseTypes` | `[Cat, Dog, Bird]` for `union Pet`, `[int, string]` for `Generic<int>` of `union Generic<T>(T, string)` and for a hand-written `[Union]` class, empty for closed classes and for `Pet?` |
 | `s switch { … }` over `T s where T : Closed` with every case named | no CS8509 from the SDK compiler |
@@ -69,7 +69,7 @@ merged in order with both gates after every merge.
 3. **Union cases.** `Shared/UnionModel.cs` takes the cases of a union from `ITypeSymbol.UnionCaseTypes`. Delete the
    constructor scan. Add tests for a generic union, a hand-written `[Union]` class and `Nullable<T>` of a union.
 4. **Driver filters.** `Fp0202SetAccessorAnalyzer` and `Fp0301ThrowAnalyzer` return early when
-   `context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol`, to drop the repeated passes of 5.9.0. Delete
+   `context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol`, to drop the earlier compiler's repeated passes. Delete
    that filter and its comment in both, and in every other analyzer that carries the same pattern. Pin the new
    behaviour with tests: a setter and a `throw` inside a union body give exactly one diagnostic each.
 5. **Language version.** `FpAnalyzerTestHost` and `Shared/TestCompilation.cs` parse with
@@ -81,7 +81,7 @@ merged in order with both gates after every merge.
    compiler gives no CS8509 for the complete switch expression.
 7. **Demo.** The demo projects build with the default language version; remove `LangVersion` from
    `demo/Directory.Build.props`. `Fp0107_PointersInCore` shows classic unsafe code.
-8. **Text.** Rewrite `docs/ROSLYN.source.md` for 5.12.0. Re-verify every code comment that says "Roslyn 5.9.0"
+8. **Text.** Rewrite `docs/ROSLYN.source.md` for 5.12.0. Re-verify every code comment that names the earlier Roslyn pin
    on 5.12.0 and state what is true now. `grep -rn "5\.9\.0"` over the tracked files ends empty.
 
 ## Package B: memory the caller owns (FP0104, FP0105)
@@ -155,7 +155,7 @@ Answer with:
 
 - one table: package, rule IDs touched, tests added / rewritten / deleted, files deleted;
 - the Step 0 numbers and the final numbers: test count, demo counts per project, last line of `count.py`;
-- for package A: every "Roslyn 5.9.0" statement you re-verified, and what it says now;
+- for package A: every statement about the earlier Roslyn pin you re-verified, and what it says now;
 - for package C: old and new diagnostic count per demo file;
 - for package D: each test that exposed a defect, and the fix;
 - every row of `AGENTS.md` you reworded, with the reason;

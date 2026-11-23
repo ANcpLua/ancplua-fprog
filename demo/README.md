@@ -9,7 +9,7 @@ One C# file per case, named after the rule and the case it tests. Every case exi
 | `KnownGaps/<Case>.cs` | real bugs that the analyzers do not report (open decisions, see `FINDINGS.md`) | nothing, on purpose |
 
 All three projects compile with the analyzers of this repository (`../ancplua-fprog/ancplua-fprog.csproj` as analyzer
-reference), with nullable enabled and C# preview.
+reference), with nullable enabled and .NET 11's default language version, C# 15.
 
 ## Expected numbers
 

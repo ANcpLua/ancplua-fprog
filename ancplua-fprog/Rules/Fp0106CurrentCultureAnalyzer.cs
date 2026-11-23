@@ -171,7 +171,7 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeInterpolation(SyntaxNodeAnalysisContext context)
     {
-        if (context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol || !CoreScope.IsInCore(context.ContainingSymbol))
+        if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var literal = (InterpolatedStringExpressionSyntax)context.Node;

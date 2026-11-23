@@ -20,7 +20,7 @@ public sealed class Fp0107Tests(TestContext testContext)
                                    return *target;
                                }
 
-                               public static bool Empty()
+                               public static {|FP0107:unsafe|} bool Empty()
                                {
                                    {|FP0107:int*|} address = null;
                                    return address == null;
@@ -43,17 +43,33 @@ public sealed class Fp0107Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0107_AddressOfAndUnsafeExpression_Reports()
+    public Task FP0107_AddressOf_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
                            public static class Core
                            {
-                               public static int Read(int value) => {|FP0107:unsafe|}(*{|FP0107:&|}value);
-
-                               public static {|FP0107:unsafe|} int ReadAgain(int value) => *({|FP0107:&|}value);
+                               public static {|FP0107:unsafe|} int Read(int value) => *({|FP0107:&|}value);
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0107_PreviewPointerAndUnsafeExpressionOutsideUnsafeBlock_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithMemorySafetyPreviewAsync("FP0107", """
+            [Fprog.FunctionalCore]
+            public static class Core
+            {
+                public static bool Empty()
+                {
+                    {|FP0107:int*|} address = null;
+                    return address == null;
+                }
+
+                public static int Read(int value) => {|FP0107:unsafe|}(*{|FP0107:&|}value);
+            }
+            """, testContext.CancellationToken);
     }
 
     [TestMethod]
@@ -108,7 +124,7 @@ public sealed class Fp0107Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public union Count(int, string)
                            {
-                               public static int Read(int value) => {|FP0107:unsafe|}(*{|FP0107:&|}value);
+                               public static {|FP0107:unsafe|} int Read(int value) => *{|FP0107:&|}value;
                            }
                            """);
     }

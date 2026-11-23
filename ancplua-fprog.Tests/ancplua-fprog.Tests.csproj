@@ -3,7 +3,6 @@
     <PropertyGroup>
         <TargetFramework>net11.0</TargetFramework>
         <Nullable>enable</Nullable>
-        <NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,7 +11,7 @@
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4"/>
         <!-- Explicit, or the testing library resolves Roslyn 1.0.1 and the test host does not compile.
              Keep equal to FprogWorkspacesVersion in the referee's HiddenTests.csproj. -->
-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0"/>
         <!-- Override the vulnerable transitive version from the Roslyn test framework. -->
         <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14"/>
     </ItemGroup>

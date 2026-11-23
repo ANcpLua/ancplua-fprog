@@ -18,6 +18,47 @@ public sealed class Fp0502Tests(TestContext testContext)
                                   """;
 
     [TestMethod]
+    public Task FP0502_SwitchStatementOverClosedConstraintMissingCase_Reports()
+    {
+        return VerifyAsync("""
+                           public static class Area
+                           {
+                               public static int Size<T>(T shape) where T : Shape
+                               {
+                                   {|FP0502:switch|} (shape)
+                                   {
+                                       case Circle: return 1;
+                                       case Square: return 2;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0502_CompleteSwitchStatementOverClosedConstraint_NoReport()
+    {
+        return VerifyAsync("""
+                           public static class Area
+                           {
+                               public static int Size<T>(T shape) where T : Shape
+                               {
+                                   switch (shape)
+                                   {
+                                       case Circle: return 1;
+                                       case Square: return 2;
+                                       case Triangle: return 3;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
     public Task FP0502_SwitchStatementMissingCase_Reports()
     {
         return VerifyAsync("""
@@ -257,6 +298,22 @@ public sealed class Fp0502Tests(TestContext testContext)
                                }
                            }
                            """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task CompilerAcceptsCompleteSwitchExpressionOverClosedConstraint()
+    {
+        return FpAnalyzerTestHost.VerifyCompilerAsync("""
+                                                      public static class Area
+                                                      {
+                                                          public static int Size<T>(T shape) where T : Shape => shape switch
+                                                          {
+                                                              Circle => 1,
+                                                              Square => 2,
+                                                              Triangle => 3
+                                                          };
+                                                      }
+                                                      """ + Shapes, testContext.CancellationToken);
     }
 
     [TestMethod]

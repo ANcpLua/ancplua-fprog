@@ -4,7 +4,6 @@
         <TargetFramework>netstandard2.0</TargetFramework>
         <IsPackable>false</IsPackable>
         <Nullable>enable</Nullable>
-        <NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>
         <LangVersion>preview</LangVersion>
 
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
@@ -15,11 +14,11 @@
 
     <!-- Microsoft.CodeAnalysis.CSharp stays at or below the compiler of the pinned SDK (CS9057). No Workspaces. -->
     <ItemGroup>
-        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0">
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.12.0"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -22,24 +22,56 @@ public sealed class UnionModelTests(TestContext testContext)
                                      """;
 
     [TestMethod]
-    public void NativeUnionGetsItsConstructedCasesFromPublicConstructors()
+    public void NativeUnionGetsItsDeclaredCases()
     {
         var compilation = TestCompilation.Create("""
                                                  public sealed record Cat;
                                                  public sealed record Dog;
                                                  public union Pet(Cat, Dog);
-
-                                                 public union Choice<T>(T, string);
-                                                 public static class Samples
-                                                 {
-                                                     public static Choice<int> Value => 42;
-                                                 }
                                                  """);
         var pet = compilation.GetNamedType("Pet");
         AssertCases(["Cat", "Dog"], UnionModel.GetCases(pet, testContext.CancellationToken));
-        AssertCases(["int", "string"], UnionModel.GetCases(
-            (INamedTypeSymbol)((IPropertySymbol)compilation.GetNamedType("Samples").GetMembers("Value").Single()).Type,
-            testContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public void GenericUnionGetsItsSubstitutedCases()
+    {
+        var compilation = TestCompilation.Create("""
+                                                 public union Choice<T>(T, string);
+                                                 """);
+        var choice = compilation.GetNamedType("Choice`1").Construct(compilation.GetSpecialType(SpecialType.System_Int32));
+        AssertCases(["int", "string"], UnionModel.GetCases(choice, testContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public void CustomUnionIgnoresConstructorsThatAreNotCaseConstructors()
+    {
+        var compilation = TestCompilation.Create("""
+                                                 using System.Runtime.CompilerServices;
+
+                                                 [Union]
+                                                 public sealed class Choice : IUnion
+                                                 {
+                                                     public Choice(int value) => Value = value;
+                                                     public Choice(string value) => Value = value;
+                                                     public Choice(ref bool flag) : this(flag ? 1 : 0) { }
+                                                     public object Value { get; }
+                                                 }
+                                                 """);
+        AssertCases(["int", "string"], UnionModel.GetCases(compilation.GetNamedType("Choice"), testContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public void NullableUnionProvidesCasesThroughItsUnderlyingType()
+    {
+        var compilation = TestCompilation.Create("public union Choice(int, string);");
+        var choice = compilation.GetNamedType("Choice");
+        var nullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(choice);
+
+        AssertCases([], nullable.UnionCaseTypes);
+        var union = UnionModel.GetUnionType(nullable);
+        Assert.IsNotNull(union);
+        AssertCases(["int", "string"], UnionModel.GetCases(union, testContext.CancellationToken));
     }
 
     [TestMethod]

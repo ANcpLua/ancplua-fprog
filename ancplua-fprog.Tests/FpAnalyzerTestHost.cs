@@ -17,7 +17,7 @@ namespace ancplua_fprog.Tests;
 /// <summary>
 ///     The single entry point for analyzer tests, shared by visible and hidden tests.
 ///     Every test compiles against exactly the .NET 11 reference assemblies from
-///     Basic.Reference.Assemblies.Net110, downloads nothing at test time, parses C# preview
+///     Basic.Reference.Assemblies.Net110, downloads nothing at test time, parses C# 15
 ///     syntax and sees the Fprog core marker.
 /// </summary>
 internal static class FpAnalyzerTestHost
@@ -40,6 +40,11 @@ internal static class FpAnalyzerTestHost
     ///     (<c>ReferenceAssemblies.Default</c> is <c>Net.Net80</c> on .NET 8+ and would add a second set.)
     /// </summary>
     private static readonly ReferenceAssemblies NoResolvedReferences = new("net11.0");
+
+    private static readonly CSharpParseOptions CSharp15 = new(LanguageVersion.CSharp15, DocumentationMode.Diagnose);
+
+    private static readonly CSharpParseOptions MemorySafetyPreview = CSharp15.WithLanguageVersion(LanguageVersion.Preview)
+        .WithFeatures([new KeyValuePair<string, string>("updated-memory-safety-rules", "on")]);
 
     private static readonly Lazy<ImmutableArray<DiagnosticAnalyzer>> AllAnalyzers = new(LoadAllAnalyzers);
 
@@ -64,13 +69,26 @@ internal static class FpAnalyzerTestHost
         CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
+        return VerifyRuleCoreAsync(ruleId, source, analyzerConfig, cancellationToken, expected);
+    }
+
+    public static Task VerifyRuleWithMemorySafetyPreviewAsync(
+        string ruleId, string source, CancellationToken cancellationToken)
+    {
+        return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, [], MemorySafetyPreview);
+    }
+
+    private static Task VerifyRuleCoreAsync(
+        string ruleId, string source, string? analyzerConfig, CancellationToken cancellationToken,
+        DiagnosticResult[] expected, CSharpParseOptions? parseOptions = null)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
         var analyzers = AllAnalyzers.Value;
         var reported = analyzers.SelectMany(SupportedIds).ToImmutableHashSet(StringComparer.Ordinal);
         if (!reported.Contains(ruleId))
             throw new InvalidOperationException($"No analyzer in {AnalyzerAssemblyName} supports {ruleId}.");
 
-        var test = CreateTest(new RuleTest(analyzers), source, expected);
+        var test = CreateTest(new RuleTest(analyzers, parseOptions), source, expected);
         test.DisabledDiagnostics.AddRange(reported.Where(id => id != ruleId));
         if (analyzerConfig is not null)
         {
@@ -93,7 +111,8 @@ internal static class FpAnalyzerTestHost
     public static Task VerifyAllAsync(string source, CancellationToken cancellationToken,
         IEnumerable<KeyValuePair<string, string>>? parseFeatures = null)
     {
-        var test = CreateTest(new RuleTest(AllAnalyzers.Value, parseFeatures), source, []);
+        var options = parseFeatures is null ? CSharp15 : CSharp15.WithFeatures(parseFeatures);
+        var test = CreateTest(new RuleTest(AllAnalyzers.Value, options), source, []);
         test.CompilerDiagnostics = CompilerDiagnostics.Warnings;
         return test.RunAsync(cancellationToken);
     }
@@ -158,7 +177,7 @@ internal static class FpAnalyzerTestHost
     ///     declared in this test assembly would trigger RS1036 and RS1038.
     /// </summary>
     private sealed class RuleTest(ImmutableArray<DiagnosticAnalyzer> analyzers,
-        IEnumerable<KeyValuePair<string, string>>? parseFeatures = null) : AnalyzerTest<DefaultVerifier>
+        CSharpParseOptions? parseOptions = null) : AnalyzerTest<DefaultVerifier>
     {
         public override string Language => LanguageNames.CSharp;
 
@@ -171,8 +190,7 @@ internal static class FpAnalyzerTestHost
 
         protected override ParseOptions CreateParseOptions()
         {
-            var options = new CSharpParseOptions(LanguageVersion.Preview, DocumentationMode.Diagnose);
-            return parseFeatures is null ? options : options.WithFeatures(parseFeatures);
+            return parseOptions ?? CSharp15;
         }
 
         protected override IEnumerable<DiagnosticAnalyzer> GetDiagnosticAnalyzers()

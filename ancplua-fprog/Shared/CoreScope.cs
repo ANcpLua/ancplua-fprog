@@ -1,7 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace ancplua_fprog.Shared;
 
@@ -30,21 +27,6 @@ internal static class CoreScope
     }
 
     /// <summary>
-    ///     Accepts the callback for the source declaration that owns the syntax. Roslyn can also run
-    ///     syntax actions inside a native union for that union and its containing symbol.
-    /// </summary>
-    public static bool IsInCoreSyntax(SyntaxNodeAnalysisContext context)
-    {
-        if (!IsInCore(context.ContainingSymbol))
-            return false;
-
-        return context.ContainingSymbol is not INamedTypeSymbol type
-               || (context.Node.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } declaration
-                   && SymbolEqualityComparer.Default.Equals(
-                       context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken), type));
-    }
-
-    /// <summary>
     ///     True when <paramref name="symbol" /> is written in source; false when the compiler synthesized it
     ///     or it was read from a compiled assembly (AGENTS.md, "Scope": only members declared in source count).
     ///     <para>
@@ -53,9 +35,10 @@ internal static class CoreScope
     ///         compilation only, also compare <c>symbol.ContainingAssembly</c> with <c>compilation.Assembly</c>.
     ///     </para>
     ///     <para>
-    ///         Observed with Roslyn 5.9.0 on <c>record Circle(double Radius)</c>. Declared: the positional
-    ///         property <c>Radius</c> (its declaring syntax is the parameter) and the primary constructor with
-    ///         its parameter. Not declared: <c>Deconstruct</c> and its <c>out</c> parameter, the copy
+    ///         With Roslyn 5.12.0, <c>record Circle(double Radius)</c> has two declared members: the positional
+    ///         property <c>Radius</c> (its declaring syntax is the parameter) and the primary constructor.
+    ///         The primary constructor's parameter is also declared. Synthesized members include
+    ///         <c>Deconstruct</c> and its <c>out</c> parameter, the copy
     ///         constructor, <c>EqualityContract</c>, <c>ToString</c>, <c>PrintMembers</c>, both <c>Equals</c>,
     ///         <c>GetHashCode</c>, <c>==</c> and <c>!=</c>, <c>&lt;Clone&gt;$</c>, the backing field of
     ///         <c>Radius</c> and the accessors of <c>Radius</c> (no <c>get</c> or <c>init</c> keyword exists).

@@ -103,14 +103,7 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
 
     private static void Analyze(SyntaxNodeAnalysisContext context)
     {
-        // Roslyn 5.9.0 runs a syntax node action inside the body of a C# 15 union declaration once with
-        // the enclosing member, then again with the union type and with each declaration around it (a
-        // type or a namespace). A throw is always executable code, so its genuine pass carries a member:
-        // a method, accessor, constructor (also the primary constructor for a base argument), operator,
-        // the field, property or event of an initializer, or the entry point of top-level statements.
-        // A type or namespace as containing symbol is therefore one of the repeated passes.
-        if (context.ContainingSymbol is INamedTypeSymbol or INamespaceSymbol
-            || !CoreScope.IsInCore(context.ContainingSymbol))
+        if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var keyword = context.Node switch

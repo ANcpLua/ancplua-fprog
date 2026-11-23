@@ -530,6 +530,25 @@ public sealed class Fp0501Tests(TestContext testContext)
                            """ + Shape);
     }
 
+    [TestMethod]
+    public Task FP0501_CompleteSwitchExpressionOverClosedConstraint_NoReport()
+    {
+        return VerifyAsync("""
+                           public closed class Choice;
+                           public sealed class Left : Choice;
+                           public sealed class Right : Choice;
+
+                           public static class Select
+                           {
+                               public static int Of<T>(T choice) where T : Choice => choice switch
+                               {
+                                   Left => 1,
+                                   Right => 2
+                               };
+                           }
+                           """);
+    }
+
     // Switch statements.
 
     [TestMethod]

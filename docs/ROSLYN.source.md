@@ -1,8 +1,13 @@
 # Roslyn API map
 
-The rule catalog, scope, and diagnostic spans are defined in [AGENTS.md](../AGENTS.md). The analyzers use the
-Roslyn 5.9.0 public APIs from the pinned .NET 11 SDK. The test host compiles C# preview code against the
-.NET 11 reference assemblies.
+The rule catalog, scope, and diagnostic spans are defined in [AGENTS.md](../AGENTS.md). The analyzers compile
+against Roslyn 5.12.0, the version used by the pinned .NET 11.0.100 SDK and the test host. The tests use C# 15
+and the .NET 11 reference assemblies. FP0107 also tests the memory-safety preview by opting into `Preview`
+and `updated-memory-safety-rules` in the test host.
+
+Roslyn 5.12.0 calls a syntax node action once per node, including nodes inside a union body. The driver
+visits only the implementing declaration of a partial constructor in a syntax node action. FP0103 walks
+the semantic model so it can check both declarations.
 
 ## Shared models
 
@@ -11,7 +16,7 @@ Roslyn 5.9.0 public APIs from the pinned .NET 11 SDK. The test host compiles C# 
 | `CoreScope` | Walks `ISymbol.ContainingType` and checks `GetAttributes()` on the type and assembly for the `Fprog.FunctionalCoreAttribute` metadata name. `DeclaringSyntaxReferences` and `IsImplicitlyDeclared` identify authored declarations. |
 | `Purity` | Classifies types in Core, Async, Pure, Shell order. It reads `AnalyzerConfigOptionsProvider.GetOptions(SyntaxTree)` and falls back to `GlobalOptions` for `fprog_pure_apis`. |
 | `EntryRule` | One semantic model action per tree. `GetSymbolInfo` resolves written names and member uses. `GetTypeInfo` identifies inferred values. `GetOperation` and `GetConversion` bind arguments, operators, indexers and delegate invocations. Receiver expressions and the type syntax of declarations determine whether an entry is already reported. |
-| `UnionModel` | Uses `ITypeSymbol.IsUnion` and the parameter types of public one-parameter `InstanceConstructors` for native unions. `IsClosed` and `GetClosedDerivedTypeInfo(cancellationToken).ClosedDerivedTypes` expose closed class cases, including cases in referenced assemblies. The model expands closed cases to leaves and follows `IConversionOperation.Operand` through upcasts and boxing. |
+| `UnionModel` | Uses `ITypeSymbol.IsUnion` and `ITypeSymbol.UnionCaseTypes` for native and hand-written unions. The compiler substitutes type arguments in the case types. The model unwraps `Nullable<T>` before reading its cases. `IsClosed` and `GetClosedDerivedTypeInfo(cancellationToken).ClosedDerivedTypes` expose closed class cases, including cases in referenced assemblies. The model expands closed cases to leaves and follows `IConversionOperation.Operand` through upcasts and boxing. |
 | `Mutators`, `LocalAliases`, `MutationRoots` | Share the traversal of assignments, increment and decrement, `ref` and `out` arguments, calls and event assignments. Alias indexing uses declarator, deconstruction, foreach and pattern operations. Reachability follows storage and receiver operations, preserves span and memory views, and distinguishes references from copies. |
 | `PartialUseGuards` | Walks the enclosing C# syntax and preceding `if` statements. Semantic symbol identity ties each supported condition to the collection, index, divisor or nullable operand being checked. |
 
@@ -25,7 +30,7 @@ Roslyn 5.9.0 public APIs from the pinned .NET 11 SDK. The test host compiles C# 
 | FP0104 | `Mutators` and `MutationRoots` inspect writes through `IParameterReferenceOperation` and aliases. Receiver methods and destination arguments share the same reachability test. |
 | FP0105 | The same write model starts at fields and source properties with backing fields. `IEventAssignmentOperation` exposes subscriptions. The enclosing operation block distinguishes construction. |
 | FP0106 | `IInvocationOperation.TargetMethod`, `IMethodSymbol.Parameters` and bound arguments expose provider overloads and comparer arguments. `InterpolatedStringExpressionSyntax` and `GetConversion` identify string interpolation. `IBinaryOperation` exposes string concatenation operands. |
-| FP0107 | `PointerTypeSyntax`, `FunctionPointerTypeSyntax`, address-of syntax, `FixedStatementSyntax`, `UnsafeStatementSyntax`, `UnsafeExpressionSyntax` and declaration tokens give the written unsafe form and span. |
+| FP0107 | `PointerTypeSyntax`, `FunctionPointerTypeSyntax`, address-of syntax, `FixedStatementSyntax`, `UnsafeStatementSyntax` and declaration tokens give the classic unsafe forms and spans. `SyntaxKind.UnsafeExpression` and `UnsafeExpressionSyntax` cover `unsafe(expr)` in the memory-safety preview and require a file-local `RSEXPERIMENTAL006` suppression. |
 | FP0201 | `IFieldSymbol.IsReadOnly` and `IsConst` handle ordinary fields. A named-type symbol start action collects operation blocks and finds writes to primary-constructor parameters, including through `ref` locals. |
 | FP0202 | The `SetAccessorDeclaration` syntax kind provides the `set` token. |
 | FP0203 | Field and property symbol actions inspect `ITypeSymbol.IsRecord`, `IsReadOnly` and the declared member type. Positional properties point to their parameter syntax. |
@@ -36,7 +41,7 @@ Roslyn 5.9.0 public APIs from the pinned .NET 11 SDK. The test host compiles C# 
 | FP0403 | A named-type symbol action checks each direct subtype of a closed class for `IsSealed` or `IsClosed`. |
 | FP0404 | `IDefaultValueOperation` and `IObjectCreationOperation.Constructor` identify explicit creation of an empty union struct. |
 | FP0501 | `ISwitchOperation` and `ISwitchExpressionOperation` expose labels and arms. `IPatternOperation.InputType` and each pattern's child operations let the rule check nested union positions. `IDefaultCaseClauseOperation` supplies the default label. |
-| FP0502 | `ISwitchOperation` exposes statement clauses. `IPatternCaseClauseOperation.Guard` and the pattern's matched type, subpatterns and alternatives determine coverage of each leaf case. Compiler warnings CS8509 and CS8655 cover switch expressions. |
+| FP0502 | `ISwitchOperation` exposes statement clauses. `IPatternCaseClauseOperation.Guard` and the pattern's matched type, subpatterns and alternatives determine coverage of each leaf case. Compiler warnings CS8509 and CS8655 cover switch expressions, including over type parameters constrained to closed classes. Coverage comes from the cases because `ISwitchExpressionOperation.IsExhaustive` can be false even when every case is named. |
 | FP0503 | `IIsTypeOperation`, `IIsPatternOperation` and `IConversionOperation.IsTryCast` identify type selection on union operands. The written right-hand syntax supplies the span even when a native union pattern operation is implicit. |
 | FP0601 | Type-test, conversion, pattern, typeof and invocation operations expose the static operand and tested type. `IDynamicTypeSymbol` identifies the written keyword. Override links and `FindImplementationForInterfaceMember` identify external contracts. |
 | FP0701 | Operation block actions inspect closure bodies, reference operations and writes. A named-type symbol start action also collects captures and writes across members of that type. |

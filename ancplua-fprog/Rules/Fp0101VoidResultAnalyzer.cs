@@ -44,7 +44,7 @@ public sealed class Fp0101VoidResultAnalyzer : DiagnosticAnalyzer
             _ => (null, default)
         };
         if (returnType is not PredefinedTypeSyntax { Keyword.RawKind: (int)SyntaxKind.VoidKeyword }
-            || !CoreScope.IsInCoreSyntax(context))
+            || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         if (context.SemanticModel.GetDeclaredSymbol(context.Node, context.CancellationToken) is IMethodSymbol
@@ -65,7 +65,7 @@ public sealed class Fp0101VoidResultAnalyzer : DiagnosticAnalyzer
     {
         var name = (SimpleNameSyntax)context.Node;
         if (name.IsVar || name.IsPartOfStructuredTrivia()
-            || !IsDelegateTypePosition(name) || !CoreScope.IsInCoreSyntax(context))
+            || !IsDelegateTypePosition(name) || !CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         if (context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is ITypeSymbol type

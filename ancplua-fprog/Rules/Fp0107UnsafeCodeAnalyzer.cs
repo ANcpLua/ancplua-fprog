@@ -1,3 +1,5 @@
+#pragma warning disable RSEXPERIMENTAL006 // FP0107 also checks the memory-safety preview's unsafe(expr) syntax.
+
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
@@ -43,14 +45,6 @@ public sealed class Fp0107UnsafeCodeAnalyzer : DiagnosticAnalyzer
             return;
 
         var syntax = context.Node;
-        // Roslyn also visits union contents under each surrounding type. A true type-owned pass
-        // applies to that type's own declaration or header. Member bodies have their member as owner.
-        if (context.ContainingSymbol is INamedTypeSymbol type
-            && syntax.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } declaration
-            && !SymbolEqualityComparer.Default.Equals(
-                context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken), type))
-            return;
-
         var location = syntax switch
         {
             PointerTypeSyntax or FunctionPointerTypeSyntax => syntax.GetLocation(),

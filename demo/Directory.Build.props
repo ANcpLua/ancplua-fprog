@@ -8,7 +8,6 @@
         <OutputType>Library</OutputType>
         <Nullable>enable</Nullable>
         <ImplicitUsings>disable</ImplicitUsings>
-        <LangVersion>preview</LangVersion>
         <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
         <EnableNETAnalyzers>false</EnableNETAnalyzers>
         <GenerateDocumentationFile>false</GenerateDocumentationFile>

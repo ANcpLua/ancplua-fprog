@@ -83,10 +83,7 @@ internal static class UnionModel
     public static ImmutableArray<ITypeSymbol> GetCases(INamedTypeSymbol union, CancellationToken cancellationToken)
     {
         if (union.IsUnion)
-            return [.. union.InstanceConstructors
-                .Where(static constructor => constructor is
-                    { DeclaredAccessibility: Accessibility.Public, Parameters.Length: 1 })
-                .Select(static constructor => constructor.Parameters[0].Type)];
+            return union.UnionCaseTypes;
 
         return union.IsClosed
             ? [.. union.GetClosedDerivedTypeInfo(cancellationToken).ClosedDerivedTypes]

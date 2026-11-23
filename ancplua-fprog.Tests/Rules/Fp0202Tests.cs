@@ -780,7 +780,7 @@ public sealed class Fp0202Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0202_SetInTopLevelUnionUnderAssemblyCore_Reports()
+    public Task FP0202_SetInTopLevelUnionUnderAssemblyCoreReportsOnce_Reports()
     {
         return VerifyAsync("""
                            [assembly: Fprog.FunctionalCore]

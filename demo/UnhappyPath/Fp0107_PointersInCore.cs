@@ -24,9 +24,9 @@ public static class Cells
         return values.Length;
     }
 
-    public static int Copy(int value) => unsafe(*&value); // expect: FP0107, FP0107
+    public static unsafe int Copy(int value) => *(&value); // expect: FP0107, FP0107
 
-    public static bool IsEmpty()
+    public static unsafe bool IsEmpty() // expect: FP0107
     {
         int* missing = null; // expect: FP0107
         return missing == null;

@@ -229,7 +229,7 @@ public sealed class Fp0301Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0301_ThrowInTopLevelUnionBodyUnderAssemblyLevelCore_Reports()
+    public Task FP0301_ThrowInTopLevelUnionUnderAssemblyCoreReportsOnce_Reports()
     {
         return VerifyAsync("""
                            [assembly: Fprog.FunctionalCore]

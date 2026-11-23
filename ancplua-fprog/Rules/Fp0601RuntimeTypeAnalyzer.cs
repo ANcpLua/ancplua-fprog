@@ -37,7 +37,7 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
     {
         var name = (IdentifierNameSyntax)context.Node;
         if (name.Identifier.Text == "dynamic"
-            && CoreScope.IsInCoreSyntax(context)
+            && CoreScope.IsInCore(context.ContainingSymbol)
             && context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is IDynamicTypeSymbol)
             context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation()));
     }

@@ -15,8 +15,7 @@ namespace ancplua_fprog.Rules;
 ///     parameter name.
 ///     <para>
 ///         A semantic model action walks the whole tree. A syntax node action on <c>Parameter</c> is not enough:
-///         the analyzer driver (Roslyn 5.9.0) never visits the defining part of a partial constructor, so its
-///         parameters would be missed.
+///         the Roslyn 5.12.0 analyzer driver visits only the implementing part of a partial constructor.
 ///     </para>
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]

@@ -37,7 +37,7 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeResultType(SyntaxNodeAnalysisContext context)
     {
-        if (!IsMemberInCore(context.ContainingSymbol))
+        if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var resultType = context.Node switch
@@ -58,30 +58,11 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
 
     private static void AnalyzeNullForgiving(SyntaxNodeAnalysisContext context)
     {
-        var symbol = context.ContainingSymbol;
-        if (!CoreScope.IsInCore(symbol)
-            || symbol is INamedTypeSymbol && !SymbolEqualityComparer.Default.Equals(symbol, GetTypeAttributeOwner(context)))
+        if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
 
         var syntax = (PostfixUnaryExpressionSyntax)context.Node;
         context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.OperatorToken.GetLocation()));
-    }
-
-    private static ISymbol? GetTypeAttributeOwner(SyntaxNodeAnalysisContext context)
-    {
-        var owner = context.Node.FirstAncestorOrSelf<AttributeListSyntax>()?.Parent;
-        if (owner is TypeParameterSyntax parameter)
-            owner = parameter.Parent?.Parent;
-
-        return owner is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax
-            ? context.SemanticModel.GetDeclaredSymbol(owner, context.CancellationToken)
-            : null;
-    }
-
-    // Roslyn also visits a union body's syntax in passes for the surrounding type and namespace.
-    private static bool IsMemberInCore(ISymbol? symbol)
-    {
-        return symbol is not (INamedTypeSymbol or INamespaceSymbol) && CoreScope.IsInCore(symbol);
     }
 
     private static void AnalyzeReturn(OperationAnalysisContext context)

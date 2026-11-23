@@ -12,12 +12,12 @@ namespace ancplua_fprog.Tests.Shared;
 
 /// <summary>
 ///     Compiles test source together with <see cref="FpAnalyzerTestHost.AnnotationsSource" /> against the
-///     .NET 11 reference assemblies, with C# preview syntax and nullable reference types enabled.
+///     .NET 11 reference assemblies, with C# 15 syntax and nullable reference types enabled.
 ///     The test sources are the first syntax trees, named <c>Test0.cs</c>, <c>Test1.cs</c> and so on.
 /// </summary>
 internal static class TestCompilation
 {
-    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Preview);
+    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.CSharp15);
 
     /// <summary>Compiles <paramref name="source" /> and fails the test if it does not compile.</summary>
     public static CSharpCompilation Create(string source, string assemblyName = "Tests",
