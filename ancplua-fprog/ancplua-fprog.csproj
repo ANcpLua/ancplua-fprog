@@ -16,7 +16,7 @@
     <PropertyGroup>
         <IsPackable>true</IsPackable>
         <PackageId>ANcpLua.Fprog.Analyzers</PackageId>
-        <VersionPrefix>0.4.0</VersionPrefix>
+        <VersionPrefix>0.4.1</VersionPrefix>
         <Authors>Alexander Nachtmann</Authors>
         <Description>Roslyn analyzers that hold C# 15 code to functional-programming rules: purity, immutability and totality inside types marked [Fprog.FunctionalCore], and complete matching over union types and closed classes.</Description>
         <PackageTags>roslyn;analyzers;functional-programming;immutability;discriminated-unions</PackageTags>
