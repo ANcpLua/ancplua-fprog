@@ -5,7 +5,7 @@
 
  Rule ID | Category   | Severity | Notes
 ---------|------------|----------|--------------------------------------------------------------------
- FP0101  | Functional | Warning  | Do not return void in the functional core
+ FP0101  | Functional | Warning  | Do not use void results in the functional core
  FP0102  | Functional | Warning  | Do not read hidden inputs in the functional core
  FP0103  | Functional | Warning  | Do not use ref or out parameters in the functional core
  FP0104  | Functional | Warning  | Do not write through a parameter in the functional core
@@ -24,7 +24,7 @@
  FP0501  | Functional | Warning  | Do not use a catch-all in a switch over a union
  FP0502  | Functional | Warning  | Handle every case of a union in a switch statement
  FP0503  | Functional | Warning  | Match union cases in a switch
- FP0601  | Functional | Warning  | Do not inspect the runtime type of an unconstrained type parameter
+ FP0601  | Functional | Warning  | Do not inspect a runtime type hidden by the static type
  FP0701  | Functional | Warning  | Do not capture a variable that is reassigned
  FP0801  | Functional | Warning  | Keep Shell types and locks outside the functional core
  FP0802  | Functional | Warning  | Keep asynchronous work outside the functional core

@@ -272,7 +272,7 @@ public sealed class Fp0101Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0101_ConstructorsDestructorsAndAccessorsInCore_NoReport()
+    public Task FP0101_VoidEventTypeBesideConstructorsAndAccessorsInCore_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -294,7 +294,7 @@ public sealed class Fp0101Tests(TestContext testContext)
 
                                public int this[int index] => _value + index;
 
-                               public event System.EventHandler? Changed
+                               public event System.{|FP0101:EventHandler|}? Changed
                                {
                                    add { }
                                    remove { }
@@ -308,17 +308,17 @@ public sealed class Fp0101Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0101_VoidLambdaAndVoidDelegateTypeInCore_NoReport()
+    public Task FP0101_VoidDelegateDeclarationAndWrittenReturnTypes_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
                            public static class Callbacks
                            {
-                               public delegate void Notify(int value);
+                               public delegate void {|FP0101:Notify|}(int value);
 
-                               public static System.Action<int> Make() => value => System.GC.KeepAlive(value);
+                               public static System.{|FP0101:Action|}<int> Make() => value => System.GC.KeepAlive(value);
 
-                               public static Notify MakeNotify() => static delegate(int value) { System.GC.KeepAlive(value); };
+                               public static {|FP0101:Notify|} MakeNotify() => static delegate(int value) { System.GC.KeepAlive(value); };
                            }
                            """);
     }
@@ -514,7 +514,7 @@ public sealed class Fp0101Tests(TestContext testContext)
                                    }
                                }
 
-                               public event System.EventHandler? Changed
+                               public event System.{|FP0101:EventHandler|}? Changed
                                {
                                    add
                                    {
@@ -824,7 +824,7 @@ public sealed class Fp0101Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0101_PointerFunctionPointerAndDelegateReturnTypesInCore_NoReport()
+    public Task FP0101_PointerFunctionPointerAndValueDelegateReturnTypesInCore_NoReport()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -833,8 +833,6 @@ public sealed class Fp0101Tests(TestContext testContext)
                                public static void* Raw(void* pointer) => pointer;
 
                                public static delegate*<void> Function(delegate*<void> pointer) => pointer;
-
-                               public static System.Action Callback() => static () => { };
 
                                public static System.Func<int> Make()
                                {
@@ -1080,8 +1078,6 @@ public sealed class Fp0101Tests(TestContext testContext)
                                        static int Count() => 4;
                                    }
 
-                                   public static System.Action Callback() => static () => { };
-
                                    public static class Keeper
                                    {
                                        public static int Feed() => 1;
@@ -1113,6 +1109,341 @@ public sealed class Fp0101Tests(TestContext testContext)
                                public static class Keeper
                                {
                                    public static void Feed() { }
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_DelegateDeclarationInAssemblyCore_Reports()
+    {
+        return VerifyAsync("""
+                           [assembly: Fprog.FunctionalCore]
+
+                           public delegate void {|FP0101:Observe|}(string text);
+                           public delegate int Measure(System.{|FP0101:Action|} callback);
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_WrittenDelegateParameterIncludingAlias_Reports()
+    {
+        return VerifyAsync("""
+                           using Notify = System.Action<int>;
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Measure({|FP0101:Notify|} callback, int count)
+                               {
+                                   callback(count);
+                                   return count;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_WrittenDelegateLocal_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Measure()
+                               {
+                                   global::System.{|FP0101:Action|} callback = static () => { };
+                                   callback();
+                                   return 1;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_WrittenDelegateField_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               private static readonly System.{|FP0101:Action|} Notify = static () => { }, Audit = static () => { };
+                               public static int Measure() { Notify(); Audit(); return 1; }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_WrittenDelegateProperty_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static System.{|FP0101:Action|} Callback { get; } = static () => { };
+
+                               public static System.{|FP0101:Action|} Make => static delegate { };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_WrittenDelegateTypeArguments_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Immutable;
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static ImmutableArray<{|FP0101:Action|}> Empty => [];
+
+                               public static int Run() => Count<{|FP0101:Action|}>(static () => { });
+                               private static int Count<T>(T item) => 1;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_VoidLambdaPassedToOutsideMember_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver { public static int With(Action action) { action(); return 1; } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run() => Driver.With(static () {|FP0101:=>|} { });
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_VoidAnonymousMethodPassedToOutsideMember_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver { public static int With(Action action) { action(); return 1; } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run() => Driver.With(static {|FP0101:delegate|} { });
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_VoidMethodGroupPassedToOutsideMember_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver
+                           {
+                               public static int With(Action action) { action(); return 1; }
+                               public static void Notify<T>() { }
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run() => Driver.With(Driver.{|FP0101:Notify|}<int>);
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_NaturalVoidDelegateTypeInVarLocal_Reports()
+    {
+        return VerifyAsync("""
+                           public static class Driver { public static void Notify(int value) { } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run()
+                               {
+                                   var callback = static (int _) {|FP0101:=>|} { };
+                                   var reporting = Driver.{|FP0101:Notify|};
+                                   callback(1);
+                                   reporting(2);
+                                   return 2;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_LambdaBranchesWithWrittenDelegateTarget_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static {|FP0101:Action|} Choose(bool first) => first
+                                   ? static () => { }
+                                   : static delegate { };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_VoidDelegateArgumentBoundToWrittenCoreParameter_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run() => With(static () => { });
+                               private static int With({|FP0101:Action|} callback) { callback(); return 1; }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_ExplicitDelegateConversionOutsideWrittenPositions_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver { public static void Notify() { } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static int Run()
+                               {
+                                   var cast = (Action)Driver.Notify;
+                                   var constructed = new Action(Driver.Notify);
+                                   cast();
+                                   constructed();
+                                   return 2;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_VoidDelegateAndItsUsesOutsideCore_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver
+                           {
+                               public delegate void Notice(int number);
+                               public static Action Get() => static () => { };
+                               public static Notice Create() => static delegate { };
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_ValueReturningDelegateDeclarationAndConversions_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver
+                           {
+                               public static int With(Func<int> f) => f();
+                               public static int One() => 1;
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public delegate int Next();
+                               public static Next Explicit() => static () => 2;
+
+                               public static int Run()
+                               {
+                                   var inferred = static () => 3;
+                                   return inferred() + Driver.With(static delegate { return 3; }) + Driver.With(Driver.One);
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_DelegateDeclarationAndConversionsInUnionBody_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           public static class Driver { public static int With(Action callback) { callback(); return 0; } }
+
+                           [Fprog.FunctionalCore]
+                           public static class Zoo
+                           {
+                               public sealed record Cat;
+                               public sealed record Dog;
+
+                               public union Pet(Cat, Dog)
+                               {
+                                   public delegate void {|FP0101:Notify|}();
+                                   public static {|FP0101:Notify|} Callback() => static () => { };
+                                   public static int Run() => Driver.With(static () {|FP0101:=>|} { });
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_DelegateDeclarationWithOwnMarker_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public delegate void {|FP0101:Observe|}(string text);
+
+                           [Fprog.FunctionalCore]
+                           public delegate int Measure(System.{|FP0101:Action|} callback);
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_PrimaryConstructorAndFieldLikeEventDelegateTypes_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Callbacks({|FP0101:Action|} initial)
+                           {
+                               public event {|FP0101:Action|} Changed = initial;
+
+                               public int Count() { Changed(); return 1; }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_EventAndPropertyAccessorValueHasWrittenType_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Callbacks
+                           {
+                               public event {|FP0101:Action|} Changed
+                               {
+                                   add { value = static () => { }; value(); }
+                                   remove { }
+                               }
+
+                               public {|FP0101:Action|} Callback
+                               {
+                                   set { value = static () => { }; value(); }
                                }
                            }
                            """);

@@ -1,4 +1,7 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace ancplua_fprog.Shared;
 
@@ -24,6 +27,21 @@ internal static class CoreScope
 
         return type.ContainingAssembly is { } assembly
                && FprogAttributes.Contains(assembly.GetAttributes(), FprogAttributes.FunctionalCore);
+    }
+
+    /// <summary>
+    ///     Accepts the callback for the source declaration that owns the syntax. Roslyn can also run
+    ///     syntax actions inside a native union for that union and its containing symbol.
+    /// </summary>
+    public static bool IsInCoreSyntax(SyntaxNodeAnalysisContext context)
+    {
+        if (!IsInCore(context.ContainingSymbol))
+            return false;
+
+        return context.ContainingSymbol is not INamedTypeSymbol type
+               || (context.Node.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { } declaration
+                   && SymbolEqualityComparer.Default.Equals(
+                       context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken), type));
     }
 
     /// <summary>

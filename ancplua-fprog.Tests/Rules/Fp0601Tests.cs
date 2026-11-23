@@ -61,7 +61,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Inspect
                            {
-                               public static int Number<T>(T value) => value is {|FP0601:int number|} ? number : 0;
+                               public static int Number<T>(T value) => value {|FP0601:is|} int number ? number : 0;
                            }
                            """);
     }
@@ -73,7 +73,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Inspect
                            {
-                               public static bool Fits<T>(object value) => value is {|FP0601:T typed|} && typed is not null;
+                               public static bool Fits<T>(object value) => value {|FP0601:is|} T typed && typed is not null;
                            }
                            """);
     }
@@ -141,9 +141,9 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Inspect
                            {
-                               public static bool NotText<T>(T value) => value is not {|FP0601:string|};
+                               public static bool NotText<T>(T value) => value {|FP0601:is|} not string;
 
-                               public static bool Scalar<T>(T value) => value is {|FP0601:int|} or {|FP0601:long|};
+                               public static bool Scalar<T>(T value) => value {|FP0601:is|} int or long;
                            }
                            """);
     }
@@ -155,7 +155,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Inspect
                            {
-                               public static bool NonEmptyText<T>(T value) => value is {|FP0601:string { Length: > 0 }|};
+                               public static bool NonEmptyText<T>(T value) => value {|FP0601:is|} string { Length: > 0 };
                            }
                            """);
     }
@@ -199,7 +199,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_ClassStructNotNullNewConstraintsNameNoTypeSoStillUnconstrained_Reports()
+    public Task FP0601_KeywordOnlyConstraints_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -219,7 +219,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_ConstraintOnlyToAnotherUnconstrainedTypeParameter_Reports()
+    public Task FP0601_ChainedTypeParameterConstraint_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -339,7 +339,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_TypeParameterConstrainedToInterfaceIsNotUnconstrained_NoReport()
+    public Task FP0601_TypeParameterWithInterfaceConstraint_Reports()
     {
         return VerifyAsync("""
                            public interface IShape { double Area { get; } }
@@ -349,39 +349,39 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Shapes
                            {
-                               public static bool IsCircle<T>(T shape) where T : IShape => shape is Circle;
+                               public static bool IsCircle<T>(T shape) where T : IShape => shape {|FP0601:is|} Circle;
 
-                               public static string Name<T>() where T : IShape => typeof(T).Name;
+                               public static string Name<T>() where T : IShape => {|FP0601:typeof(T)|}.Name;
 
-                               public static string Runtime<T>(T shape) where T : IShape => shape.GetType().Name;
+                               public static string Runtime<T>(T shape) where T : IShape => shape.{|FP0601:GetType|}().Name;
 
-                               public static bool Via<T, TShape>(T shape) where T : TShape where TShape : IShape => shape is Circle;
+                               public static bool Via<T, TShape>(T shape) where T : TShape where TShape : IShape => shape {|FP0601:is|} Circle;
                            }
                            """);
     }
 
     [TestMethod]
-    public Task FP0601_TypeTestsWithoutTypeParameterInCore_NoReport()
+    public Task FP0601_RuntimeTestsOfObject_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
                            public static class Concrete
                            {
-                               public static bool IsNumber(object value) => value is int;
+                               public static bool IsNumber(object value) => value {|FP0601:is|} int;
 
-                               public static string? AsText(object value) => value as string;
+                               public static string? AsText(object value) => value {|FP0601:as|} string;
 
-                               public static int Number(object value) => value is int number ? number : 0;
+                               public static int Number(object value) => value {|FP0601:is|} int number ? number : 0;
 
                                public static string Name() => typeof(int).Name;
 
-                               public static string Runtime(object value) => value.GetType().Name;
+                               public static string Runtime(object value) => value.{|FP0601:GetType|}().Name;
                            }
                            """);
     }
 
     [TestMethod]
-    public Task FP0601_DefaultNameofAndCastAreNotInTheRowList_NoReport()
+    public Task FP0601_ExplicitUnboxingBesideDefaultAndNameof_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -391,7 +391,7 @@ public sealed class Fp0601Tests(TestContext testContext)
 
                                public static string Label<T>() => nameof(T);
 
-                               public static T Unbox<T>(object value) => (T)value;
+                               public static T Unbox<T>(object value) => {|FP0601:(T)value|};
 
                                public static T Identity<T>(T value) => value;
                            }
@@ -399,7 +399,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_TestedTypeOnlyContainsTAsTypeArgument_NoReport()
+    public Task FP0601_EqualityOverrideObjectContract_NoReport()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -466,7 +466,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            {
                                public static bool Positive<T>(T value) => value is > 0;
 
-                               public static bool Small<T>(T value) => value is {|FP0601:int|} and < 10;
+                               public static bool Small<T>(T value) => value {|FP0601:is|} int and < 10;
                            }
                            """);
     }
@@ -480,7 +480,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Pairs
                            {
-                               public static bool LeftIsNumber<T>(Pair<T> pair) => pair is { Left: {|FP0601:int|} };
+                               public static bool LeftIsNumber<T>(Pair<T> pair) => pair {|FP0601:is|} { Left: int };
 
                                public static int Sum<T>(Pair<T> pair) => pair switch
                                {
@@ -582,7 +582,7 @@ public sealed class Fp0601Tests(TestContext testContext)
 
                                public static bool operator true(Cell<T> cell) => cell.Content {|FP0601:is|} int;
 
-                               public static bool operator false(Cell<T> cell) => cell.Content is not {|FP0601:int|};
+                               public static bool operator false(Cell<T> cell) => cell.Content {|FP0601:is|} not int;
 
                                public string Kind
                                {
@@ -715,7 +715,7 @@ public sealed class Fp0601Tests(TestContext testContext)
 
                                public static string? AsText<T>(T value) => (object?)value {|FP0601:as|} string;
 
-                               public static int Number<T>(T value) => (object?)value is {|FP0601:int number|} ? number : 0;
+                               public static int Number<T>(T value) => (object?)value {|FP0601:is|} int number ? number : 0;
 
                                public static int Kind<T>(T value) => (object?)value switch
                                {
@@ -749,12 +749,16 @@ public sealed class Fp0601Tests(TestContext testContext)
                                public static object? Erase<T>(T value) => value as object;
 
                                public static bool Lifted<T>(T value) where T : class => value as T is not null;
+
+                               public static T? SameNullable<T>(T? value) where T : struct => value as T?;
+
+                               public static T? LiftToNullable<T>(T value) where T : struct => value as T?;
                            }
                            """);
     }
 
     [TestMethod]
-    public Task FP0601_ConstrainedToBaseClassEnumDelegateOrGenericInterface_NoReport()
+    public Task FP0601_ConstrainedToBaseClassEnumDelegateOrGenericInterface_Reports()
     {
         return VerifyAsync("""
                            public abstract class Shape { }
@@ -764,15 +768,15 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Constrained
                            {
-                               public static bool IsSquare<T>(T shape) where T : Shape => shape is Square;
+                               public static bool IsSquare<T>(T shape) where T : Shape => shape {|FP0601:is|} Square;
 
-                               public static string Kind<T>(T value) where T : struct, System.Enum => value.GetType().Name;
+                               public static string Kind<T>(T value) where T : struct, System.Enum => value.{|FP0601:GetType|}().Name;
 
-                               public static string Name<T>() where T : System.Delegate => typeof(T).Name;
+                               public static string Name<T>() where T : System.Delegate => {|FP0601:typeof(T)|}.Name;
 
-                               public static bool Fits<T>(object value) where T : System.IComparable<T> => value is T;
+                               public static bool Fits<T>(object value) where T : System.IComparable<T> => value {|FP0601:is|} T;
 
-                               public static T? Narrow<T>(object value) where T : Shape => value as T;
+                               public static T? Narrow<T>(object value) where T : Shape => value {|FP0601:as|} T;
                            }
                            """);
     }
@@ -852,9 +856,9 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Dynamic
                            {
-                               public static bool Fits<T>(dynamic value) => value {|FP0601:is|} T;
+                               public static bool Fits<T>({|FP0601:dynamic|} value) => value {|FP0601:is|} T;
 
-                               public static int Pick<T>(dynamic value) => value is {|FP0601:T typed|} ? typed!.GetHashCode() : 0;
+                               public static int Pick<T>({|FP0601:dynamic|} value) => value {|FP0601:is|} T typed ? typed!.GetHashCode() : 0;
                            }
                            """);
     }
@@ -938,9 +942,9 @@ public sealed class Fp0601Tests(TestContext testContext)
                            {
                                public static bool Qualified<T>(T value) => value {|FP0601:is|} global::System.Int32;
 
-                               public static int Count<T>(T value) => value is ({|FP0601:System.Collections.Generic.List<int> list|}) ? list.Count : 0;
+                               public static int Count<T>(T value) => value {|FP0601:is|} (System.Collections.Generic.List<int> list) ? list.Count : 0;
 
-                               public static bool Neither<T>(T value) => value is not ({|FP0601:int|} or {|FP0601:string|});
+                               public static bool Neither<T>(T value) => value {|FP0601:is|} not (int or string);
 
                                public static string Name<T>() => {|FP0601:typeof(
                                    /* the parameter */ T)|}.Name;
@@ -949,7 +953,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_IsAgainstTypeParameterThatIsNoCaseOfUnionValue_Reports()
+    public Task FP0601_IsAgainstTypeParameterThatIsNoCaseOfUnionValue_NoReport()
     {
         return VerifyAsync("""
                            public sealed record Success<T>(T Value);
@@ -961,7 +965,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Results
                            {
-                               public static bool IsBare<T>(Result<T> result) => result {|FP0601:is|} T;
+                               public static bool IsBare<T>(Result<T> result) => result is T;
                            }
                            """);
     }
@@ -1031,7 +1035,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_PatternSyntaxAgainstTypeParameterThatIsNoCaseOfUnionValue_Reports()
+    public Task FP0601_PatternSyntaxAgainstTypeParameterThatIsNoCaseOfUnionValue_NoReport()
     {
         return VerifyAsync("""
                            public sealed record Success<T>(T Value);
@@ -1043,9 +1047,9 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Results
                            {
-                               public static bool NotBare<T>(Result<T> result) => result is not {|FP0601:T|};
+                               public static bool NotBare<T>(Result<T> result) => result is not T;
 
-                               public static int Bare<T>(Result<T> result) => result is {|FP0601:T value|} ? value!.GetHashCode() : 0;
+                               public static int Bare<T>(Result<T> result) => result is T value ? value!.GetHashCode() : 0;
                            }
                            """);
     }
@@ -1085,7 +1089,7 @@ public sealed class Fp0601Tests(TestContext testContext)
                                    }
                                }
 
-                               public static bool SmallNumber<T>(T value) => value is {|FP0601:int|} and > 0 and < 10;
+                               public static bool SmallNumber<T>(T value) => value {|FP0601:is|} int and > 0 and < 10;
                            }
                            """);
     }
@@ -1163,7 +1167,7 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0601_UnionValueAgainstOtherTypeParameterOrPlainStructWithConstructor_Reports()
+    public Task FP0601_UnionAndConcreteStructOperandsAgainstTypeParameter_NoReport()
     {
         return VerifyAsync("""
                            public sealed record None;
@@ -1178,15 +1182,256 @@ public sealed class Fp0601Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Checks
                            {
-                               public static bool Other<T, U>(Option<T> option) => option {|FP0601:is|} U;
+                               public static bool Other<T, U>(Option<T> option) => option is U;
 
                                public static int Pick<T, U>(Option<T> option) => option switch
                                {
-                                   {|FP0601:U picked|} => picked!.GetHashCode(),
+                                   U picked => picked!.GetHashCode(),
                                    _ => 0
                                };
 
-                               public static int Inner<T>(Box<T> box) => box is {|FP0601:T inner|} ? inner!.GetHashCode() : 0;
+                               public static int Inner<T>(Box<T> box) => box is T inner ? inner!.GetHashCode() : 0;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_ObjectSwitchPatternsAtNestedPositions_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public sealed record Envelope(object Value);
+
+                               public static int Code(object value) => value switch
+                               {
+                                   {|FP0601:string text|} => text.Length,
+                                   {|FP0601:Envelope { Value: {|FP0601:int number|} }|} => number,
+                                   _ => 0
+                               };
+
+                               public static int Statement(object value)
+                               {
+                                   switch (value)
+                                   {
+                                       case {|FP0601:int number|}: return number;
+                                       default: return 0;
+                                   }
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_ExplicitDowncastAndUnboxingFromObjectAndTypeParameter_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public static string Text<T>(T item) => {|FP0601:(string)(object)item|};
+
+                               public static int Count(object item) => {|FP0601:(int)item|};
+
+                               public static T Cast<T>(T item) => (T)item;
+
+                               public static System.IConvertible Narrow<T>(T item) where T : class =>
+                                   {|FP0601:(System.IConvertible)item|};
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_WrittenDynamicTypeAndDynamicRuntimeOperations_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public static {|FP0601:dynamic|} Echo({|FP0601:dynamic|} value)
+                               {
+                                   {|FP0601:dynamic|} prior = value;
+                                   var inferred = prior;
+                                   return inferred;
+                               }
+
+                               public static System.Collections.Generic.IEnumerable<{|FP0601:dynamic|}[]> Wrap() => [];
+
+                               public static bool Text({|FP0601:dynamic|} item) => item {|FP0601:is|} string;
+
+                               public static string? AsText({|FP0601:dynamic|} item) => item {|FP0601:as|} string;
+
+                               public static int Count({|FP0601:dynamic|} item) => {|FP0601:(int)item|};
+
+                               public static string Kind({|FP0601:dynamic|} item) => item.{|FP0601:GetType|}().Name;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_NamesSpelledDynamicAndInferredDynamic_NoReport()
+    {
+        return VerifyAsync("""
+                           public static class Feed { public static dynamic Load() => 1; }
+
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public sealed class @dynamic { }
+                               public static @dynamic Copy(@dynamic value) => value;
+                               public static int Copy(int dynamic) => dynamic;
+                               public static object Load()
+                               {
+                                   var inferred = Feed.Load();
+                                   return inferred;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_DynamicInUnionBody_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Zoo
+                           {
+                               public sealed record Cat;
+                               public sealed record Dog;
+
+                               public union Pet(Cat, Dog)
+                               {
+                                   public static bool Contains({|FP0601:dynamic|} input) => input {|FP0601:is|} Pet;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_BoxingUpcastNumericAndNamedSourceConversions_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public class Base { }
+                               public sealed class Derived : Base { }
+                               public static Derived Down(Base value) => (Derived)value;
+                               public static Base Up(Derived value) => (Base)value;
+                               public static object Box<T>(T value) => (object)value!;
+                               public static double Convert(int value) => (double)value;
+                               public static string Type(int value) => value.GetType().Name;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_UnionValuesInTestsAndSwitchThroughUpcast_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public closed record Shape;
+                               public sealed record Circle : Shape;
+                               public sealed record Square : Shape;
+                               public sealed record Cat;
+                               public sealed record Dog;
+                               public union Pet(Cat, Dog);
+
+                               public static bool CircleShape<T>(T value) where T : Shape => value is Circle;
+                               public static Circle? AsCircle<T>(T value) where T : Shape => (object)value as Circle;
+                               public static string Kind<T>(T value) where T : Shape => value.GetType().Name;
+                               public static int Test(Pet value) => ((object)value) switch { Cat => 1, _ => 2 };
+                               public static bool IsCat(Pet value) => (object)value is Cat;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_OverrideAndExternalImplicitAndExplicitInterfaceContracts_NoReport()
+    {
+        return VerifyAsync("""
+                           public interface IIndex { int this[object candidate] { get; } }
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Token(int value) : System.IComparable, System.Collections.IEqualityComparer, IIndex
+                           {
+                               public int Value => value;
+                               public override bool Equals(object? candidate) => candidate is Token other && Value == other.Value;
+                               public override int GetHashCode() => value;
+
+                               public int CompareTo(object? candidate) => candidate switch
+                               {
+                                   Token other => Value.CompareTo(other.Value),
+                                   _ => 1
+                               };
+
+                               bool System.Collections.IEqualityComparer.Equals(object? left, object? right) =>
+                                   left is Token first && right is Token second && first.Value == second.Value;
+
+                               int System.Collections.IEqualityComparer.GetHashCode(object value) => ((Token)value).Value;
+
+                               int IIndex.this[object candidate] => candidate is int index ? index : -1;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_LocalOrParameterOutsideItsOverrideContract_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public sealed class Token(int value)
+                           {
+                               public int Value => value;
+
+                               public override bool Equals(object? candidate)
+                               {
+                                   object local = Value;
+                                   return local {|FP0601:is|} int && candidate is Token other && Value == other.Value;
+                               }
+
+                               public override int GetHashCode() => Value;
+
+                               public bool Other()
+                               {
+                                   object candidate = Value;
+                                   return candidate {|FP0601:is|} int;
+                               }
+
+                               public bool Equals(object? candidate, bool same) => candidate {|FP0601:is|} Token && same;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_ObjectParameterImplementingCoreInterface_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Domain
+                           {
+                               public interface ICheck { bool Fits(object value); }
+                               public sealed class Check : ICheck
+                               {
+                                   public bool Fits(object value) => value {|FP0601:is|} string;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0601_UserMethodWithGetTypeName_NoReport()
+    {
+        return VerifyAsync("""
+                           public class Value { public new int GetType() => 1; }
+
+                           [Fprog.FunctionalCore]
+                           public static class Inspect
+                           {
+                               public static int Read<T>(T item) where T : Value => item.GetType();
                            }
                            """);
     }

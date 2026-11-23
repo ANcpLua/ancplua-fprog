@@ -61,7 +61,7 @@ internal static class UnionModel
     }
 
     /// <summary>Finds the original value through parentheses, upcasts and boxing.</summary>
-    private static IOperation ValueBeforeUpcast(IOperation value, Compilation compilation)
+    public static IOperation ValueBeforeUpcast(IOperation value, Compilation compilation)
     {
         while (GetUpcastOperand(value, compilation) is { } operand)
             value = operand;
@@ -109,7 +109,7 @@ internal static class UnionModel
         }
     }
 
-    private static bool AlwaysConvertsTo(Compilation compilation, ITypeSymbol source, ITypeSymbol? target)
+    public static bool AlwaysConvertsTo(Compilation compilation, ITypeSymbol source, ITypeSymbol? target)
     {
         return target is not null && compilation.ClassifyConversion(source, target) is
             { IsIdentity: true } or { IsImplicit: true, IsReference: true } or { IsImplicit: true, IsBoxing: true };

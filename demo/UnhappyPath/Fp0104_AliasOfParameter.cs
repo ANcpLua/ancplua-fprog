@@ -44,7 +44,7 @@ public static class Normalizer
 
     public static int ViaPattern(object boxed)
     {
-        if (boxed is Order order)
+        if (boxed is Order order) // expect: FP0601
             order.Total = 1; // expect: FP0104
         return 0;
     }
