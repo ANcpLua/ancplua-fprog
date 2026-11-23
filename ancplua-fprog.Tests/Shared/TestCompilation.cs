@@ -46,18 +46,6 @@ internal static class TestCompilation
         return compilation;
     }
 
-    /// <summary>
-    ///     Compiles <paramref name="source" /> that does not compile, for tests of helpers on erroneous code.
-    ///     Fails the test if the compiler does not report <paramref name="expectedErrorId" />.
-    /// </summary>
-    public static CSharpCompilation CreateWithError(string source, string expectedErrorId)
-    {
-        var compilation = Compile([source], "Erroneous", OutputKind.DynamicallyLinkedLibrary, []);
-        var errorIds = Errors(compilation).Select(diagnostic => diagnostic.Id).ToArray();
-        Assert.Contains(expectedErrorId, errorIds);
-        return compilation;
-    }
-
     /// <summary>Emits <paramref name="compilation" /> and references it as a metadata (DLL) reference.</summary>
     public static MetadataReference ToImageReference(CSharpCompilation compilation)
     {

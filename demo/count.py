@@ -8,7 +8,6 @@ Usage:  python3 count.py            build, print the table, exit 1 when a file d
 
 Expectation: a line ending in "// expect: FP0302" (several IDs separated by commas) must get exactly these
 diagnostics; every other line must get none. HappyPath and KnownGaps have no such comment, so they must be clean.
-A warning that a suppressor hid (FPS001 hides CS8509) is not counted; it is listed in the column "suppressed".
 """
 import json
 import os
@@ -51,7 +50,6 @@ def reported(project):
     path = os.path.join(HERE, "artifacts", project + ".sarif")
     found = defaultdict(Counter)
     levels = defaultdict(Counter)
-    suppressed = defaultdict(Counter)
     if not os.path.exists(path):
         raise SystemExit(f"{path} is missing: build the demo first (run without --no-build).")
     with open(path, encoding="utf-8") as log:
@@ -70,11 +68,10 @@ def reported(project):
             line = physical.get("region", {}).get("startLine", 0)
             rule = result.get("ruleId", "?")
             if result.get("suppressions"):
-                suppressed[name][rule] += 1
                 continue
             found[name][(line, rule)] += 1
             levels[name][LEVELS.get(result.get("level", "warning"), "warnings")] += 1
-    return found, levels, suppressed
+    return found, levels
 
 
 def print_expected():
@@ -106,7 +103,7 @@ def main():
     all_as_expected = True
     for project in PROJECTS:
         marks = expected(project)
-        found, levels, suppressed = reported(project)
+        found, levels = reported(project)
         rows = []
         for name in sorted(set(marks) | set(found)):
             want, got = marks.get(name, Counter()), found.get(name, Counter())
@@ -118,7 +115,6 @@ def main():
                 "warnings": levels[name]["warnings"],
                 "infos": levels[name]["infos"],
                 "ids": dict(sorted(Counter(rule for (_, rule), count in got.items() for _ in range(count)).items())),
-                "suppressed": dict(sorted(suppressed[name].items())),
                 "missing": [f"{rule} line {line}" for line, rule in missing],
                 "unexpected": [f"{rule} line {line}" for line, rule in unexpected],
                 "as_expected": not missing and not unexpected,
@@ -141,10 +137,8 @@ def main():
             print(f"\n{project}: {data['errors']} errors, {data['warnings']} warnings, {data['infos']} infos")
             for row in data["files"]:
                 ids = ", ".join(f"{rule} x{count}" for rule, count in row["ids"].items()) or "-"
-                hidden = ", ".join(f"{rule} x{count}" for rule, count in row["suppressed"].items())
                 state = "ok      " if row["as_expected"] else "MISMATCH"
-                print(f"  {state} {row['file']:<48} E{row['errors']} W{row['warnings']} I{row['infos']}  {ids}"
-                      + (f"   suppressed: {hidden}" if hidden else ""))
+                print(f"  {state} {row['file']:<48} E{row['errors']} W{row['warnings']} I{row['infos']}  {ids}")
                 for item in row["missing"]:
                     print(f"           expected but not reported: {item}")
                 for item in row["unexpected"]:

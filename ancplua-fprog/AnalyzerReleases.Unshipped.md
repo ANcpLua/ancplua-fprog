@@ -16,9 +16,9 @@
  FP0301  | Functional | Warning  | Do not throw in the functional core                                
  FP0302  | Functional | Warning  | Do not call partial members in the functional core                 
  FP0303  | Functional | Warning  | Do not return null or default in the functional core               
- FP0401  | Functional | Warning  | A union must be abstract                                           
- FP0402  | Functional | Warning  | Union constructors must be private                                 
- FP0403  | Functional | Warning  | A union case must be sealed and nested inside its union            
+ FP0401  | Functional | Warning  | Declare a core class sealed, static or closed
+ FP0403  | Functional | Warning  | Declare a closed class case sealed or closed
+ FP0404  | Functional | Warning  | Construct a union from a case
  FP0501  | Functional | Warning  | Do not use a catch-all in a switch over a union                    
  FP0502  | Functional | Warning  | Handle every case of a union in a switch expression                
  FP0601  | Functional | Warning  | Do not inspect the runtime type of an unconstrained type parameter 

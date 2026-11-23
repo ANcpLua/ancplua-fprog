@@ -4,14 +4,11 @@ using Microsoft.CodeAnalysis;
 namespace ancplua_fprog.Shared;
 
 /// <summary>
-///     Finds the Fprog marker attributes by full metadata name (<c>Fprog.FunctionalCoreAttribute</c>,
-///     <c>Fprog.UnionAttribute</c>). The name is compared part by part, so a call allocates no strings,
-///     and a copy of the attribute in any assembly counts.
+///     Matches the Fprog marker by full metadata name. A copy of the attribute in any assembly counts.
 /// </summary>
 internal static class FprogAttributes
 {
     public const string FunctionalCore = "FunctionalCoreAttribute";
-    public const string Union = "UnionAttribute";
 
     private const string Namespace = "Fprog";
 

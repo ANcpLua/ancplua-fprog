@@ -18,7 +18,7 @@ namespace ancplua_fprog.Tests;
 ///     The single entry point for analyzer tests, shared by visible and hidden tests.
 ///     Every test compiles against exactly the .NET 11 reference assemblies from
 ///     Basic.Reference.Assemblies.Net110, downloads nothing at test time, parses C# preview
-///     syntax and sees the Fprog marker attributes. Protected file: do not edit.
+///     syntax and sees the Fprog core marker.
 /// </summary>
 internal static class FpAnalyzerTestHost
 {
@@ -28,11 +28,9 @@ internal static class FpAnalyzerTestHost
     internal const string AnnotationsSource = """
                                               namespace Fprog
                                               {
-                                                  [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class | System.AttributeTargets.Struct)]
+                                                  [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class | System.AttributeTargets.Struct |
+                                                  System.AttributeTargets.Interface | System.AttributeTargets.Enum | System.AttributeTargets.Delegate)]
                                                   public sealed class FunctionalCoreAttribute : System.Attribute { }
-
-                                                  [System.AttributeUsage(System.AttributeTargets.Class)]
-                                                  public sealed class UnionAttribute : System.Attribute { }
                                               }
                                               """;
 
@@ -67,30 +65,6 @@ internal static class FpAnalyzerTestHost
         return test.RunAsync(cancellationToken);
     }
 
-    /// <summary>
-    ///     Verifies a suppressor. Compiler warnings are compared, analyzer diagnostics are ignored.
-    ///     Every expected result must have the ID <paramref name="compilerId" /> (for example CS8509);
-    ///     mark the suppressed ones with <c>.WithIsSuppressed(true)</c>, as in
-    ///     <c>DiagnosticResult.CompilerWarning("CS8509").WithLocation(0).WithIsSuppressed(true)</c>.
-    /// </summary>
-    public static Task VerifySuppressionAsync(
-        string compilerId,
-        string source,
-        CancellationToken cancellationToken,
-        params DiagnosticResult[] expected)
-    {
-        if (!compilerId.StartsWith("CS", StringComparison.Ordinal))
-            throw new ArgumentException("Pass a compiler diagnostic ID such as CS8509.", nameof(compilerId));
-        if (expected.Any(result => result.Id != compilerId))
-            throw new ArgumentException($"Every expected diagnostic must be {compilerId}.", nameof(expected));
-
-        var analyzers = AllAnalyzers.Value;
-        var test = CreateTest(new RuleTest(analyzers), source, expected);
-        test.CompilerDiagnostics = CompilerDiagnostics.Warnings;
-        test.DisabledDiagnostics.AddRange(analyzers.SelectMany(SupportedIds));
-        return test.RunAsync(cancellationToken);
-    }
-
     /// <summary>Runs a single analyzer type. Useful while developing one rule.</summary>
     public static Task VerifyAsync<TAnalyzer>(
         string source,
@@ -105,7 +79,7 @@ internal static class FpAnalyzerTestHost
     {
         test.TestCode = source;
         test.ReferenceAssemblies = NoResolvedReferences;
-        // Parse, not Diagnose: suppression tests would otherwise see CS1591 for every public member.
+        // Parse documentation comments without requesting CS1591 for public members.
         test.TestState.DocumentationMode = DocumentationMode.Parse;
         test.TestState.Sources.Add(("Fprog.Annotations.cs", AnnotationsSource));
         test.TestState.AdditionalReferences.AddRange(Net110.References.All);

@@ -30,7 +30,6 @@ commit so that you can drop it.
 | 3 | FP0301 | `ArgumentNullException.ThrowIfNull(x)` and the other static `Throw*` helpers on exception types; the CA1510 to CA1513 code fixes rewrite `if (...) throw` into them | the method name | throws; the .NET 11 framework has exactly 13 such methods |
 | 4 | FP0102 | `Guid.CreateVersion7()` (clock plus random bits), also the overload with a timestamp | the method name, like `NewGuid` | two calls, two values |
 | 5 | FP0201 | `class Counter(int count) { int Next() => ++count; }`: a primary constructor parameter is a field that cannot be readonly | the parameter name in the primary constructor, once | `Next()` gives 6, 7 |
-| 6 | FPS001 | CS8509 was suppressed for a union that is not abstract, or whose constructor is not private. With the union in a referenced DLL the consuming project had no diagnostic at all | no longer suppressed: the compiler's warning stays | `new Shape()` and a foreign `Triangle : Shape` throw `SwitchExpressionException` |
 | 7 | FP0104 | `int.TryParse(text, out state.Count)`, `ref values[0]` | the argument expression (decided by the parameter being `ref`/`out`) | caller's object changed |
 | 8 | FP0104 | `(first ? a : b).Value = 1`, `(a ?? b).Value = 1`, a switch-expression receiver | the assignment target | caller's object changed |
 | 9 | FP0104 | `var same = order; same.Total = 0;`, a local holding a member, a `foreach` variable, a pattern variable | the assignment target | caller's object changed |
@@ -50,7 +49,6 @@ that rule loses its point in `make score`; run it with your referee folder befor
 | 2 | `FP0302_ImmutableArrayOrDefaultAndOtherOperators_NoReport` (one line) | `FP0302_MethodGroupOfImmutableArrayOperator_Reports` |
 | 2 | `FP0302_InvokingDelegateMadeFromMethodGroup_NoReport` | `FP0302_DelegateMadeFromMethodGroupReportedAtTheGroupNotAtItsInvocation_Reports` + `FP0302_InvokingDelegateParameter_NoReport` |
 | 5 | `FP0201_MutatedPrimaryConstructorParameterHasNoDeclarator_NoReport` | `FP0201_PrimaryConstructorParameterWrittenByAMember_Reports` |
-| 6 | `FPS001_NonAbstractUnionWithEveryCaseNamed_Reports` | `FPS001_NonAbstractUnionWithEveryCaseNamedStaysUnsuppressed_NoReport` |
 | 7 | `FP0104_RefAndOutArgumentsAreNotAssignments_NoReport` | `FP0104_RefAndOutArgumentsIntoParameterObject_Reports` |
 | 11 | `FP0801_UsingStaticMethodAndEnumConstant_NoReport` | `FP0801_UsingStaticMethodAndEnumConstant_Reports` |
 | 11 | `FP0801_UsingStaticMemberHasNoTypeNameToken_NoReport` | `FP0801_UsingStaticMemberOfForbiddenTypeWithoutTypeToken_Reports` + `FP0801_UsingStaticMemberOfAllowedType_NoReport` |
@@ -70,10 +68,6 @@ Patches 3, 4, 8, 9 and 10 changed no existing test. 114 tests were added.
   helpers on types that are not exceptions. A user method `MyException.ThrowX` that never throws is reported.
 - **5:** a parameter written only in an initializer or in the base-constructor arguments (plain reassignment during
   construction, nothing is captured); records; a `ref` local bound to the parameter.
-- **6:** closed class, record and generic unions are suppressed as before. One residual that no union author can
-  close: a record's copy constructor cannot be private (CS8878), so another assembly can write
-  `record Extra : Shape { public Extra(Shape original) : base(original) { } }`. FP0403 reports that type in its own
-  project. Counting the copy constructor would end suppression for every record union.
 - **7:** a `ref` argument for a `ref readonly` parameter, `in` arguments, `out var`, the method's own `out` parameter.
 - **9:** a local whose value comes from a method call (`values.ToArray()`, `source.ToList()`), `new`, `with`; a local
   that is assigned again; a struct copy; a boxed copy. Still open: `ref` locals, spans over a parameter's array,
@@ -101,7 +95,7 @@ Each needs a decision about the catalog, or cannot be decided by a rule of this 
 | `Fp0102_StaticMutableProperty.cs` | a mutable static auto-property of a non-core type | The row says "static field". |
 | `Fp0802_BlockingOnTask.cs` | `pending.Result`, `GetAwaiter().GetResult()`, `async IAsyncEnumerable` | The row looks at the return type of methods; tests encode async streams as allowed. |
 | `Fp0502_SwitchStatementAndIfChain.cs` | a switch statement that forgets a case, `case not Card:`, an `is` chain | FP0502 is defined for switch expressions; visible tests encode statements and `is` as not reported. |
-| `Fp0501_TupleUpcastAndNativeUnion.cs` | `(state, input) switch { ..., _ => state }`, a cast to `object`, a C# 15 `union` | Outside the row; `[Fprog.Union]` cannot be put on a native union. |
+| `Fp0501_TupleUpcastAndNativeUnion.cs` | `(state, input) switch { ..., _ => state }`, a cast to `object`, a C# 15 `union` | Matching still checks the original top-level positions of closed values. |
 | `Fp0303_NullThroughALocal.cs` | `string? result = null; ...; return result;` | Needs data flow; a constant holding null is encoded as not reported. |
 | `Fp0302_OtherPartialMembers.cs` | `ParseExact`, `Convert.ToInt32`, `Max()`/`Average()` on an empty sequence, `xs[0]`, division, a hard cast | Outside the row's list; `ParseExact` and `BigInteger.Parse` are encoded as not reported. |
 | `Fp0203_ImmutableBuilderMember.cs` | a record holding `ImmutableArray<T>.Builder` (a `with` copy shares it) | The row allows the whole namespace, and the test is named "Decided". |
@@ -121,7 +115,6 @@ FP0104 does not treat as an assignment and FP0105 leaves alone, because accumula
 - "`Aggregate` on an empty `ImmutableArray` throws": wrong, it returns 0. Removed from the examples.
 - "CS8509 cannot be removed for `Circle { Radius: > 0 }` + `Circle { Radius: <= 0 }` without a catch-all": wrong.
   `Circle { Radius: > 0 } => 1, Circle => 2` is suppressed. No dead end exists.
-- "FPS001 can demand a closed union": only partly. Records stay open through the copy constructor (see patch 6).
 - The first design for FP0801 (report only where the member has no FP0801 yet) was shown to add second diagnostics,
   to depend on unrelated members and to be non-monotonic. It was replaced before any code was written.
 - A record member of type `...Builder` was planned as a fix and dropped: the row allows it literally.

@@ -1,8 +1,6 @@
 namespace Fprog
 {
-    [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class | System.AttributeTargets.Struct)]
+    [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class | System.AttributeTargets.Struct |
+                           System.AttributeTargets.Interface | System.AttributeTargets.Enum | System.AttributeTargets.Delegate)]
     public sealed class FunctionalCoreAttribute : System.Attribute { }
-
-    [System.AttributeUsage(System.AttributeTargets.Class)]
-    public sealed class UnionAttribute : System.Attribute { }
 }

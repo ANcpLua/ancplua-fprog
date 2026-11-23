@@ -3,6 +3,7 @@
     <PropertyGroup>
         <TargetFramework>net11.0</TargetFramework>
         <Nullable>enable</Nullable>
+        <NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

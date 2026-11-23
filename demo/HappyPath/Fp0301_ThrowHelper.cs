@@ -1,10 +1,7 @@
 namespace Demo.Fp0301_ThrowHelper;
 
-[Fprog.Union]
-public abstract record Checked
+public closed record Checked
 {
-    private Checked() { }
-
     public sealed record Valid(int Value) : Checked;
 
     public sealed record Invalid(string Reason) : Checked;

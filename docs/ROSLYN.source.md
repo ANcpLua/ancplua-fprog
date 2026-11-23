@@ -18,11 +18,7 @@
 >    deeply immutable nor structurally equal. AGENTS.md FP0203 forbids them.
 > 7. Section 1 flags only non-generic `Task` and `ValueTask`; FP0802 flags all four task types. Section 5 forbids `try`;
 >    AGENTS.md has no such rule. Rules that AGENTS.md does not list are not scored.
-> 8. The IDs FP0001–FP0007 and the namespace scope (`*.Domain*`) are not used. Use the IDs from AGENTS.md and the
->    `[Fprog.FunctionalCore]` and `[Fprog.Union]` scope.
->
-> **Not mentioned below but useful:** `ISwitchExpressionOperation.IsExhaustive` (FP0502, FPS001) and
-> `DiagnosticSuppressor` with `SuppressionDescriptor` (FPS001).
+> 8. Use the rule IDs from AGENTS.md and the `[Fprog.FunctionalCore]` marker for core scope.
 
 # Specification: Roslyn API Mapping for FP Static Analyzers
 
@@ -110,9 +106,13 @@
 - **Registration:**
   * `context.RegisterSymbolAction(AnalyzeAdtHierarchy, SymbolKind.NamedType)`
   * `context.RegisterOperationAction(AnalyzeSwitchExhaustiveness, OperationKind.SwitchExpression, OperationKind.Switch)`
-- **Symbol Checks (`INamedTypeSymbol`):**
-  * **Sealed Leaf Types:** Wenn ein konkreter Typ im Domain-Namespace von einem `abstract record` oder einer `abstract class` erbt (`type.BaseType`), muss `type.IsSealed == true` sein.
-  * **Closed Hierarchy:** Wenn ein Typ im Domain-Namespace `IsAbstract == true` ist, müssen alle explizit deklarierten Instanzkonstruktoren (`type.InstanceConstructors.Where(c => !c.IsImplicitlyDeclared)`, ignoriert den vom Compiler generierten `protected` Copy-Konstruktor bei Records) die Sichtbarkeit `Accessibility.Private`, `Accessibility.PrivateProtected` oder `Accessibility.Internal` besitzen, um externe Ableitungen außerhalb der Assembly zu verhindern.
+- **Union model:** `ITypeSymbol.IsUnion` identifies native union structs. Public one-parameter constructors
+  supply their case types. `ITypeSymbol.IsClosed` identifies closed classes and records.
+  `GetClosedDerivedTypeInfo(cancellationToken).ClosedDerivedTypes` supplies their direct cases.
+- **Declaration rules:** FP0401 checks `IsSealed`, `IsStatic` and `IsClosed` on classes in core. FP0403
+  checks `IsSealed` and `IsClosed` on the direct children of closed classes.
+- **Empty union values:** FP0404 checks `IDefaultValueOperation` and `IObjectCreationOperation` with
+  the implicit parameterless constructor of a native union struct.
 - **Operation Checks (`ISwitchExpressionOperation`, `ISwitchOperation`):**
   * Prüfe `switchOp.Value.Type`: Wenn der Typ eine Domain-Union oder ein `abstract` ADT-Basistyp ist:
     * Bei `ISwitchExpressionOperation`: Iteriere über `switchOp.Arms` und prüfe `arm.Pattern`.

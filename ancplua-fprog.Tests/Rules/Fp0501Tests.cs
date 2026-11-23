@@ -14,11 +14,8 @@ public sealed class Fp0501Tests(TestContext testContext)
 
                                  public interface IRound { }
 
-                                 [Fprog.Union]
-                                 public abstract record Shape : Entity, IShape
+                                 public closed record Shape : Entity, IShape
                                  {
-                                     private Shape() { }
-
                                      public sealed record Circle(double Radius) : Shape, IRound;
 
                                      public sealed record Square(double Side) : Shape;
@@ -85,11 +82,8 @@ public sealed class Fp0501Tests(TestContext testContext)
                                };
                            }
 
-                           [Fprog.Union]
-                           public abstract record Pair
+                           public closed record Pair
                            {
-                               private Pair() { }
-
                                public void Deconstruct(out double left, out double right) => (left, right) = (1, 2);
 
                                public sealed record One : Pair;
@@ -502,11 +496,8 @@ public sealed class Fp0501Tests(TestContext testContext)
                                };
                            }
 
-                           [Fprog.Union]
-                           public abstract record Result<T>
+                           public closed record Result<T>
                            {
-                               private Result() { }
-
                                public sealed record Ok(T Value) : Result<T>;
 
                                public sealed record Error(string Message) : Result<T>;
@@ -1093,11 +1084,8 @@ public sealed class Fp0501Tests(TestContext testContext)
     public Task FP0501_SwitchOverThisInsideUnion_Reports()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Light
+                           public closed record Light
                            {
-                               private Light() { }
-
                                public int Tag => this switch
                                {
                                    Red => 1,
@@ -1130,11 +1118,8 @@ public sealed class Fp0501Tests(TestContext testContext)
         return VerifyAsync("""
                            public static class Outer<T>
                            {
-                               [Fprog.Union]
-                               public abstract class Option
+                               public closed class Option
                                {
-                                   private Option() { }
-
                                    public sealed class Some(T value) : Option
                                    {
                                        public T Value { get; } = value;
@@ -1162,18 +1147,12 @@ public sealed class Fp0501Tests(TestContext testContext)
     public Task FP0501_NestedUnionValueAgainstOuterUnionType_Reports()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Node
+                           public closed record Node
                            {
-                               private Node() { }
-
                                public sealed record Leaf : Node;
 
-                               [Fprog.Union]
-                               public abstract record Branch : Node
+                               public closed record Branch : Node
                                {
-                                   private Branch() { }
-
                                    public sealed record Pair : Branch;
 
                                    public sealed record Triple : Branch;
@@ -1481,11 +1460,8 @@ public sealed class Fp0501Tests(TestContext testContext)
                                };
                            }
 
-                           [Fprog.Union]
-                           public abstract record Pair
+                           public closed record Pair
                            {
-                               private Pair() { }
-
                                public void Deconstruct(out double left, out double right) => (left, right) = (1, 2);
 
                                public sealed record One : Pair;

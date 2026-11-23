@@ -7,11 +7,8 @@ namespace ancplua_fprog.Tests.Rules;
 public sealed class Fp0502Tests(TestContext testContext)
 {
     private const string Shapes = """
-                                  [Fprog.Union]
-                                  public abstract record Shape
+                                  public closed record Shape
                                   {
-                                      private Shape() { }
-
                                       public sealed record Circle(double Radius) : Shape;
 
                                       public sealed record Square(double Side) : Shape;
@@ -22,21 +19,15 @@ public sealed class Fp0502Tests(TestContext testContext)
                                   """;
 
     private const string Results = """
-                                   [Fprog.Union]
-                                   public abstract record Inner
+                                   public closed record Inner
                                    {
-                                       private Inner() { }
-
                                        public sealed record A : Inner;
 
                                        public sealed record B : Inner;
                                    }
 
-                                   [Fprog.Union]
-                                   public abstract record Result<T>
+                                   public closed record Result<T>
                                    {
-                                       private Result() { }
-
                                        public sealed record Ok(T Value) : Result<T>;
 
                                        public sealed record Error(string Message) : Result<T>;
@@ -780,11 +771,8 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_PrivateCaseSeenFromOutside_Reports()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Token
+                           public closed record Token
                            {
-                               private Token() { }
-
                                public sealed record Word(string Text) : Token;
 
                                private sealed record Secret(int Code) : Token;
@@ -806,11 +794,8 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_PrivateCaseNamedInsideUnion_NoReport()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Token
+                           public closed record Token
                            {
-                               private Token() { }
-
                                public sealed record Word(string Text) : Token;
 
                                private sealed record Secret(int Code) : Token;
@@ -875,18 +860,12 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_CaseThatIsItselfAUnionHandledOnlyThroughItsCases_Reports()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Node
+                           public closed record Node
                            {
-                               private Node() { }
-
                                public sealed record Leaf(int Value) : Node;
 
-                               [Fprog.Union]
-                               public abstract record Branch : Node
+                               public closed record Branch : Node
                                {
-                                   private Branch() { }
-
                                    public sealed record Pair(Node Left, Node Right) : Branch;
 
                                    public sealed record Many(Node First) : Branch;
@@ -921,8 +900,7 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_UnionWithoutCases_NoReport()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Never
+                           public closed record Never
                            {
                                private Never() { }
                            }
@@ -943,8 +921,7 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_ClassUnionWithCasesOutsideIt_Reports()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract class Option
+                           public closed class Option
                            {
                            }
 
@@ -979,11 +956,8 @@ public sealed class Fp0502Tests(TestContext testContext)
         return VerifyAsync("""
                            public static class Outer<T>
                            {
-                               [Fprog.Union]
-                               public abstract record Result
+                               public closed record Result
                                {
-                                   private Result() { }
-
                                    public sealed record Ok(T Value) : Result;
 
                                    public sealed record Error(string Message) : Result;
@@ -1190,24 +1164,17 @@ public sealed class Fp0502Tests(TestContext testContext)
     public Task FP0502_GadtStyleCasesNamedForTheValueTypeArgument_NoReport()
     {
         return VerifyAsync("""
-                           [Fprog.Union]
-                           public abstract record Expr<T>
-                           {
-                               private Expr() { }
-
-                               public sealed record IntLit(int Value) : Expr<int>;
-
-                               public sealed record Add(Expr<int> Left, Expr<int> Right) : Expr<int>;
-
-                               public sealed record BoolLit(bool Value) : Expr<bool>;
-                           }
+                           public closed record Expr<T>;
+                           public sealed record IntLit(int Value) : Expr<int>;
+                           public sealed record Add(Expr<int> Left, Expr<int> Right) : Expr<int>;
+                           public sealed record BoolLit(bool Value) : Expr<bool>;
 
                            public static class Eval
                            {
                                public static int Int(Expr<int> expr) => expr switch
                                {
-                                   Expr<int>.IntLit lit => lit.Value,
-                                   Expr<int>.Add add => Int(add.Left) + Int(add.Right)
+                                   IntLit lit => lit.Value,
+                                   Add add => Int(add.Left) + Int(add.Right)
                                };
                            }
                            """);

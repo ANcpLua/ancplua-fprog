@@ -4,6 +4,7 @@
         <TargetFramework>netstandard2.0</TargetFramework>
         <IsPackable>false</IsPackable>
         <Nullable>enable</Nullable>
+        <NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>
         <LangVersion>preview</LangVersion>
 
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>

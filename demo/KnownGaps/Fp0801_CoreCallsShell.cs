@@ -12,7 +12,7 @@ public static class Database
 }
 
 [Fprog.FunctionalCore]
-public abstract class Rule
+public closed class Rule
 {
     public abstract bool Applies(DateTime when);
 }

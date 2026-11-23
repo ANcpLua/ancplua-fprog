@@ -2,20 +2,14 @@ using System.Collections.Immutable;
 using System.Linq;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Rules;
 
-/// <summary>
-///     FP0502: a <c>switch</c> expression over a union value has a case that no arm without a <c>when</c>
-///     clause names with a type test for the case's own type (<see cref="UnionSwitchCoverage.CasesNotNamed" />).
-///     A case reached only through a catch-all, a base type or an arm with a <c>when</c> clause counts as
-///     not handled, and so does a case that the code at the switch cannot name (a private nested case seen
-///     from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
-///     statements are not checked.
-/// </summary>
+/// <summary>FP0502 reports cases without an unguarded case arm in a switch expression.</summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
 {
@@ -32,35 +26,41 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterCompilationStartAction(static start =>
-        {
-            var model = new UnionModel(start.Compilation);
-            start.RegisterOperationAction(
-                operationContext => Analyze(operationContext, model),
-                OperationKind.SwitchExpression);
-        });
+        context.RegisterOperationAction(Analyze, OperationKind.SwitchExpression);
     }
 
-    private static void Analyze(OperationAnalysisContext context, UnionModel model)
+    private static void Analyze(OperationAnalysisContext context)
     {
         var switchExpression = (ISwitchExpressionOperation)context.Operation;
         if (switchExpression.Syntax is not SwitchExpressionSyntax syntax
-            || !model.TryGetCoverage(switchExpression, out var coverage))
+            || UnionModel.GetUnionType(switchExpression.Value.Type) is not { IsClosed: true } union)
             return;
 
-        // A case that the code at the switch cannot name (a private nested case seen from outside the
-        // union) is in none of the coverage lists, yet no arm handles it. GetCases still has it.
-        var nameable = coverage.Cases;
-        var missing = coverage.CasesNotNamed.AddRange(
-            model.GetCases(switchExpression.Value.Type)
-                .RemoveAll(@case => nameable.Contains(@case, SymbolEqualityComparer.Default)));
-        if (missing.IsEmpty)
+        var missing = UnionModel.GetCases(union, context.CancellationToken)
+            .Where(@case => !switchExpression.Arms.Any(
+                arm => arm.Guard is null && NamesCase(context.Compilation, arm.Pattern, @case)))
+            .ToArray();
+        if (missing.Length == 0)
             return;
 
         context.ReportDiagnostic(Diagnostic.Create(
-            Rule,
-            syntax.SwitchKeyword.GetLocation(),
-            coverage.Union.Name,
-            string.Join(", ", missing.Select(static @case => @case.Name))));
+            Rule, syntax.SwitchKeyword.GetLocation(), union.Name, string.Join(", ", missing.Select(@case => @case.Name))));
+    }
+
+    private static bool NamesCase(Compilation compilation, IPatternOperation pattern, ITypeSymbol caseType)
+    {
+        if (pattern is IBinaryPatternOperation binary)
+            return NamesCase(compilation, binary.LeftPattern, caseType)
+                   || NamesCase(compilation, binary.RightPattern, caseType);
+
+        var matchedType = pattern switch
+        {
+            ITypePatternOperation type => type.MatchedType,
+            IDeclarationPatternOperation declaration => declaration.MatchedType,
+            IRecursivePatternOperation recursive => recursive.MatchedType,
+            _ => null
+        };
+
+        return matchedType is not null && compilation.ClassifyConversion(caseType, matchedType).IsIdentity;
     }
 }

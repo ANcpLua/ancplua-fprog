@@ -1,10 +1,7 @@
 namespace Demo.KnownGaps.Fp0502_SwitchStatementAndIfChain;
 
-[Fprog.Union]
-public abstract record Payment
+public closed record Payment
 {
-    private Payment() { }
-
     public sealed record Card(string Number) : Payment;
 
     public sealed record Cash(decimal Amount) : Payment;

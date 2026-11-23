@@ -1,10 +1,7 @@
 namespace Demo.KnownGaps.Fp0501_TupleUpcastAndNativeUnion;
 
-[Fprog.Union]
-public abstract record State
+public closed record State
 {
-    private State() { }
-
     public sealed record Idle : State;
 
     public sealed record Running : State;
@@ -12,11 +9,8 @@ public abstract record State
     public sealed record Done : State;
 }
 
-[Fprog.Union]
-public abstract record Event
+public closed record Event
 {
-    private Event() { }
-
     public sealed record Start : Event;
 
     public sealed record Finish : Event;

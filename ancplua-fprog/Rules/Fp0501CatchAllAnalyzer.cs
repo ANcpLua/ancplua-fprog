@@ -71,7 +71,7 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     /// <summary>The static type of <paramref name="value" /> when it is a union value, otherwise null.</summary>
     private static ITypeSymbol? GetUnionValueType(IOperation value)
     {
-        return value.Type is { } type && UnionModel.GetUnionType(type) is not null ? type : null;
+        return value.Type is { } type && UnionModel.GetUnionType(type) is { IsClosed: true } ? type : null;
     }
 
     /// <summary>

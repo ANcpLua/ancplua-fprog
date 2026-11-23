@@ -1,803 +1,136 @@
-using System;
-using System.Collections.Immutable;
+using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Shared;
 
 [TestClass]
-public sealed class UnionModelTests
+public sealed class UnionModelTests(TestContext testContext)
 {
-    private const string ShapeSource = """
-                                       namespace Shapes
-                                       {
-                                           [Fprog.Union]
-                                           public abstract record Shape
-                                           {
-                                               private Shape() { }
+    private const string Hierarchy = """
+                                     public closed record Shape;
+                                     public sealed record Circle(int Radius) : Shape;
+                                     public closed record Polygon : Shape;
+                                     public sealed record Square(int Side) : Polygon;
+                                     public sealed record Triangle(int Side) : Polygon;
 
-                                               public sealed record Circle(double Radius) : Shape;
-
-                                               public sealed record Square(double Side) : Shape;
-                                           }
-                                       }
-                                       """;
-
-    private const string GenericCasesSource = """
-                                              namespace Results
-                                              {
-                                                  [Fprog.Union]
-                                                  public abstract record Result<T>
-                                                  {
-                                                      public sealed record Ok(T Value) : Result<T>;
-
-                                                      public sealed record Error(string Message) : Result<T>;
-                                                  }
-
-                                                  public sealed record IntOk(int Value) : Result<int>;
-
-                                                  public sealed record ListOk<T>(System.Collections.Generic.List<T> Values) : Result<System.Collections.Generic.List<T>>;
-
-                                                  public sealed record Both<TFirst, TSecond>(TFirst First, TSecond Second);
-
-                                                  public sealed record Same<T>(T Value) : Result<Both<T, T>>;
-
-                                                  public static class Values
-                                                  {
-                                                      public static void OfInt(Result<int> result) { }
-
-                                                      public static void OfString(Result<string> result) { }
-
-                                                      public static void OfListOfInt(Result<System.Collections.Generic.List<int>> result) { }
-
-                                                      public static void OfIntAndString(Result<Both<int, string>> result) { }
-
-                                                      public static void OfIntAndInt(Result<Both<int, int>> result) { }
-
-                                                      public static void OfAny<TValue>(Result<TValue> result) { }
-
-                                                      public static void OfAnyAndInt<TValue>(Result<Both<TValue, int>> result) { }
-
-                                                      public static void Constrained<TResult>(TResult result) where TResult : Result<int> { }
-                                                  }
-                                              }
-                                              """;
-
-    private const string Ok = "Results.Result<T>.Ok";
-    private const string Error = "Results.Result<T>.Error";
-    private const string IntOk = "Results.IntOk";
-    private const string ListOk = "Results.ListOk<T>";
-    private const string Same = "Results.Same<T>";
-
-    private const string ClosednessSource = """
-                                            namespace Lib
-                                            {
-                                                [Fprog.Union]
-                                                public abstract record ClosedRecord
-                                                {
-                                                    private ClosedRecord() { }
-
-                                                    public sealed record A : ClosedRecord;
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract class ClosedClass
-                                                {
-                                                    private ClosedClass() { }
-
-                                                    public sealed class A : ClosedClass { }
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract record ClosedGeneric<T>
-                                                {
-                                                    private ClosedGeneric() { }
-
-                                                    public sealed record A(T Value) : ClosedGeneric<T>;
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract record ImplicitRecord
-                                                {
-                                                    public sealed record A : ImplicitRecord;
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract class ImplicitClass
-                                                {
-                                                    public sealed class A : ImplicitClass { }
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract class ProtectedClass
-                                                {
-                                                    private ProtectedClass(int code) { }
-
-                                                    protected ProtectedClass() { }
-
-                                                    public sealed class A : ProtectedClass { }
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract record PrimaryRecord(int Code)
-                                                {
-                                                    public sealed record A() : PrimaryRecord(1);
-                                                }
-
-                                                [Fprog.Union]
-                                                public record NotAbstract
-                                                {
-                                                    private NotAbstract() { }
-
-                                                    public sealed record A : NotAbstract;
-                                                }
-
-                                                [Fprog.Union]
-                                                public abstract class OwnTypeClass
-                                                {
-                                                    private OwnTypeClass() { }
-
-                                                    protected OwnTypeClass(OwnTypeClass original) { }
-
-                                                    public sealed class A : OwnTypeClass { }
-                                                }
-                                            }
-                                            """;
+                                     public closed class Result<T>;
+                                     public sealed class Ok<T> : Result<T>;
+                                     public sealed class Number : Result<int>;
+                                     """;
 
     [TestMethod]
-    public void UnionWithNestedSealedCases_HasThoseCases()
-    {
-        var compilation = TestCompilation.Create(ShapeSource);
-        var shape = compilation.GetNamedType("Shapes.Shape");
-
-        Assert.IsTrue(UnionModel.IsUnion(shape));
-        AssertCases(["Shapes.Shape.Circle", "Shapes.Shape.Square"], new UnionModel(compilation).GetCases(shape));
-        AssertSameSymbol(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.Shape+Circle")));
-        AssertSameSymbol(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.Shape+Square")));
-    }
-
-    [TestMethod]
-    public void CaseDeclaredOutsideItsUnion_IsACase()
+    public void NativeUnionGetsItsConstructedCasesFromPublicConstructors()
     {
         var compilation = TestCompilation.Create("""
-                                                 namespace Shapes
-                                                 {
-                                                     [Fprog.Union]
-                                                     public abstract class Shape { }
+                                                 public sealed record Cat;
+                                                 public sealed record Dog;
+                                                 public union Pet(Cat, Dog);
 
-                                                     public sealed class Triangle : Shape { }
+                                                 public union Choice<T>(T, string);
+                                                 public static class Samples
+                                                 {
+                                                     public static Choice<int> Value => 42;
                                                  }
                                                  """);
-        var shape = compilation.GetNamedType("Shapes.Shape");
-
-        AssertCases(["Shapes.Triangle"], new UnionModel(compilation).GetCases(shape));
-        AssertSameSymbol(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.Triangle")));
+        var pet = compilation.GetNamedType("Pet");
+        AssertCases(["Cat", "Dog"], UnionModel.GetCases(pet, testContext.CancellationToken));
+        AssertCases(["int", "string"], UnionModel.GetCases(
+            (INamedTypeSymbol)((IPropertySymbol)compilation.GetNamedType("Samples").GetMembers("Value").Single()).Type,
+            testContext.CancellationToken));
     }
 
     [TestMethod]
-    public void TypeDerivingFromACase_IsNotACase()
+    public void ClosedHierarchyGetsDirectCasesAndExpandsClosedCaseToLeaves()
     {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Shapes
-                                                 {
-                                                     [Fprog.Union]
-                                                     public abstract record Shape
-                                                     {
-                                                         public record Circle(double Radius) : Shape;
-                                                     }
-
-                                                     public sealed record UnitCircle() : Shape.Circle(1.0);
-                                                 }
-                                                 """);
-
-        Assert.IsNull(UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.UnitCircle")));
-        AssertCases(["Shapes.Shape.Circle"],
-            new UnionModel(compilation).GetCases(compilation.GetNamedType("Shapes.Shape")));
+        var compilation = TestCompilation.Create(Hierarchy);
+        var shape = compilation.GetNamedType("Shape");
+        AssertCases(["Circle", "Polygon"], UnionModel.GetCases(shape, testContext.CancellationToken));
+        AssertCases(["Circle", "Square", "Triangle"], UnionModel.GetLeafCases(shape, testContext.CancellationToken));
+        Assert.IsNull(UnionModel.GetUnionType(compilation.GetNamedType("Square")));
     }
 
     [TestMethod]
-    public void GenericUnion_IsMatchedOnItsOriginalDefinition()
+    public void ClosedHierarchyGetsCasesFromMetadata()
     {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Results
-                                                 {
-                                                     [Fprog.Union]
-                                                     public abstract record Result<T>
-                                                     {
-                                                         public sealed record Ok(T Value) : Result<T>;
-
-                                                         public sealed record Error(string Message) : Result<T>;
-                                                     }
-
-                                                     public sealed record Pending<T> : Result<T>;
-
-                                                     public static class Uses
-                                                     {
-                                                         public static Result<int> Value { get; } = new Result<int>.Ok(1);
-
-                                                         public static Result<string>.Ok Success { get; } = new("done");
-
-                                                         public static Pending<int> Waiting { get; } = new();
-                                                     }
-                                                 }
-                                                 """);
-        var result = compilation.GetNamedType("Results.Result`1");
-        var uses = compilation.GetNamedType("Results.Uses");
-        var resultOfInt = PropertyType(uses, "Value");
-
-        Assert.IsTrue(UnionModel.IsUnion(resultOfInt));
-        AssertSameSymbol(result, UnionModel.GetUnion(resultOfInt));
-        AssertSameSymbol(result, UnionModel.GetUnionOfCase(PropertyType(uses, "Success")));
-        AssertSameSymbol(result, UnionModel.GetUnionOfCase(PropertyType(uses, "Waiting")));
-        AssertCases(
-            ["Results.Result<T>.Ok", "Results.Result<T>.Error", "Results.Pending<T>"],
-            new UnionModel(compilation).GetCases(resultOfInt));
+        var library = TestCompilation.Create(Hierarchy, "Domain");
+        var compilation = TestCompilation.Create("public sealed class Consumer;", "Consumer",
+            TestCompilation.ToImageReference(library));
+        AssertCases(["Circle", "Square", "Triangle"],
+            UnionModel.GetLeafCases(compilation.GetNamedType("Shape"), testContext.CancellationToken));
     }
 
     [TestMethod]
-    public void AbstractBaseClassWithoutTheAttribute_IsNotAUnion()
+    [DataRow(SpecialType.System_Int32, "Ok<int>", "Number")]
+    [DataRow(SpecialType.System_String, "Ok<string>")]
+    public void CompilerProvidesCasesForTheConstructedClosedType(SpecialType argument, params string[] expected)
     {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Animals
-                                                 {
-                                                     public abstract class Animal { }
-
-                                                     public sealed class Dog : Animal { }
-                                                 }
-                                                 """);
-        var animal = compilation.GetNamedType("Animals.Animal");
-
-        Assert.IsFalse(UnionModel.IsUnion(animal));
-        Assert.IsNull(UnionModel.GetUnion(animal));
-        Assert.IsNull(UnionModel.GetUnionOfCase(compilation.GetNamedType("Animals.Dog")));
-        Assert.IsEmpty(new UnionModel(compilation).GetCases(animal));
+        var compilation = TestCompilation.Create(Hierarchy);
+        var result = compilation.GetNamedType("Result`1").Construct(compilation.GetSpecialType(argument));
+        AssertCases(expected, UnionModel.GetCases(result, testContext.CancellationToken));
     }
 
     [TestMethod]
-    public void ClassWithTheAttributeThatIsNotAbstract_IsAUnion()
+    [DataRow("(Shape shape)", "shape", "Shape")]
+    [DataRow("(Shape? shape)", "shape", "Shape")]
+    [DataRow("(Pet? pet)", "pet", "Pet")]
+    [DataRow("(Shape shape)", "(object)shape", "Shape")]
+    [DataRow("(Pet pet)", "(object)pet", "Pet")]
+    [DataRow("(Circle circle)", "(object)(Shape)circle", "Shape")]
+    [DataRow("(Polygon polygon)", "(Shape)polygon", "Polygon")]
+    [DataRow("(object shape)", "(Shape)shape", "Shape")]
+    [DataRow("(System.Collections.Generic.List<int> ints)", "(object)ints", null)]
+    [DataRow("<T>(T shape) where T : Shape", "(object)shape", "Shape")]
+    [DataRow("<T, U>(T shape) where T : U where U : Shape", "shape", "Shape")]
+    [DataRow("<T>(T item) where T : class", "item", null)]
+    public void UnionValueKeepsItsTypeThroughNullableConstraintsAndUpcasts(
+        string signature, string value, string? expected)
     {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Shapes
-                                                 {
-                                                     [Fprog.Union]
-                                                     public class Shape { }
+        var compilation = TestCompilation.Create(Hierarchy + $$"""
 
-                                                     public class Circle : Shape { }
-                                                 }
-                                                 """);
-        var shape = compilation.GetNamedType("Shapes.Shape");
+                                                            public union Pet(string, int);
+                                                            public static class Sample
+                                                            {
+                                                                public static int Run{{signature}}
+                                                                    => ({{value}}) switch { _ => 0 };
+                                                            }
+                                                            """);
 
-        Assert.IsTrue(UnionModel.IsUnion(shape));
-        AssertCases(["Shapes.Circle"], new UnionModel(compilation).GetCases(shape));
+        var operation = compilation.GetSwitchExpression("Run");
+        Assert.AreEqual(expected, UnionModel.GetUnionOfExpression(operation.Value, compilation)?.Name);
     }
 
     [TestMethod]
-    public void AttributeWithTheSameSimpleNameButAnotherFullName_DoesNotMakeAUnion()
+    [DataRow("Circle", true)]
+    [DataRow("Circle _", true)]
+    [DataRow("Shape", true)]
+    [DataRow("Circle(_)", true)]
+    [DataRow("Circle(var radius)", true)]
+    [DataRow("Circle { Radius: _ }", true)]
+    [DataRow("Circle { Radius: > 0 }", false)]
+    [DataRow("Circle(1)", false)]
+    [DataRow("Circle or Square", true)]
+    [DataRow("Square or Triangle", false)]
+    [DataRow("not Square", false)]
+    public void CoverageRequiresAnUnconditionalTestOfTheCase(string pattern, bool expected)
     {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Other
-                                                 {
-                                                     public sealed class UnionAttribute : System.Attribute { }
-                                                 }
+        var compilation = TestCompilation.Create(Hierarchy + $$"""
 
-                                                 namespace Shapes
-                                                 {
-                                                     [Other.Union]
-                                                     public abstract class Shape { }
-
-                                                     public sealed class Circle : Shape { }
-                                                 }
-                                                 """);
-
-        Assert.IsFalse(UnionModel.IsUnion(compilation.GetNamedType("Shapes.Shape")));
-        Assert.IsNull(UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.Circle")));
+                                                            public static class Sample
+                                                            {
+                                                                public static int Run(Shape shape)
+                                                                    => shape switch { {{pattern}} => 1, _ => 0 };
+                                                            }
+                                                            """);
+        var operation = compilation.GetSwitchExpression("Run");
+        Assert.AreEqual(expected, UnionModel.CoversCase(
+            compilation, operation.Arms[0].Pattern, compilation.GetNamedType("Circle")));
     }
 
-    [TestMethod]
-    public void NullableAnnotatedUnionType_ResolvesToTheUnion()
+    private static void AssertCases(string[] expected, IEnumerable<ITypeSymbol> cases)
     {
-        var compilation = TestCompilation.Create(ShapeSource + """
-
-                                                               namespace Uses
-                                                               {
-                                                                   public static class Values
-                                                                   {
-                                                                       public static Shapes.Shape? Maybe { get; } = null;
-                                                                   }
-                                                               }
-                                                               """);
-        var maybe = PropertyType(compilation.GetNamedType("Uses.Values"), "Maybe");
-
-        Assert.AreEqual(NullableAnnotation.Annotated, maybe.NullableAnnotation);
-        Assert.IsTrue(UnionModel.IsUnion(maybe));
-        AssertSameSymbol(compilation.GetNamedType("Shapes.Shape"), UnionModel.GetUnion(maybe));
-        AssertCases(["Shapes.Shape.Circle", "Shapes.Shape.Square"], new UnionModel(compilation).GetCases(maybe));
-    }
-
-    [TestMethod]
-    public void NativeUnionDeclaration_IsNotAnFprogUnion()
-    {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Pets
-                                                 {
-                                                     public sealed record Cat(string Name);
-
-                                                     public sealed record Dog(string Name);
-
-                                                     public union Pet(Cat, Dog);
-                                                 }
-                                                 """);
-        var pet = compilation.GetNamedType("Pets.Pet");
-
-        Assert.IsFalse(UnionModel.IsUnion(pet));
-        Assert.IsNull(UnionModel.GetUnion(pet));
-        Assert.IsEmpty(new UnionModel(compilation).GetCases(pet));
-        Assert.IsNull(UnionModel.GetUnionOfCase(compilation.GetNamedType("Pets.Cat")));
-    }
-
-    [TestMethod]
-    public void ClosedClass_IsNotAnFprogUnion()
-    {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Shapes
-                                                 {
-                                                     public closed class Shape { }
-
-                                                     public sealed class Circle : Shape { }
-                                                 }
-                                                 """);
-        var shape = compilation.GetNamedType("Shapes.Shape");
-
-        Assert.IsFalse(UnionModel.IsUnion(shape));
-        Assert.IsEmpty(new UnionModel(compilation).GetCases(shape));
-        Assert.IsNull(UnionModel.GetUnionOfCase(compilation.GetNamedType("Shapes.Circle")));
-    }
-
-    [TestMethod]
-    public void UnionFromAReferencedAssembly_HasCasesFromThatAssemblyAndThisCompilation()
-    {
-        var library = TestCompilation.Create("""
-                                             namespace Lib
-                                             {
-                                                 [Fprog.Union]
-                                                 public abstract class Shape { }
-
-                                                 public sealed class Circle : Shape { }
-                                             }
-                                             """, "Library");
-        var compilation = TestCompilation.Create("""
-                                                 namespace App
-                                                 {
-                                                     public sealed class Square : Lib.Shape { }
-                                                 }
-                                                 """, "App", TestCompilation.ToImageReference(library));
-        var shape = compilation.GetNamedType("Lib.Shape");
-
-        Assert.IsTrue(UnionModel.IsUnion(shape));
-        AssertSameSymbol(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("App.Square")));
-        AssertCases(["Lib.Circle", "App.Square"], new UnionModel(compilation).GetCases(shape));
-    }
-
-    [TestMethod]
-    public void GetCases_ForAConstructedUnion_LeavesOutCasesOfOtherConstructions()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource);
-        var model = new UnionModel(compilation);
-
-        AssertCases([Ok, Error, IntOk], model.GetCases(ParameterType(compilation, "OfInt")));
-        AssertCases([Ok, Error], model.GetCases(ParameterType(compilation, "OfString")));
-        AssertCases([Ok, Error, ListOk], model.GetCases(ParameterType(compilation, "OfListOfInt")));
-    }
-
-    [TestMethod]
-    public void GetCases_ForTheUnionDefinition_ReturnsEveryCase()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource);
-
-        AssertCases(
-            [Ok, Error, IntOk, ListOk, Same],
-            new UnionModel(compilation).GetCases(compilation.GetNamedType("Results.Result`1")));
-    }
-
-    [TestMethod]
-    public void GetCases_CaseTypeParameterUsedTwice_MustBindToOneType()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource);
-        var model = new UnionModel(compilation);
-
-        AssertCases([Ok, Error], model.GetCases(ParameterType(compilation, "OfIntAndString")));
-        AssertCases([Ok, Error, Same], model.GetCases(ParameterType(compilation, "OfIntAndInt")));
-    }
-
-    [TestMethod]
-    public void GetCases_ForATypeParameterOfTheValue_ReturnsEveryCaseItCanBe()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource);
-        var model = new UnionModel(compilation);
-
-        AssertCases([Ok, Error, IntOk, ListOk, Same], model.GetCases(ParameterType(compilation, "OfAny")));
-        AssertCases([Ok, Error, Same], model.GetCases(ParameterType(compilation, "OfAnyAndInt")));
-    }
-
-    [TestMethod]
-    public void GetCases_ComparesTypeArgumentsByStructure()
-    {
-        var compilation = TestCompilation.Create("""
-                                                 namespace Structures
-                                                 {
-                                                     [Fprog.Union]
-                                                     public abstract record Result<T>;
-
-                                                     public sealed record ArrayOk : Result<int[]>;
-
-                                                     public sealed record TupleOk : Result<(int Id, string Name)>;
-
-                                                     public sealed record StringOk : Result<string>;
-
-                                                     public sealed record ObjectOk : Result<object>;
-
-                                                     public static class Outer<T>
-                                                     {
-                                                         [Fprog.Union]
-                                                         public abstract record Choice
-                                                         {
-                                                             public sealed record Yes(T Value) : Choice;
-                                                         }
-                                                     }
-
-                                                     public sealed record IntChoice : Outer<int>.Choice;
-
-                                                     public static class Values
-                                                     {
-                                                         public static void OfArray(Result<int[]> result) { }
-
-                                                         public static void OfMatrix(Result<int[,]> result) { }
-
-                                                         public static void OfStringArray(Result<string[]> result) { }
-
-                                                         public static void OfUnnamedTuple(Result<(int, string)> result) { }
-
-                                                         public static void OfOtherTuple(Result<(int, int)> result) { }
-
-                                                         public static void OfNullableString(Result<string?> result) { }
-
-                                                         public static void OfDynamic(Result<dynamic> result) { }
-
-                                                         public static void OfIntChoice(Outer<int>.Choice choice) { }
-
-                                                         public static void OfStringChoice(Outer<string>.Choice choice) { }
-                                                     }
-                                                 }
-                                                 """);
-        var model = new UnionModel(compilation);
-
-        AssertCases(["Structures.ArrayOk"], model.GetCases(ParameterType(compilation, "OfArray")));
-        AssertCases([], model.GetCases(ParameterType(compilation, "OfMatrix")));
-        AssertCases([], model.GetCases(ParameterType(compilation, "OfStringArray")));
-        AssertCases(["Structures.TupleOk"], model.GetCases(ParameterType(compilation, "OfUnnamedTuple")));
-        AssertCases([], model.GetCases(ParameterType(compilation, "OfOtherTuple")));
-        AssertCases(["Structures.StringOk"], model.GetCases(ParameterType(compilation, "OfNullableString")));
-        AssertCases(["Structures.ObjectOk"], model.GetCases(ParameterType(compilation, "OfDynamic")));
-        AssertCases(
-            ["Structures.Outer<T>.Choice.Yes", "Structures.IntChoice"],
-            model.GetCases(ParameterType(compilation, "OfIntChoice")));
-        AssertCases(["Structures.Outer<T>.Choice.Yes"], model.GetCases(ParameterType(compilation, "OfStringChoice")));
-    }
-
-    [TestMethod]
-    public void TypeParameterConstrainedToAUnion_IsAUnionValue()
-    {
-        var compilation = TestCompilation.Create(ShapeSource + """
-
-                                                               namespace Uses
-                                                               {
-                                                                   public static class Constraints
-                                                                   {
-                                                                       public static void Direct<TShape>(TShape shape) where TShape : Shapes.Shape { }
-
-                                                                       public static void Indirect<TOuter, TInner>(TOuter shape) where TOuter : TInner where TInner : Shapes.Shape { }
-
-                                                                       public static void NullableParameter<TShape>(TShape? shape) where TShape : Shapes.Shape { }
-
-                                                                       public static void NullableConstraint<TShape>(TShape shape) where TShape : Shapes.Shape? { }
-                                                                   }
-                                                               }
-                                                               """);
-        var shape = compilation.GetNamedType("Shapes.Shape");
-        var model = new UnionModel(compilation);
-
-        foreach (var method in new[] { "Direct", "Indirect", "NullableParameter", "NullableConstraint" })
-        {
-            var parameter = ParameterType(compilation, method);
-
-            Assert.AreEqual(TypeKind.TypeParameter, parameter.TypeKind, method);
-            Assert.IsFalse(UnionModel.IsUnion(parameter), method);
-            AssertSameSymbol(shape, UnionModel.GetUnionType(parameter));
-            AssertSameSymbol(shape, UnionModel.GetUnion(parameter));
-            AssertCases(["Shapes.Shape.Circle", "Shapes.Shape.Square"], model.GetCases(parameter));
-        }
-    }
-
-    [TestMethod]
-    public void TypeParameterConstrainedToAConstructedUnion_HasThatUnionType()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource);
-        var constrained = ParameterType(compilation, "Constrained");
-
-        Assert.AreEqual("Results.Result<int>", UnionModel.GetUnionType(constrained)?.ToDisplayString());
-        AssertSameSymbol(compilation.GetNamedType("Results.Result`1"), UnionModel.GetUnion(constrained));
-        AssertCases([Ok, Error, IntOk], new UnionModel(compilation).GetCases(constrained));
-    }
-
-    [TestMethod]
-    public void TypeParameterWithoutAUnionConstraint_IsNotAUnionValue()
-    {
-        var compilation = TestCompilation.Create(ShapeSource + """
-
-                                                               namespace Uses
-                                                               {
-                                                                   public static class Constraints
-                                                                   {
-                                                                       public static void Unconstrained<TValue>(TValue value) { }
-
-                                                                       public static void ReferenceType<TValue>(TValue value) where TValue : class { }
-
-                                                                       public static void Disposable<TValue>(TValue value) where TValue : System.IDisposable { }
-
-                                                                       public static void Other<TOuter, TInner>(TOuter value) where TOuter : TInner where TInner : System.Exception { }
-
-                                                                       public static void OfArray(Shapes.Shape[] shapes) { }
-
-                                                                       public static void OfCase(Shapes.Shape.Circle circle) { }
-                                                                   }
-                                                               }
-                                                               """);
-        var model = new UnionModel(compilation);
-
-        foreach (var method in new[] { "Unconstrained", "ReferenceType", "Disposable", "Other", "OfArray", "OfCase" })
-        {
-            var parameter = ParameterType(compilation, method);
-
-            Assert.IsNull(UnionModel.GetUnionType(parameter), method);
-            Assert.IsNull(UnionModel.GetUnion(parameter), method);
-            Assert.IsEmpty(model.GetCases(parameter), method);
-        }
-
-        Assert.IsNull(UnionModel.GetUnionType(null));
-    }
-
-    [TestMethod]
-    public void CyclicConstraints_AreBrokenByRoslynAndGiveNoUnionValue()
-    {
-        var compilation = TestCompilation.CreateWithError("""
-                                                          namespace Uses
-                                                          {
-                                                              public static class Constraints
-                                                              {
-                                                                  public static void Cyclic<TFirst, TSecond>(TFirst value) where TFirst : TSecond where TSecond : TFirst { }
-                                                              }
-                                                          }
-                                                          """, "CS0454");
-        var first = ParameterType(compilation, "Cyclic") as ITypeParameterSymbol;
-
-        // Roslyn drops the constraint that closes the cycle, so the cycle guard of GetUnionType has
-        // nothing to stop here. This pins that, and that the answer is null and not a hang.
-        Assert.IsNotNull(first);
-        var second = Assert.IsInstanceOfType<ITypeParameterSymbol>(Assert.ContainsSingle(first.ConstraintTypes));
-        Assert.IsEmpty(second.ConstraintTypes);
-        Assert.IsNull(UnionModel.GetUnionType(first));
-        Assert.IsNull(UnionModel.GetUnionType(second));
-    }
-
-    [TestMethod]
-    public void NullableAnnotatedConstructedUnionType_ResolvesToTheConstructedUnion()
-    {
-        var compilation = TestCompilation.Create(GenericCasesSource + """
-
-                                                                      namespace Uses
-                                                                      {
-                                                                          public static class Maybe
-                                                                          {
-                                                                              public static void OfMaybeInt(Results.Result<int>? result) { }
-                                                                          }
-                                                                      }
-                                                                      """);
-        var maybe = ParameterType(compilation, "OfMaybeInt");
-
-        Assert.AreEqual(NullableAnnotation.Annotated, maybe.NullableAnnotation);
-        AssertSameSymbol(maybe, UnionModel.GetUnionType(maybe));
-        AssertSameSymbol(compilation.GetNamedType("Results.Result`1"), UnionModel.GetUnion(maybe));
-        AssertCases([Ok, Error, IntOk], new UnionModel(compilation).GetCases(maybe));
-    }
-
-    [TestMethod]
-    public void FirstUse_RacedByManyThreads_GivesEveryThreadTheSameAnswers()
-    {
-        const int unionCount = 8;
-        const int threadCount = 16;
-        var compilation =
-            TestCompilation.Create(string.Concat(Enumerable.Range(0, unionCount).Select(ManyUnionsSource)));
-        var expected = Enumerable.Range(0, unionCount).Select(ExpectedAnswers).ToArray();
-
-        for (var round = 0; round < 20; round++)
-        {
-            // A new model has an empty index, so every round races to build it.
-            var model = new UnionModel(compilation);
-            var answers = Race(
-                threadCount,
-                thread =>
-                {
-                    // Every thread starts with another union, so the first calls differ.
-                    var answersOfThread = new string[unionCount];
-                    for (var step = 0; step < unionCount; step++)
-                    {
-                        var union = (thread + step) % unionCount;
-                        answersOfThread[union] = Answers(model, compilation, union);
-                    }
-
-                    return answersOfThread;
-                });
-
-            foreach (var threadAnswers in answers)
-                Assert.AreSequenceEqual(expected, threadAnswers);
-        }
-    }
-
-    /// <summary>
-    ///     Runs <paramref name="work" /> on <paramref name="threadCount" /> threads of their own and lets all
-    ///     of them begin at the same moment.
-    /// </summary>
-    private static TResult[] Race<TResult>(int threadCount, Func<int, TResult> work)
-    {
-        var waiting = 0;
-        var start = new TaskCompletionSource();
-        var threads = Enumerable.Range(0, threadCount)
-            .Select(thread => Task.Factory.StartNew(
-                () =>
-                {
-                    Interlocked.Increment(ref waiting);
-                    start.Task.Wait();
-                    return work(thread);
-                },
-                TaskCreationOptions.LongRunning))
-            .ToArray();
-
-        SpinWait.SpinUntil(() => Volatile.Read(ref waiting) == threadCount);
-        start.SetResult();
-        return Task.WhenAll(threads).GetAwaiter().GetResult();
-    }
-
-    private static string ManyUnionsSource(int index)
-    {
-        return $$"""
-                 namespace Many
-                 {
-                     [Fprog.Union]
-                     public abstract record Union{{index}}<T>
-                     {
-                         public sealed record First(T Value) : Union{{index}}<T>;
-
-                         public sealed record Second : Union{{index}}<T>;
-                     }
-
-                     public sealed record Third{{index}} : Union{{index}}<int>;
-
-                     public static class Switches{{index}}
-                     {
-                         public static int Run{{index}}(Union{{index}}<string> value) => value switch { Union{{index}}<string>.First => 1, _ => 2 };
-                     }
-                 }
-
-                 """;
-    }
-
-    /// <summary>What <see cref="Answers" /> must return for the union with the number <paramref name="index" />.</summary>
-    private static string ExpectedAnswers(int index)
-    {
-        var first = $"Many.Union{index}<T>.First";
-        var second = $"Many.Union{index}<T>.Second";
-        return
-            $"definition: {first}, {second}, Many.Third{index}; value: {first}, {second}; not named: {second}; without own arm: {second}; unhandled: ";
-    }
-
-    private static string Answers(UnionModel model, Compilation compilation, int index)
-    {
-        var switchExpression = compilation.GetSwitchExpression($"Run{index}");
-        Assert.IsTrue(model.TryGetCoverage(switchExpression, out var coverage));
-        return $"definition: {Names(model.GetCases(compilation.GetNamedType($"Many.Union{index}`1")))}"
-               + $"; value: {Names(coverage.Cases)}"
-               + $"; not named: {Names(coverage.CasesNotNamed)}"
-               + $"; without own arm: {Names(coverage.CasesWithoutOwnArm)}"
-               + $"; unhandled: {Names(coverage.UnhandledCases)}";
-    }
-
-    [TestMethod]
-    [DataRow("Lib.ClosedRecord", true)]
-    [DataRow("Lib.ClosedClass", true)]
-    [DataRow("Lib.ClosedGeneric`1", true)]
-    [DataRow("Lib.ImplicitRecord", false)]
-    [DataRow("Lib.ImplicitClass", false)]
-    [DataRow("Lib.ProtectedClass", false)]
-    [DataRow("Lib.PrimaryRecord", false)]
-    [DataRow("Lib.NotAbstract", false)]
-    [DataRow("Lib.OwnTypeClass", false)]
-    public void IsClosed_ForAUnionInSource_IsAbstractWithOnlyPrivateConstructors(string metadataName, bool expected)
-    {
-        var compilation = TestCompilation.Create(ClosednessSource, "Library");
-
-        Assert.AreEqual(expected, UnionModel.IsClosed(compilation.GetNamedType(metadataName)));
-    }
-
-    [TestMethod]
-    [DataRow("Lib.ClosedRecord", true)]
-    [DataRow("Lib.ClosedClass", true)]
-    [DataRow("Lib.ClosedGeneric`1", true)]
-    [DataRow("Lib.ImplicitRecord", false)]
-    [DataRow("Lib.ImplicitClass", false)]
-    [DataRow("Lib.ProtectedClass", false)]
-    [DataRow("Lib.PrimaryRecord", false)]
-    [DataRow("Lib.NotAbstract", false)]
-    [DataRow("Lib.OwnTypeClass", false)]
-    public void IsClosed_ForAUnionFromAReferencedAssembly_SeesOnlyTheNonPrivateConstructors(string metadataName,
-        bool expected)
-    {
-        var library = TestCompilation.Create(ClosednessSource, "Library");
-        var compilation = TestCompilation.Create("""
-                                                 namespace App
-                                                 {
-                                                     public static class Uses
-                                                     {
-                                                         public static int Code(Lib.ClosedRecord value) => 0;
-                                                     }
-                                                 }
-                                                 """, "App", TestCompilation.ToImageReference(library));
-        var union = compilation.GetNamedType(metadataName);
-
-        Assert.IsNotNull(union.ContainingAssembly);
-        Assert.AreEqual("Library", union.ContainingAssembly.Name);
-        Assert.AreEqual(expected, UnionModel.IsClosed(union));
-    }
-
-    [TestMethod]
-    public void IsClosed_ForAConstructedGenericUnion_LooksAtTheDefinition()
-    {
-        var compilation = TestCompilation.Create(ClosednessSource, "Library");
-        var definition = compilation.GetNamedType("Lib.ClosedGeneric`1");
-
-        Assert.IsTrue(UnionModel.IsClosed(definition.Construct(compilation.GetSpecialType(SpecialType.System_Int32))));
-    }
-
-    private static string Names(ImmutableArray<INamedTypeSymbol> types)
-    {
-        return string.Join(", ", types.Select(type => type.ToDisplayString()));
-    }
-
-    private static ITypeSymbol ParameterType(Compilation compilation, string methodName)
-    {
-        var declaration = compilation.GetMethodDeclaration(methodName);
-        var parameter = compilation.GetSemanticModel(declaration.SyntaxTree)
-            .GetDeclaredSymbol(declaration.ParameterList.Parameters.Single());
-        Assert.IsNotNull(parameter, $"No parameter symbol for '{methodName}'.");
-        return parameter.Type;
-    }
-
-    private static ITypeSymbol PropertyType(INamedTypeSymbol type, string propertyName)
-    {
-        return type.GetMembers(propertyName).OfType<IPropertySymbol>().Single().Type;
-    }
-
-    private static void AssertCases(string[] expected, ImmutableArray<INamedTypeSymbol> actual)
-    {
-        Assert.AreSequenceEqual(expected, actual.Select(type => type.ToDisplayString()).ToArray());
-    }
-
-    private static void AssertSameSymbol(ISymbol expected, ISymbol? actual)
-    {
-        Assert.AreEqual(expected, actual, SymbolEqualityComparer.Default);
+        CollectionAssert.AreEquivalent(expected, cases.Select(@case => @case.ToDisplayString()).ToArray());
     }
 }
