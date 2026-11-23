@@ -1,0 +1,129 @@
+using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace ancplua_fprog.Tests.Rules;
+
+[TestClass]
+public sealed class Fp0503Tests(TestContext testContext)
+{
+    private const string Shapes = """
+
+                                  public interface IRound;
+                                  public closed record Shape;
+                                  public sealed record Circle(int Radius) : Shape, IRound;
+                                  public sealed record Square(int Side) : Shape;
+
+                                  public union Choice(string, int);
+                                  """;
+
+    [TestMethod]
+    public Task FP0503_IsWithTypeDeclarationOrRecursivePattern_Reports()
+    {
+        return VerifyAsync("""
+                           public static class Area
+                           {
+                               public static bool IsCircle(Shape shape) => shape is {|FP0503:Circle|};
+                               public static bool Positive(Shape shape) =>
+                                   shape is {|FP0503:Circle circle|} && circle.Radius > 0;
+                               public static bool PositiveRadius(Shape shape) =>
+                                   shape is {|FP0503:Circle { Radius: > 0 }|};
+                               public static bool Either(Shape shape) => shape is {|FP0503:Circle or Square|};
+                               public static bool Negative(Shape shape) => shape is {|FP0503:not Square|};
+                               public static bool Nested(Shape shape) => shape is {|FP0503:Circle { Radius: int radius }|} && radius > 0;
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0503_IsNativeUnionAndNullableUnionReportsOnlyPattern_Reports()
+    {
+        return VerifyAsync("""
+                           public static class Area
+                           {
+                               public static bool IsText(Choice value) => value is {|FP0503:string|};
+                               public static bool HasText(Choice? value) => value is {|FP0503:string text|} && text.Length > 0;
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0503_AsBehindCastOrThroughClosedConstraint_Reports()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           public static class Area
+                           {
+                               public static Circle? Round(Shape shape) => shape as {|FP0503:Circle|};
+                               public static IRound? Boxed(Shape shape) => ((object)shape) as {|FP0503:IRound|};
+                               public static Circle? Constrained<T>(T shape) where T : Shape
+                                   => shape as {|FP0503:Circle|};
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0503_NullVarUntypedPatternAndSwitchCases_NoReport()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           public static class Area
+                           {
+                               public static bool Missing(Shape? shape) => shape is null;
+                               public static bool Present(Shape? shape) => shape is not null;
+                               public static bool PresentPattern(Shape? shape) => shape is { };
+                               public static bool Bind(Shape? shape) => shape is var current && current is not null;
+                               public static int Switch(Shape shape) => shape switch { Circle => 1, Square => 2 };
+                               public static bool Ordinary(object value) => value is Circle;
+                               public static Circle? TryCircle(object value) => value as Circle;
+                           }
+                           """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0503_TypeTestsOnReferencedUnions_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0503", """
+            #nullable enable
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool IsCat(Pet pet) => pet is {|FP0503:Cat|};
+                public static Circle? AsCircle(Shape shape) => shape as {|FP0503:Circle|};
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0503_NullTestsOnReferencedUnions_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0503", """
+            #nullable enable
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool Empty(Pet pet) => pet is null;
+                public static bool Missing(Shape? shape) => shape is null;
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0503_GeneratedCode_NoReport()
+    {
+        return VerifyAsync("""
+                           // <auto-generated/>
+                           public static class ShapeChecks
+                           {
+                               public static bool IsRound(Shape shape) => shape is Circle;
+                           }
+                           """ + Shapes);
+    }
+
+    private Task VerifyAsync(string source)
+    {
+        return FpAnalyzerTestHost.VerifyRuleAsync("FP0503", source, testContext.CancellationToken);
+    }
+}

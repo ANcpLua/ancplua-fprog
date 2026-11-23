@@ -1,0 +1,25 @@
+using System.Collections.Immutable;
+using ancplua_fprog.Shared;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+
+namespace ancplua_fprog.Rules;
+
+/// <summary>FP0802 reports Async values and closures entering the functional core.</summary>
+[DiagnosticAnalyzer(LanguageNames.CSharp)]
+public sealed class Fp0802AsyncBoundaryAnalyzer : DiagnosticAnalyzer
+{
+    private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
+        "FP0802",
+        "Keep asynchronous work outside the functional core",
+        "Complete '{0}' in the shell and pass plain values to the core");
+
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
+
+    public override void Initialize(AnalysisContext context)
+    {
+        context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+        context.EnableConcurrentExecution();
+        EntryRule.Register(context, Rule, PurityClass.Async);
+    }
+}

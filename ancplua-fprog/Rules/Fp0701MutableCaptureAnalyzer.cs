@@ -11,14 +11,14 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0701: inside the functional core, a lambda, anonymous method or local function captures a local
-/// or parameter that is written anywhere other than by its declaration: assignment, compound or
-/// coalescing assignment, <c>++</c>/<c>--</c>, deconstruction, a <c>ref</c> or <c>out</c> argument, binding
-/// a writable <c>ref</c> alias to it, or a write to a field, inline-array element or mutating property of a
-/// value-type variable. Locals and ordinary parameters are written only inside their member; a primary
-/// constructor parameter can be written by any member of its type. Reported once per variable and
-/// closure, at the first reference to the variable inside the closure; a reference that is the first one
-/// of several nested closures is reported once.
+///     FP0701: inside the functional core, a lambda, anonymous method or local function captures a local
+///     or parameter that is written anywhere other than by its declaration: assignment, compound or
+///     coalescing assignment, <c>++</c>/<c>--</c>, deconstruction, a <c>ref</c> or <c>out</c> argument, binding
+///     a writable <c>ref</c> alias to it, or a write to a field, inline-array element or mutating property of a
+///     value-type variable. Locals and ordinary parameters are written only inside their member; a primary
+///     constructor parameter can be written by any member of its type. Reported once per variable and
+///     closure, at the first reference to the variable inside the closure; a reference that is the first one
+///     of several nested closures is reported once.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
@@ -57,13 +57,9 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
 
         var reported = new HashSet<SyntaxNode>();
         foreach (var closure in closures)
-        {
-            foreach (var use in FindFirstUses(closure, written.Contains))
-            {
-                if (reported.Add(use.Value))
-                    context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Key.Name));
-            }
-        }
+        foreach (var use in FindFirstUses(closure, written.Contains))
+            if (reported.Add(use.Value))
+                context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Key.Name));
     }
 
     /// <summary>Primary constructor parameters are in scope in the whole type, so every member can write them.</summary>
@@ -86,16 +82,19 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsPrimaryConstructorParameter(ISymbol variable, CancellationToken cancellationToken)
-        => variable is IParameterSymbol { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } constructor }
-           && IsPrimaryConstructor(constructor, cancellationToken);
+    {
+        return variable is IParameterSymbol
+               {
+                   ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } constructor
+               }
+               && IsPrimaryConstructor(constructor, cancellationToken);
+    }
 
     private static bool IsPrimaryConstructor(IMethodSymbol constructor, CancellationToken cancellationToken)
     {
         foreach (var reference in constructor.DeclaringSyntaxReferences)
-        {
             if (reference.GetSyntax(cancellationToken) is TypeDeclarationSyntax)
                 return true;
-        }
 
         return false;
     }
@@ -137,13 +136,16 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>True when the target of a <c>ref</c> reassignment allows writes through it (not <c>ref readonly</c>).</summary>
-    private static bool IsWritableReference(IOperation target) => target switch
+    private static bool IsWritableReference(IOperation target)
     {
-        ILocalReferenceOperation local => local.Local.RefKind == RefKind.Ref,
-        IParameterReferenceOperation parameter => parameter.Parameter.RefKind is RefKind.Ref or RefKind.Out,
-        IFieldReferenceOperation field => field.Field.RefKind == RefKind.Ref,
-        _ => false
-    };
+        return target switch
+        {
+            ILocalReferenceOperation local => local.Local.RefKind == RefKind.Ref,
+            IParameterReferenceOperation parameter => parameter.Parameter.RefKind is RefKind.Ref or RefKind.Out,
+            IFieldReferenceOperation field => field.Field.RefKind == RefKind.Ref,
+            _ => false
+        };
+    }
 
     private static void AddWrittenTarget(IOperation? target, HashSet<ISymbol> written)
     {
@@ -177,13 +179,15 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// A write through a <c>readonly</c> accessor (every accessor of a <c>readonly struct</c>) cannot change the
-    /// variable it is called on, for example the indexer setter of <c>ArraySegment&lt;T&gt;</c>.
+    ///     A write through a <c>readonly</c> accessor (every accessor of a <c>readonly struct</c>) cannot change the
+    ///     variable it is called on, for example the indexer setter of <c>ArraySegment&lt;T&gt;</c>.
     /// </summary>
     private static bool MutatesInstance(IPropertySymbol property)
-        => (property.ReturnsByRef ? property.GetMethod : property.SetMethod) is { IsReadOnly: false };
+    {
+        return (property.ReturnsByRef ? property.GetMethod : property.SetMethod) is { IsReadOnly: false };
+    }
 
-    /// <summary>The first reference inside <paramref name="closure"/> to each captured candidate variable.</summary>
+    /// <summary>The first reference inside <paramref name="closure" /> to each captured candidate variable.</summary>
     private static Dictionary<ISymbol, SyntaxNode> FindFirstUses(IOperation closure, Func<ISymbol, bool> isCandidate)
     {
         var firstUses = new Dictionary<ISymbol, SyntaxNode>(SymbolEqualityComparer.Default);
@@ -207,9 +211,7 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
                 && !IsDeclaredInside(variable, closure.Syntax)
                 && (!firstUses.TryGetValue(variable, out var previous)
                     || operation.Syntax.SpanStart < previous.SpanStart))
-            {
                 firstUses[variable] = operation.Syntax;
-            }
 
             foreach (var child in operation.ChildOperations)
                 pending.Push(child);
@@ -221,23 +223,21 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     private static bool IsDeclaredInside(ISymbol variable, SyntaxNode closureSyntax)
     {
         foreach (var location in variable.Locations)
-        {
             if (location.SourceTree == closureSyntax.SyntaxTree && closureSyntax.Span.Contains(location.SourceSpan))
                 return true;
-        }
 
         return false;
     }
 
     /// <summary>
-    /// Writes to and captures of one type's primary constructor parameters, gathered over all its members
-    /// (concurrently) and reported when the type is complete.
+    ///     Writes to and captures of one type's primary constructor parameters, gathered over all its members
+    ///     (concurrently) and reported when the type is complete.
     /// </summary>
     private sealed class PrimaryConstructorCaptures(INamedTypeSymbol type, IMethodSymbol constructor)
     {
         private readonly object _gate = new();
-        private readonly HashSet<ISymbol> _written = new(SymbolEqualityComparer.Default);
         private readonly List<KeyValuePair<ISymbol, SyntaxNode>> _uses = [];
+        private readonly HashSet<ISymbol> _written = new(SymbolEqualityComparer.Default);
 
         public void CollectBlock(OperationBlockAnalysisContext context)
         {
@@ -256,10 +256,8 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
             lock (_gate)
             {
                 foreach (var variable in written)
-                {
                     if (IsOwnParameter(variable))
                         _written.Add(variable);
-                }
 
                 _uses.AddRange(uses);
             }
@@ -271,15 +269,15 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
             lock (_gate)
             {
                 foreach (var use in _uses)
-                {
                     if (_written.Contains(use.Key) && reported.Add(use.Value))
                         context.ReportDiagnostic(Diagnostic.Create(Rule, use.Value.GetLocation(), use.Key.Name));
-                }
             }
         }
 
         private bool IsOwnParameter(ISymbol variable)
-            => variable is IParameterSymbol parameter
-               && SymbolEqualityComparer.Default.Equals(parameter.ContainingSymbol, constructor);
+        {
+            return variable is IParameterSymbol parameter
+                   && SymbolEqualityComparer.Default.Equals(parameter.ContainingSymbol, constructor);
+        }
     }
 }

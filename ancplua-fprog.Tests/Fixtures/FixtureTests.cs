@@ -37,18 +37,19 @@ public abstract class FixtureTests<TFixture> where TFixture : class, IFixture<TF
     public TestContext? TestContext { get; set; }
 
     protected TFixture Fixture => _fixture
-        ?? throw new InvalidOperationException("The fixture is outside its test lifetime.");
+                                  ?? throw new InvalidOperationException("The fixture is outside its test lifetime.");
 
     protected CancellationToken CancellationToken => Context.CancellationToken;
 
     private TestContext Context => TestContext
-        ?? throw new InvalidOperationException("MSTest has not initialized the test context.");
+                                   ?? throw new InvalidOperationException(
+                                       "MSTest has not initialized the test context.");
 
     [TestInitialize]
     public async Task PrepareFixtureAsync()
     {
         var scope = GetType().GetCustomAttribute<UsesFixtureAttribute>()?.Scope
-            ?? throw new InvalidOperationException("Declare UsesFixture with an explicit scope.");
+                    ?? throw new InvalidOperationException("Declare UsesFixture with an explicit scope.");
         _ownsFixture = scope switch
         {
             FixtureScope.Test => true,

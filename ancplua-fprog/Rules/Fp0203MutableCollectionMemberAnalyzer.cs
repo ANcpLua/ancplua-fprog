@@ -5,21 +5,13 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace ancplua_fprog.Rules;
 
-/// <summary>
-/// FP0203: a record or readonly struct in the functional core has a field or property whose type is an
-/// array (including <c>System.Array</c>), <c>System.Text.StringBuilder</c>, or a type from
-/// <c>System.Collections</c> or one of its namespaces other than <c>Immutable</c> and <c>Frozen</c>
-/// (interfaces included). Only the member's own type is judged, after unwrapping <c>Nullable&lt;T&gt;</c>, so
-/// <c>KeyValuePair&lt;K, V&gt;?</c> counts while <c>ImmutableArray&lt;List&lt;int&gt;&gt;</c> and
-/// <c>Func&lt;IEnumerable&lt;int&gt;&gt;</c> do not. Reported at the member name: the declarator name for
-/// fields, the parameter name for positional record properties, and the <c>this</c> keyword for indexers.
-/// </summary>
+/// <summary>FP0203 reports mutable collections and writable memory held by a record or readonly struct in core.</summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
 {
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0203",
-        "Do not store mutable collections in records or readonly structs",
+        "Do not store mutable collections or memory in records or readonly structs",
         "Use an immutable collection from System.Collections.Immutable or System.Collections.Frozen");
 
     /// <inheritdoc />
@@ -47,10 +39,8 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
             || !IsRecordOrReadOnlyStruct(symbol.ContainingType)
             || !CoreScope.IsDeclaredInSource(symbol)
             || !CoreScope.IsInCore(symbol)
-            || !ContainsForbiddenType(type))
-        {
+            || !HasMutableType(type))
             return;
-        }
 
         var location = symbol.Locations.IsEmpty ? null : symbol.Locations[0];
         if (location is { IsInSource: true })
@@ -58,40 +48,32 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsRecordOrReadOnlyStruct(INamedTypeSymbol? type)
-        => type is { IsRecord: true } or { TypeKind: TypeKind.Struct, IsReadOnly: true };
+    {
+        return type is { IsRecord: true } or { TypeKind: TypeKind.Struct, IsReadOnly: true };
+    }
 
-    private static bool ContainsForbiddenType(ITypeSymbol type)
-        => type switch
+    private static bool HasMutableType(ITypeSymbol type)
+    {
+        return type switch
         {
             IArrayTypeSymbol => true,
             INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
-                => ContainsForbiddenType(nullable.TypeArguments[0]),
+                => HasMutableType(nullable.TypeArguments[0]),
             INamedTypeSymbol named => IsForbiddenNamedType(named),
             _ => false
         };
+    }
 
     private static bool IsForbiddenNamedType(INamedTypeSymbol type)
     {
-        if (type.SpecialType == SpecialType.System_Array)
+        if (type.SpecialType == SpecialType.System_Array || Mutators.IsStringBuilder(type)
+            || Mutators.IsSystemType(type, "Memory", 1) || Mutators.IsSystemType(type, "ArraySegment", 1))
             return true;
 
         var ns = type.ContainingNamespace;
-        if (type.Name == "StringBuilder" && IsSystemChild(ns, "Text"))
-            return true;
-
-        INamespaceSymbol? child = null;
-        for (var current = ns; current is { IsGlobalNamespace: false }; current = current.ContainingNamespace)
-        {
-            if (IsSystemChild(current, "Collections"))
-                return child is null || (child.Name != "Immutable" && child.Name != "Frozen");
-
-            child = current;
-        }
-
-        return false;
+        return Mutators.IsCollectionsNamespace(ns)
+               || Mutators.IsCollectionsChild(ns, "Generic")
+               || Mutators.IsCollectionsChild(ns, "ObjectModel")
+               || (Mutators.IsNestedBuilder(type) && Mutators.IsCollectionsChild(ns, "Immutable"));
     }
-
-    private static bool IsSystemChild(INamespaceSymbol? ns, string name)
-        => ns is { ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
-           && ns.Name == name;
 }

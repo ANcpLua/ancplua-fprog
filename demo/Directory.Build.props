@@ -1,0 +1,23 @@
+<Project>
+
+    <!-- Demo for the ancplua-fprog analyzers. Every project here compiles with the analyzers of this repository.
+         HappyPath must build with 0 warnings. UnhappyPath must report exactly the lines marked "// expect: <ID>".
+         KnownGaps holds real bugs that the analyzers do not report (0 warnings on purpose, see README). -->
+    <PropertyGroup>
+        <TargetFramework>net11.0</TargetFramework>
+        <OutputType>Library</OutputType>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+        <EnableNETAnalyzers>false</EnableNETAnalyzers>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <ErrorLog>$(MSBuildThisFileDirectory)artifacts/$(MSBuildProjectName).sarif,version=2.1</ErrorLog>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../ancplua-fprog/ancplua-fprog.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+        <Compile Include="$(MSBuildThisFileDirectory)Fprog.Annotations.cs" Link="Fprog.Annotations.cs" />
+    </ItemGroup>
+
+</Project>
