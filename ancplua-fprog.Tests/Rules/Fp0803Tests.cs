@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -60,6 +61,29 @@ public sealed class Fp0803Tests(TestContext testContext)
                            public interface IContract;
                            public sealed class Adapter : IContract;
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0803_ShellImplementsReferencedCoreInterface_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0803", """
+            public sealed class ShellCounter : Domain.{|FP0803:ICounter|}
+            {
+                public int Get() => 1;
+            }
+            """, ReferencedAssemblySources.CoreTypes, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0803_CoreImplementsReferencedCoreInterface_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0803", """
+            [Fprog.FunctionalCore]
+            public sealed class CoreCounter : Domain.ICounter
+            {
+                public int Get() => 1;
+            }
+            """, ReferencedAssemblySources.CoreTypes, testContext.CancellationToken);
     }
 
     [TestMethod]

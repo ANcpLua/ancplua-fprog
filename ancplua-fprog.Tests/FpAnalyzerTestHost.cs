@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Basic.Reference.Assemblies;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -78,9 +79,20 @@ internal static class FpAnalyzerTestHost
         return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, [], MemorySafetyPreview);
     }
 
+    /// <summary>Runs a rule against a consumer of a library compiled to an in-memory DLL.</summary>
+    public static Task VerifyRuleWithReferencedAssemblyAsync(
+        string ruleId, string source, string librarySource, CancellationToken cancellationToken,
+        params DiagnosticResult[] expected)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var library = TestCompilation.Create(librarySource, "ReferencedTypes");
+        var reference = TestCompilation.ToImageReference(library);
+        return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, expected, reference: reference);
+    }
+
     private static Task VerifyRuleCoreAsync(
         string ruleId, string source, string? analyzerConfig, CancellationToken cancellationToken,
-        DiagnosticResult[] expected, CSharpParseOptions? parseOptions = null)
+        DiagnosticResult[] expected, CSharpParseOptions? parseOptions = null, MetadataReference? reference = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
         var analyzers = AllAnalyzers.Value;
@@ -88,7 +100,7 @@ internal static class FpAnalyzerTestHost
         if (!reported.Contains(ruleId))
             throw new InvalidOperationException($"No analyzer in {AnalyzerAssemblyName} supports {ruleId}.");
 
-        var test = CreateTest(new RuleTest(analyzers, parseOptions), source, expected);
+        var test = CreateTest(new RuleTest(analyzers, parseOptions), source, expected, reference);
         test.DisabledDiagnostics.AddRange(reported.Where(id => id != ruleId));
         if (analyzerConfig is not null)
         {
@@ -127,14 +139,19 @@ internal static class FpAnalyzerTestHost
         return CreateTest(new RuleTest([new TAnalyzer()]), source, expected).RunAsync(cancellationToken);
     }
 
-    private static RuleTest CreateTest(RuleTest test, string source, DiagnosticResult[] expected)
+    private static RuleTest CreateTest(RuleTest test, string source, DiagnosticResult[] expected,
+        MetadataReference? reference = null)
     {
         test.TestCode = source;
         test.ReferenceAssemblies = NoResolvedReferences;
         // Parse documentation comments without requesting CS1591 for public members.
         test.TestState.DocumentationMode = DocumentationMode.Parse;
-        test.TestState.Sources.Add(("Fprog.Annotations.cs", AnnotationsSource));
         test.TestState.AdditionalReferences.AddRange(Net110.References.All);
+        // The compiled library already supplies the core marker.
+        if (reference is null)
+            test.TestState.Sources.Add(("Fprog.Annotations.cs", AnnotationsSource));
+        else
+            test.TestState.AdditionalReferences.Add(reference);
         test.ExpectedDiagnostics.AddRange(expected);
         return test;
     }

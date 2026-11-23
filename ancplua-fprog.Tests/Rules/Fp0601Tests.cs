@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -1347,6 +1348,29 @@ public sealed class Fp0601Tests(TestContext testContext)
                                public static bool IsCat(Pet value) => (object)value is Cat;
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0601_ReferencedUnionValuesThroughUpcasts_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0601", """
+            #nullable enable
+            using Domain;
+
+            [Fprog.FunctionalCore]
+            public static class Inspect
+            {
+                public static bool IsCat(Pet pet) => (object)pet is Cat;
+                public static Circle? AsCircle<T>(T shape) where T : Shape => (object)shape as Circle;
+                public static int Sides(Shape shape) => (object)shape switch
+                {
+                    Circle => 0,
+                    Square => 4,
+                    Triangle => 3,
+                    _ => -1
+                };
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
     [TestMethod]

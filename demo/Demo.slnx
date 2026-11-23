@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="HappyPath/HappyPath.csproj" />
   <Project Path="KnownGaps/KnownGaps.csproj" />
+  <Project Path="ReferencedTypes/ReferencedTypes.csproj" />
   <Project Path="UnhappyPath/UnhappyPath.csproj" />
 </Solution>

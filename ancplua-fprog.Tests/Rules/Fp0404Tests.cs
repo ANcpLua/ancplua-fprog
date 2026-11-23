@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -82,6 +83,37 @@ public sealed class Fp0404Tests(TestContext testContext)
                                public static Pet? MissingExplicitly => new Pet?();
                            }
                            """ + Pets);
+    }
+
+    [TestMethod]
+    public Task FP0404_EmptyReferencedUnionStruct_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0404", """
+            using Domain;
+
+            public static class Shelter
+            {
+                public static Pet ByDefaultLiteral() => {|FP0404:default|};
+                public static Pet ByDefaultExpression() => {|FP0404:default(Pet)|};
+                public static Pet ByConstructor() => {|FP0404:new Pet()|};
+                public static Pet ByTargetTypedConstructor() => {|FP0404:new()|};
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0404_ReferencedClosedAndFilledUnion_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0404", """
+            #nullable enable
+            using Domain;
+
+            public static class Shelter
+            {
+                public static Pet Adopt(Cat cat) => new Pet(cat);
+                public static Shape? Missing() => default(Shape);
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
     [TestMethod]

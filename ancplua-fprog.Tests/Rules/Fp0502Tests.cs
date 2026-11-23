@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -298,6 +299,70 @@ public sealed class Fp0502Tests(TestContext testContext)
                                }
                            }
                            """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0502_SwitchStatementsMissingReferencedCases_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0502", """
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Pet pet)
+                {
+                    {|FP0502:switch|} (pet)
+                    {
+                        case Cat: return 1;
+                        case null: return 0;
+                    }
+                    return -1;
+                }
+
+                public static int Sides(Shape shape)
+                {
+                    {|FP0502:switch|} (shape)
+                    {
+                        case Circle: return 0;
+                        case Square: return 4;
+                    }
+                    return -1;
+                }
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0502_SwitchStatementsCoveringReferencedCases_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0502", """
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Pet pet)
+                {
+                    switch (pet)
+                    {
+                        case Cat: return 1;
+                        case Dog: return 2;
+                        case null: return 0;
+                    }
+                    return -1;
+                }
+
+                public static int Sides(Shape shape)
+                {
+                    switch (shape)
+                    {
+                        case Circle: return 0;
+                        case Square: return 4;
+                        case Triangle: return 3;
+                    }
+                    return -1;
+                }
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
     [TestMethod]

@@ -8,8 +8,9 @@ One C# file per case, named after the rule and the case it tests. Every case exi
 | `HappyPath/<Case>.cs` | the same job done correctly | nothing |
 | `KnownGaps/<Case>.cs` | real bugs that the analyzers do not report (open decisions, see `FINDINGS.md`) | nothing, on purpose |
 
-All three projects compile with the analyzers of this repository (`../ancplua-fprog/ancplua-fprog.csproj` as analyzer
+The three demo projects compile with the analyzers of this repository (`../ancplua-fprog/ancplua-fprog.csproj` as analyzer
 reference), with nullable enabled and .NET 11's default language version, C# 15.
+The warning-free ReferencedTypes library provides the closed cases for the FP0502 demo pair.
 
 ## Expected numbers
 

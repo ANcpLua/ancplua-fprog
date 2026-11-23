@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -373,6 +374,32 @@ public sealed class Fp0801Tests(TestContext testContext)
                                public static UnicodeRange Range() => UnicodeRange.Create('a', 'z');
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0801_ReferencedCoreTypeAndInterface_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0801", """
+            using Domain;
+
+            [Fprog.FunctionalCore]
+            public static class Work
+            {
+                public static Count Run(ICounter input) => new Count(input.Get());
+            }
+            """, ReferencedAssemblySources.CoreTypes, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0801_ReferencedUnmarkedSiblingType_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0801", """
+            [Fprog.FunctionalCore]
+            public static class Work
+            {
+                public static int Read(Domain.{|FP0801:ExternalCount|} external) => external.Value;
+            }
+            """, ReferencedAssemblySources.CoreTypes, testContext.CancellationToken);
     }
 
     [TestMethod]

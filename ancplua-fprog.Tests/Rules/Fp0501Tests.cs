@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -1666,6 +1667,43 @@ public sealed class Fp0501Tests(TestContext testContext)
                                public static int Tag(Shape shape) => shape switch { Circle => 1 };
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0501_CatchAllOverReferencedUnions_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0501", """
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Pet pet) => pet switch
+                {
+                    {|FP0501:IAnimal animal|} => 1,
+                    null => 0
+                };
+
+                public static int Sides(Shape shape) => shape switch
+                {
+                    Circle => 0,
+                    {|FP0501:_|} => 1
+                };
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0501_EveryReferencedCaseNamed_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0501", """
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Pet pet) => pet switch { Cat => 1, Dog => 2, null => 0 };
+                public static int Sides(Shape shape) => shape switch { Circle => 0, Square => 4, Triangle => 3 };
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
     private Task VerifyAsync(string source)

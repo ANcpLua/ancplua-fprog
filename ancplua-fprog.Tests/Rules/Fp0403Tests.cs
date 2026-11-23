@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -87,6 +89,29 @@ public sealed class Fp0403Tests(TestContext testContext)
 
                            public class Square : Shape.Polygon;
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0403_SubtypeOfReferencedOpenCase_NoReport()
+    {
+        const string library = """
+                               namespace Domain;
+
+                               public closed class Shape;
+                               public class OpenCase : Shape;
+                               """;
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0403", """
+            public class ExternalSubtype : Domain.OpenCase;
+            """, library, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task CompilerRejectsDerivationFromReferencedClosedCase()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0403", """
+            public sealed record {|#0:ExternalSubtype|} : Domain.Polygon;
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken,
+            DiagnosticResult.CompilerError("CS9382").WithLocation(0).WithArguments("ExternalSubtype", "Domain.Polygon"));
     }
 
     [TestMethod]

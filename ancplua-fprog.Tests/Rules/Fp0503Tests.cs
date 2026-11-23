@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using ancplua_fprog.Tests.Shared;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -77,6 +78,36 @@ public sealed class Fp0503Tests(TestContext testContext)
                                public static Circle? TryCircle(object value) => value as Circle;
                            }
                            """ + Shapes);
+    }
+
+    [TestMethod]
+    public Task FP0503_TypeTestsOnReferencedUnions_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0503", """
+            #nullable enable
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool IsCat(Pet pet) => pet is {|FP0503:Cat|};
+                public static Circle? AsCircle(Shape shape) => shape as {|FP0503:Circle|};
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    public Task FP0503_NullTestsOnReferencedUnions_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0503", """
+            #nullable enable
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool Empty(Pet pet) => pet is null;
+                public static bool Missing(Shape? shape) => shape is null;
+            }
+            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
     [TestMethod]
