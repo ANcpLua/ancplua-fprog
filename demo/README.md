@@ -19,7 +19,7 @@ Generated from `python3 demo/count.py --json`.
 | Project | Errors | Warnings | Infos |
 | --- | --- | --- | --- |
 | HappyPath | 0 | 0 | 0 |
-| UnhappyPath | 0 | 133 | 0 |
+| UnhappyPath | 0 | 134 | 0 |
 | KnownGaps | 0 | 0 | 0 |
 
 | UnhappyPath file | Warnings | IDs |
@@ -33,13 +33,14 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0104_ElementHandedOutByCall.cs` | 2 | FP0104 x2 |
 | `Fp0104_MutatingCallOnParameter.cs` | 3 | FP0104 x3 |
 | `Fp0104_OutArgument.cs` | 5 | FP0104 x3, FP0201 x1, FP0801 x1 |
+| `Fp0104_ReferenceInsideValueParameter.cs` | 1 | FP0104 x1 |
 | `Fp0104_SpanOverParameter.cs` | 2 | FP0104 x2 |
 | `Fp0105_EventSubscription.cs` | 2 | FP0105 x2 |
 | `Fp0105_FieldBehindAlias.cs` | 3 | FP0105 x2, FP0202 x1 |
 | `Fp0105_StateHeldInAField.cs` | 3 | FP0105 x3 |
 | `Fp0106_FormattingByCulture.cs` | 2 | FP0106 x2 |
 | `Fp0106_SortingStringsByCulture.cs` | 1 | FP0106 x1 |
-| `Fp0107_PointersInCore.cs` | 8 | FP0107 x8 |
+| `Fp0107_PointersInCore.cs` | 9 | FP0107 x9 |
 | `Fp0201_PrimaryConstructorParameter.cs` | 2 | FP0201 x2 |
 | `Fp0203_BuilderInRecord.cs` | 5 | FP0203 x5 |
 | `Fp0301_DoesNotReturn.cs` | 2 | FP0301 x2 |
@@ -65,7 +66,7 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0601_Dynamic.cs` | 1 | FP0601 x1 |
 | `Fp0801_ConcurrencyPrimitives.cs` | 5 | FP0801 x5 |
 | `Fp0801_CoreCallsNonCoreCode.cs` | 2 | FP0801 x2 |
-| `Fp0801_ImplicitlyTypedShellObject.cs` | 5 | FP0801 x4, FP0802 x1 |
+| `Fp0801_ImplicitlyTypedShellObject.cs` | 4 | FP0801 x3, FP0802 x1 |
 | `Fp0801_InjectedClock.cs` | 3 | FP0801 x3 |
 | `Fp0801_ShellValueWithoutTypeName.cs` | 6 | FP0801 x6 |
 | `Fp0801_TrustedLibrary.cs` | 1 | FP0801 x1 |
