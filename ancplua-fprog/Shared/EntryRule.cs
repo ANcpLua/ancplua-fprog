@@ -52,12 +52,12 @@ internal static class EntryRule
                         break;
                     case ImplicitObjectCreationExpressionSyntax creation:
                         if (BoundaryType(creation) is { } type && !TargetIsAnchored(creation))
-                            Report(creation.NewKeyword.GetLocation(), type.Name);
+                            Report(creation.NewKeyword.GetLocation(), DisplayName(type));
                         break;
                     case ElementAccessExpressionSyntax or ElementBindingExpressionSyntax:
                         var access = (ExpressionSyntax)node;
                         if (IndexerType(access) is { } indexerType && !IsAnchored(IndexerReceiver(access)))
-                            Report(access.GetLocation(), indexerType.Name);
+                            Report(access.GetLocation(), DisplayName(indexerType));
                         break;
                     case ArgumentSyntax argument
                         when _model.GetOperation(argument, _cancellationToken) is IArgumentOperation:
@@ -99,7 +99,7 @@ internal static class EntryRule
                 AnalyzeOperator(expression);
                 if (ImplicitConversionType(expression) is { } conversionType
                     && !IsAnchored(expression, includeConversion: false))
-                    Report(expression.GetLocation(), conversionType.Name);
+                    Report(expression.GetLocation(), DisplayName(conversionType));
             }
         }
 
@@ -259,10 +259,13 @@ internal static class EntryRule
             return false;
         }
 
-        private bool TargetIsAnchored(ImplicitObjectCreationExpressionSyntax creation)
+        // The written type that a target-typed expression takes its type from. A collection expression hands that
+        // type on to its elements.
+        private bool TargetIsAnchored(ExpressionSyntax targetTyped)
         {
-            SyntaxNode value = creation;
-            while (value.Parent is ParenthesizedExpressionSyntax or TupleExpressionSyntax
+            SyntaxNode value = targetTyped;
+            while (value.Parent is ParenthesizedExpressionSyntax or TupleExpressionSyntax or ExpressionElementSyntax
+                   || value is ExpressionElementSyntax && value.Parent is CollectionExpressionSyntax
                    || value.Parent is ConditionalExpressionSyntax conditional && conditional.Condition != value
                    || value.Parent is SwitchExpressionArmSyntax arm && arm.Expression == value
                    || value.Parent is SwitchExpressionSyntax expression && expression.GoverningExpression != value
@@ -315,7 +318,7 @@ internal static class EntryRule
         {
             if (!expression.IsKind(SyntaxKind.NullLiteralExpression)
                 && BoundaryType(expression) is { } type && !IsAnchored(expression))
-                Report(expression.GetLocation(), type.Name);
+                Report(expression.GetLocation(), DisplayName(type));
         }
 
         private void ReportResources(VariableDeclarationSyntax? declaration)
@@ -344,7 +347,7 @@ internal static class EntryRule
             };
 
             if (token.RawKind != 0 && !IsAnchored(left) && !IsAnchored(right) && !HasWrittenTypeName(typeName, _model))
-                Report(token.GetLocation(), type.Name);
+                Report(token.GetLocation(), DisplayName(type));
         }
 
         private INamedTypeSymbol? OperatorType(ExpressionSyntax expression)
@@ -390,6 +393,24 @@ internal static class EntryRule
             return Matches(declaring) ? declaring : Matches(receiver) ? receiver : null;
         }
 
+        private bool ElementIsAnchored(CollectionElementSyntax element)
+        {
+            return element switch
+            {
+                ExpressionElementSyntax expression => IsAnchored(expression.Expression),
+                SpreadElementSyntax spread => IsAnchored(spread.Expression),
+                _ => false
+            };
+        }
+
+        // An array has no name of its own; the message names the type of its elements.
+        private static string DisplayName(ITypeSymbol type)
+        {
+            while (type is IArrayTypeSymbol array)
+                type = array.ElementType;
+            return type.Name;
+        }
+
         private ITypeSymbol? BoundaryType(ExpressionSyntax value)
         {
             var info = _model.GetTypeInfo(value, _cancellationToken);
@@ -427,6 +448,8 @@ internal static class EntryRule
                 ObjectCreationExpressionSyntax creation => HasWrittenTypeName(creation.Type, _model),
                 ArrayCreationExpressionSyntax creation => HasWrittenTypeName(creation.Type.ElementType, _model),
                 ImplicitObjectCreationExpressionSyntax creation => BoundaryType(creation) is not null,
+                CollectionExpressionSyntax collection
+                    => TargetIsAnchored(collection) || collection.Elements.Any(ElementIsAnchored),
                 DefaultExpressionSyntax @default => HasWrittenTypeName(@default.Type, _model),
                 ThisExpressionSyntax or BaseExpressionSyntax => true,
                 BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.CoalesceExpression)

@@ -1,6 +1,8 @@
 using System.Linq;
 using System.Threading.Tasks;
 using ancplua_fprog.Tests.Shared;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ancplua_fprog.Tests.Rules;
@@ -44,6 +46,7 @@ public sealed class Fp0801Tests(TestContext testContext)
                                                   public static Effects.Read Reader() => () => 1;
                                                   public static Effects.Cursor Current { get; } = new();
                                                   public static int Make(Effects.Cursor cursor) => cursor.Next();
+                                                  public static int Count(Effects.Cursor[] cursors) => cursors.Length;
                                                   public static T Infer<T>(T value) => value;
                                                   public static (Effects.Cursor, int) Row => (new(), 1);
                                                   public static View? State => new();
@@ -288,6 +291,54 @@ public sealed class Fp0801Tests(TestContext testContext)
                                       public static int Compute() => Source.Make({|FP0801:new|}());
                                   }
                                   """);
+    }
+
+    [TestMethod]
+    public Task FP0801_TargetTypedNewInCollectionExpressionAnchoredByWrittenType_Reports()
+    {
+        return VerifyTrustedAsync("""
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static Effects.{|FP0801:Cursor|}[] Pair() => [new(), new()];
+
+                                      public static int Sample()
+                                      {
+                                          Effects.{|FP0801:Cursor|}[][] named = [[new()], [new(), new()]];
+                                          return named.Length;
+                                      }
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    public Task FP0801_TargetTypedNewInCollectionExpressionOfUnwrittenType_Reports()
+    {
+        return VerifyTrustedAsync("""
+                                  using Trusted;
+
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static int Compute() => Source.Count([{|FP0801:new|}(), {|FP0801:new|}()]);
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    public Task FP0801_ArrayOfShellTypeNamesItsElementType_Reports()
+    {
+        return FpAnalyzerTestHost.VerifyRuleAsync("FP0801", """
+                                                            [Fprog.FunctionalCore]
+                                                            public static class Report
+                                                            {
+                                                                private static T Same<T>(T value) => value;
+
+                                                                public static int First(Effects.{|FP0801:Cursor|}[] values)
+                                                                    => {|#0:Same(values)[0]|}.Next();
+                                                            }
+                                                            """ + AcquiredValues, Config, testContext.CancellationToken,
+            new DiagnosticResult("FP0801", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("Cursor"));
     }
 
     [TestMethod]

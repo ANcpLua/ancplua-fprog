@@ -278,6 +278,8 @@ Each result alternative of a conditional, coalescing or switch expression assign
 A `using` declaration anchors its resource at the initializer. For
 `var r = new StreamReader(path); var copy = r; copy.ReadLine();`, the only report is at `StreamReader`.
 The target type of a target-typed `new` also anchors it when that type is written and reported in core.
+A collection expression hands its target type on to its elements and is anchored by that type or by an element.
+For an array the message names the element type.
 An anchored expression adds nothing.
 Attribute lists, `using` directives, `nameof` operands and documentation comments lie outside the rule.
 
