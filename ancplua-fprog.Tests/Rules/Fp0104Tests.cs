@@ -36,6 +36,17 @@ public sealed class Fp0104Tests(TestContext testContext)
                                  }
                                  """;
 
+    private const string OrderTypes = """
+
+                                      public sealed class Order
+                                      {
+                                          public System.Collections.Generic.List<int> Lines { get; } = [];
+                                          public int[] Raw { get; } = [0];
+                                      }
+
+                                      public readonly record struct OrderPair(Order First, Order Second);
+                                      """;
+
     [TestMethod]
     public Task FP0104_FieldAssignment_Reports()
     {
@@ -647,7 +658,7 @@ public sealed class Fp0104Tests(TestContext testContext)
                                    {|FP0104:span[0]|} = 1;
                                    {|FP0104:span[^1]|} += 1;
                                    {|FP0104:memory.Span[0]|}++;
-                                   holder.Ref = 5;
+                                   {|FP0104:holder.Ref|} = 5;
                                    {|FP0104:rest[0]|} = 6;
                                    return span[0];
                                }
@@ -656,7 +667,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_StructParameterHoldingReference_NoReport()
+    public Task FP0104_StructParameterHoldingReference_Reports()
     {
         return VerifyAsync("""
                            public struct Wrapper
@@ -671,9 +682,9 @@ public sealed class Fp0104Tests(TestContext testContext)
                            {
                                public static Wrapper Touch(Wrapper wrapper)
                                {
-                                   wrapper.Box.Count = 1;
-                                   wrapper.Values[0]++;
-                                   wrapper.Box.Items[0] = new Box();
+                                   {|FP0104:wrapper.Box.Count|} = 1;
+                                   {|FP0104:wrapper.Values[0]|}++;
+                                   {|FP0104:wrapper.Box.Items[0]|} = new Box();
                                    wrapper.Point.X = 2;
                                    wrapper.Box = new Box();
                                    return wrapper;
@@ -759,7 +770,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_TupleAccumulatorHoldingArray_NoReport()
+    public Task FP0104_TupleAccumulatorHoldingArray_Reports()
     {
         return VerifyAsync("""
                            using System.Linq;
@@ -772,8 +783,30 @@ public sealed class Fp0104Tests(TestContext testContext)
                                        (Counts: new int[buckets], Total: 0),
                                        (acc, value) =>
                                        {
-                                           acc.Counts[value % buckets]++;
+                                           {|FP0104:acc.Counts[value % buckets]|}++;
                                            return (acc.Counts, acc.Total + 1);
+                                       }).Counts;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_TupleAccumulatorUpdatingFreshCopy_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public static class Histogram
+                           {
+                               public static int[] Count(int[] values, int buckets)
+                                   => values.Aggregate(
+                                       (Counts: new int[buckets], Total: 0),
+                                       (acc, value) =>
+                                       {
+                                           int[] updated = [.. acc.Counts];
+                                           updated[value % buckets]++;
+                                           return (updated, acc.Total + 1);
                                        }).Counts;
                            }
                            """);
@@ -1188,7 +1221,7 @@ public sealed class Fp0104Tests(TestContext testContext)
                                public static int Touch(in Box box, ref readonly Wrapper wrapper, in Point point)
                                {
                                    {|FP0104:box.Count|} = 1;
-                                   wrapper.Box.X += 2;
+                                   {|FP0104:wrapper.Box.X|} += 2;
                                    return point.X + wrapper.Point.Y;
                                }
                            }
@@ -2076,6 +2109,170 @@ public sealed class Fp0104Tests(TestContext testContext)
                                }
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReferenceInsideImmutableArrayParameter_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Immutable;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Append(ImmutableArray<Order> orders)
+                               {
+                                   orders[0].Lines.{|FP0104:Add|}(1);
+                                   return 1;
+                               }
+
+                               public static int Replace(ImmutableArray<Order> orders)
+                               {
+                                   {|FP0104:orders[0].Raw[0]|} = 1;
+                                   return 1;
+                               }
+                           }
+                           """ + OrderTypes);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReferenceInsideTupleParameter_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Append((Order a, Order b) pair)
+                               {
+                                   pair.a.Lines.{|FP0104:Add|}(1);
+                                   return 1;
+                               }
+                           }
+                           """ + OrderTypes);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReferenceInsideRecordStructParameter_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Replace(OrderPair pair)
+                               {
+                                   {|FP0104:pair.First.Raw[0]|} = 1;
+                                   var copy = pair;
+                                   copy.First.Lines.{|FP0104:Add|}(2);
+                                   return 1;
+                               }
+                           }
+                           """ + OrderTypes);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReferencesInNullableRecordStructPattern_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Replace(OrderPair? pair)
+                               {
+                                   if (pair is OrderPair selected)
+                                       {|FP0104:selected.First.Raw[0]|} = 1;
+                                   if (pair is { First: var first })
+                                       first.Lines.{|FP0104:Add|}(2);
+                                   return 1;
+                               }
+                           }
+                           """ + OrderTypes);
+    }
+
+    [TestMethod]
+    public Task FP0104_ElementFromImmutableArrayCallThroughLocal_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Immutable;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Append(ImmutableArray<Order> orders)
+                               {
+                                   var first = orders.First();
+                                   first.Lines.{|FP0104:Add|}(1);
+                                   return 1;
+                               }
+                           }
+                           """ + OrderTypes);
+    }
+
+    [TestMethod]
+    public Task FP0104_ExtensionIndexerWritingItsReceiver_Reports()
+    {
+        return VerifyAsync("""
+                           public sealed record Grid(int[] Cells);
+                           public readonly record struct ValueGrid(int[] Cells);
+
+                           [Fprog.FunctionalCore]
+                           public static class GridExtensions
+                           {
+                               extension(Grid grid)
+                               {
+                                   public int this[int i]
+                                   {
+                                       set => {|FP0104:grid.Cells[i]|} = value;
+                                   }
+                               }
+
+                               extension(ValueGrid grid)
+                               {
+                                   public int this[int i]
+                                   {
+                                       set => {|FP0104:grid.Cells[i]|} = value;
+                                   }
+                               }
+
+                               public static int Write(Grid grid, ValueGrid copy)
+                               {
+                                   {|FP0104:grid[1]|} = 7;
+                                   copy[1] = 7;
+                                   return 7;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReplacingSlotOfValueParameterOrLocalCopy_NoReport()
+    {
+        return VerifyAsync("""
+                           public record struct MutableOrderPair(Order First, Order Second);
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static Order Tuple((Order First, Order Second) pair, Order other)
+                               {
+                                   pair.First = other;
+                                   return pair.First;
+                               }
+
+                               public static Order Struct(MutableOrderPair pair, Order other)
+                               {
+                                   pair.First = other;
+                                   return pair.First;
+                               }
+
+                               public static Order Copy(ref MutableOrderPair pair, Order other)
+                               {
+                                   var copy = pair;
+                                   copy.First = other;
+                                   return copy.First;
+                               }
+                           }
+                           """ + OrderTypes);
     }
 
     [TestMethod]

@@ -15,7 +15,7 @@
 * **C# Semantic Violations (Analyzer Rules):**
   * **Kein Ergebnis ohne Eingabe / Kein Aufruf ohne Rückgabe:** Eine reine Funktion darf weder `void` noch ein untypisiertes `Task`/`ValueTask` zurückgeben (ein Aufruf ohne Rückgabewert existiert nur für seinen Seiteneffekt). Eine parameterlose Funktion ist nur dann rein, wenn sie eine unveränderliche Konstante zurückgibt.
   * **Keine impliziten Eingaben (Hidden Inputs):** Verbot von Lesezugriffen auf veränderliche statische Felder, globale Singletons, Uhren (`DateTime.Now`), Zufallsgeneratoren (`Random`, `Guid.NewGuid`) oder Umgebungsvariablen.
-  * **Keine impliziten Ausgaben (Hidden Outputs):** Verbot von `ref`- und `out`-Parametern, Verbot der Mutation übergebener Referenztypen sowie Verbot jeglicher I/O-Operationen.
+  * **Keine impliziten Ausgaben (Hidden Outputs):** Verbot von `ref`- und `out`-Parametern, von Mutation des Speichers des Aufrufers (auch über Referenzen in Werttypen) und von I/O-Operationen.
 
 ---
 

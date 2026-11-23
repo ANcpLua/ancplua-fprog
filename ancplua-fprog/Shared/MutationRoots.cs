@@ -36,7 +36,7 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
         if (target is IParameterReferenceOperation || (rebind && (owner == MutationOwner.Field || target is ILocalReferenceOperation)))
             return default;
 
-        return Storage(target, target.Syntax.SpanStart, true);
+        return Storage(target, target.Syntax.SpanStart, true, rebind);
     }
 
     public Match Event(IOperation target)
@@ -48,7 +48,7 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
         return Target(target, false);
     }
 
-    private Match Storage(IOperation? target, int start, bool widen)
+    private Match Storage(IOperation? target, int start, bool widen, bool rebind = false)
     {
         return target switch
         {
@@ -56,11 +56,13 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
             IParameterReferenceOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } parameter
                 when owner == MutationOwner.Parameter => new Match(parameter.Parameter, start),
             IConditionalOperation { IsRef: true } conditional =>
-                Storage(conditional.WhenTrue, start, widen).Include(Storage(conditional.WhenFalse, start, widen)),
-            IParenthesizedOperation parentheses => Storage(parentheses.Operand, start, widen),
+                Storage(conditional.WhenTrue, start, widen, rebind)
+                    .Include(Storage(conditional.WhenFalse, start, widen, rebind)),
+            IParenthesizedOperation parentheses => Storage(parentheses.Operand, start, widen, rebind),
             IInvocationOperation invocation when invocation.TargetMethod.RefKind != RefKind.None =>
                 Trace(Mutators.CallReceiver(invocation), start, true, [], widen),
-            _ => target is null ? default : Trace(ReceiverOfRead(target), start, ReturnsByRef(target), [], widen)
+            // Replacing the target's slot does not follow the reference that was in that slot.
+            _ => target is null ? default : Trace(ReceiverOfRead(target), start, !rebind && ReturnsByRef(target), [], widen)
         };
     }
 
@@ -120,7 +122,9 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
             switch (value)
             {
                 case IParameterReferenceOperation { Parameter: var parameter }:
-                    return owner == MutationOwner.Parameter && IsSharedParameter(parameter)
+                    return owner == MutationOwner.Parameter
+                           && !Mutators.IsPrintMembersParameter(parameter)
+                           && (shared || SharesProjectedValue(reads) || parameter.RefKind is RefKind.Ref or RefKind.Out)
                         ? new Match(parameter, start) : default;
                 case IFieldReferenceOperation field
                     when owner == MutationOwner.Field && IsOwnMember(field.Field, field.Instance):
@@ -148,9 +152,8 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
 
     private Match ReadLocal(ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
     {
-        // A copied struct is independent. A span or memory is a view, and a known tuple projection
-        // can select a reference that was assigned as one component of a tuple expression.
-        if (!local.IsRef && (storage || !SharesStorage(local.Type) && (reads.IsEmpty || reads[0].TupleIndex < 0)))
+        // A by-value copy has its own slots. A reference or view carried by the copy can still reach the source.
+        if (!local.IsRef && !shared && !SharesStorage(local.Type) && !SharesProjectedValue(reads))
             return default;
 
         var active = _active ??= new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
@@ -175,13 +178,6 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
 
         active.Remove(local);
         return result;
-    }
-
-    private static bool IsSharedParameter(IParameterSymbol parameter)
-    {
-        return !Mutators.IsPrintMembersParameter(parameter)
-               && (Mutators.MayBeReference(parameter.Type) || Mutators.IsMutableView(parameter.Type)
-                   || parameter.RefKind is RefKind.Ref or RefKind.Out);
     }
 
     private static bool SharesStorage(ITypeSymbol? type)

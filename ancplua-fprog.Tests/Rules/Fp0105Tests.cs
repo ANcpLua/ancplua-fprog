@@ -709,6 +709,34 @@ public sealed class Fp0105Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0105_ReferenceInsideValueFieldThroughPatternOrElementCall_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Immutable;
+                           using System.Linq;
+
+                           public readonly record struct HolderPair(Holder First, Holder Second);
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Cache
+                           {
+                               private readonly HolderPair? _pair = new HolderPair(new Holder(), new Holder());
+                               private readonly ImmutableArray<Holder> _items = [new()];
+
+                               public int Update()
+                               {
+                                   if (_pair is HolderPair pair)
+                                       {|FP0105:pair.First.Cells[0]|} = 1;
+
+                                   var item = _items.First();
+                                   {|FP0105:item.Value|}++;
+                                   return item.Value;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public Task FP0105_FieldRootUsesSharedAliasesAndWriters_Reports()
     {
         return VerifyAsync("""

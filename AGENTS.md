@@ -215,12 +215,13 @@ pattern, a type pattern), so every report comes with a way out.
 
 ### Reached from a parameter, reached from a field, mutating call (FP0104, FP0105, FP0203)
 
-- A write lands in **memory the caller owns** when the path from the parameter to the written location passes
-  through a reference. That reference is the parameter itself when its type can be a reference type, is `Span<T>`
-  or `Memory<T>`, or is passed by `ref` or `out`; or it is a reference-typed field, property or element read on
-  the way: `orders[0].Lines.Add(x)` for an `ImmutableArray<Order>`, `pair.First.Total = 0` for a tuple or a
-  `record struct`. A write that stays inside a by-value parameter's own storage (`pair.First = other`) belongs to
-  the member. FP0103 covers direct writes to the named `ref` or `out` parameter at its signature.
+- A write lands in **memory the caller owns** when the path from the parameter to the written location crosses
+  shared storage. The path can start at a reference, span or memory parameter, or at a parameter passed by
+  `ref` or `out`. It can also cross a reference, span or memory read from a field, property or element, or
+  follow a writable `ref` field or result. Examples are `orders[0].Lines.Add(x)` for `ImmutableArray<Order>`
+  and `pair.First.Total = 0` for a tuple or record struct. Replacing `pair.First` or rebinding a `ref` field
+  of a by-value parameter changes that parameter's own storage. FP0103 covers direct writes to the named
+  `ref` or `out` parameter at its signature.
 - An expression is **reached from** a parameter when it is the parameter; a field, property, indexer or element
   read from something reached; `?:`, `??` or a switch expression with a reached branch; a span or memory made from
   something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; or a local that stands for something
@@ -230,8 +231,9 @@ pattern, a type pattern), so every report comes with a way out.
   type, hands out one of its elements, and that element is reached: `orders.First()`, `orders.Find(…)`,
   `byId.TryGetValue(id, out var order)`.
 - Every other value that a method call returns starts fresh (`values.ToArray()`, `source.ToList()`), as do
-  `new`, `with`, a copied struct and a boxed copy. A writable `ref` result used as a target designates storage
-  reached from its receiver. Tuple deconstruction follows the source of each selected element.
+  `new`, `with` and a boxed copy. A local copy of a struct has its own slots, and a reference or view it
+  carries can still reach the source. A writable `ref` result used as a target designates storage reached
+  from its receiver. Tuple deconstruction follows the source of each selected element.
 - **Reached from a field** uses the same steps with an instance field of `this`, a static field or a source
   property of either kind with a backing field. A constructor or initializer that fills its
   own fields is construction. Direct writes to a field's own storage are covered by the field-declaration and
