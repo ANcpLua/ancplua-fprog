@@ -5,6 +5,7 @@ using Basic.Reference.Assemblies;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Emit;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -47,10 +48,11 @@ internal static class TestCompilation
     }
 
     /// <summary>Emits <paramref name="compilation" /> and references it as a metadata (DLL) reference.</summary>
-    public static MetadataReference ToImageReference(CSharpCompilation compilation)
+    public static MetadataReference ToImageReference(CSharpCompilation compilation, bool metadataOnly = false)
     {
         using var stream = new MemoryStream();
-        var result = compilation.Emit(stream);
+        var result = compilation.Emit(stream,
+            options: new EmitOptions(metadataOnly: metadataOnly, includePrivateMembers: !metadataOnly));
         Assert.IsTrue(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
         return MetadataReference.CreateFromImage(stream.ToArray());
     }

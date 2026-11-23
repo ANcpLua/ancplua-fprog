@@ -17,6 +17,20 @@ internal static class ReferencedAssemblySources
                                  public sealed record Triangle : Polygon;
                                  """;
 
+    public const string GenericClosedHierarchies = """
+                                                    namespace Domain
+                                                    {
+                                                        public interface IMarked;
+                                                        public closed class Root<T>;
+                                                        public sealed class Marked<T> : Root<T>, IMarked;
+                                                        public sealed class Extra<T> : Root<System.Collections.Generic.List<T>>;
+
+                                                        public closed record Result<T>;
+                                                        public sealed record Ok<T> : Result<T>;
+                                                        public sealed record Err<T> : Result<T>;
+                                                    }
+                                                    """;
+
     public const string CoreTypes = """
                                     namespace Domain;
 

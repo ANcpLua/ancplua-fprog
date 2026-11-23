@@ -3,6 +3,13 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.1.1
+
+* Faster analysis of functional-core boundaries, mutation through aliases, written delegate types, and union cases.
+* FP0501, FP0502 and FP0503 leave a constructed `closed` class or record to the compiler when it cannot list all
+  cases. FP0601 treats a type parameter constrained to one like other type parameters.
+* FP0404 allows default construction of hand-written union structs whose `Value` property is computed.
+
 ## 0.1.0
 
 First release.

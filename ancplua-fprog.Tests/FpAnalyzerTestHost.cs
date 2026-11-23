@@ -84,9 +84,24 @@ internal static class FpAnalyzerTestHost
         string ruleId, string source, string librarySource, CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
+        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, false, cancellationToken, expected);
+    }
+
+    /// <summary>Runs a rule against a consumer of a metadata-only reference assembly.</summary>
+    public static Task VerifyRuleWithReferenceAssemblyAsync(
+        string ruleId, string source, string librarySource, CancellationToken cancellationToken,
+        params DiagnosticResult[] expected)
+    {
+        return VerifyRuleWithReferencedAssemblyAsync(ruleId, source, librarySource, true, cancellationToken, expected);
+    }
+
+    private static Task VerifyRuleWithReferencedAssemblyAsync(
+        string ruleId, string source, string librarySource, bool metadataOnly, CancellationToken cancellationToken,
+        DiagnosticResult[] expected)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         var library = TestCompilation.Create(librarySource, "ReferencedTypes");
-        var reference = TestCompilation.ToImageReference(library);
+        var reference = TestCompilation.ToImageReference(library, metadataOnly);
         return VerifyRuleCoreAsync(ruleId, source, null, cancellationToken, expected, reference: reference);
     }
 
