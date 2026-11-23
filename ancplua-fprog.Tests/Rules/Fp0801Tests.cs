@@ -5,6 +5,7 @@ using ancplua_fprog.Tests.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -437,6 +438,34 @@ public sealed class Fp0801Tests(TestContext testContext)
 
         Assert.AreEqual("FP0801", diagnostic.Id);
         Assert.AreEqual("File", compilation.SyntaxTrees.First().GetText(cancellationToken).ToString(diagnostic.Location.SourceSpan));
+    }
+
+    [TestMethod]
+    public async Task FP0801_FilterSpanTouchingTheName_Reports()
+    {
+        var compilation = TestCompilation.Create("""
+            [Fprog.FunctionalCore]
+            public static class Work
+            {
+                public static bool Exists() => System.IO.File.Exists("path");
+            }
+            """);
+        var method = compilation.GetMethodDeclaration("Exists");
+        var name = method.DescendantNodes().OfType<IdentifierNameSyntax>().Single(n => n.Identifier.ValueText == "File").Span;
+        var model = compilation.GetSemanticModel(method.SyntaxTree);
+        var analyzer = new Fp0801ShellBoundaryAnalyzer();
+        var cancellationToken = testContext.CancellationToken;
+        var whole = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, null, cancellationToken);
+
+        // A caret inside the name, a caret at its end, and the dot that follows it.
+        foreach (var span in new[] { new TextSpan(name.Start + 1, 0), new TextSpan(name.End, 0), new TextSpan(name.End, 1) })
+        {
+            var part = await compilation.WithAnalyzers([analyzer]).GetAnalysisResultAsync(model, span, cancellationToken);
+            var expected = whole.GetAllDiagnostics(analyzer).Where(d => span.IntersectsWith(d.Location.SourceSpan)).ToArray();
+
+            Assert.HasCount(1, expected);
+            CollectionAssert.AreEqual(expected, part.GetAllDiagnostics(analyzer).ToArray());
+        }
     }
 
     [TestMethod]

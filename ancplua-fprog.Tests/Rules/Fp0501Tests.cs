@@ -1761,6 +1761,60 @@ public sealed class Fp0501Tests(TestContext testContext)
             """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    [Timeout(5000)]
+    public Task FP0501_UnionThatNamesItselfAsCase_Reports(bool fromReference)
+    {
+        const string library = """
+
+            namespace Chains
+            {
+                using System.Collections.Generic;
+                using System.Runtime.CompilerServices;
+
+                public closed class Root;
+
+                [Union]
+                public closed class Link : Root, IUnion
+                {
+                    public Link(Link next) => Value = next;
+                    public Link(int value) => Value = value;
+                    public object? Value { get; }
+                }
+
+                public sealed class End() : Link(0);
+
+                public closed class Root<T>;
+
+                [Union]
+                public closed class Link<T> : Root<T>, IUnion
+                {
+                    public Link(Link<List<T>> next) => Value = next;
+                    public Link(int value) => Value = value;
+                    public object? Value { get; }
+                }
+
+                public sealed class End<T>() : Link<T>(0);
+            }
+            """;
+        const string source = """
+            #nullable enable
+            using Chains;
+
+            public static class Format
+            {
+                public static int Tag(Root value) => value switch { {|FP0501:_|} => 0 };
+                public static int Tag(Root<int> value) => value switch { {|FP0501:_|} => 0 };
+            }
+            """;
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0501", source, "#nullable enable" + library,
+                testContext.CancellationToken)
+            : VerifyAsync(source + library);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);

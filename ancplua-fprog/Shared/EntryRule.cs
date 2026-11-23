@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -28,6 +29,13 @@ internal static class EntryRule
         private readonly SemanticModel _model = context.SemanticModel;
         private readonly CancellationToken _cancellationToken = context.CancellationToken;
         private readonly TextSpan? _filterSpan = context.FilterSpan;
+
+        // A report counts for a span that it touches. The walk only visits what overlaps, so it looks one
+        // character further on each side.
+        private readonly TextSpan? _walkSpan = context.FilterSpan is { } requested
+            ? TextSpan.FromBounds(Math.Max(0, requested.Start - 1),
+                Math.Min(context.SemanticModel.SyntaxTree.Length, requested.End + 1))
+            : null;
         private readonly Purity.ConfiguredApis _configured = purity.ForTree(context.SemanticModel.SyntaxTree);
         private readonly Dictionary<SyntaxTree, SemanticModel> _declarationModels = new();
         private readonly Dictionary<SimpleNameSyntax, (ISymbol? Symbol, INamedTypeSymbol? WrittenType)> _names = new();
@@ -45,7 +53,7 @@ internal static class EntryRule
                 var scope = scopes.Pop();
                 var topLevel = scope is GlobalStatementSyntax;
                 var core = IsTypeDeclaration(scope) && purity.Scope.Contains(_model.GetDeclaredSymbol(scope, _cancellationToken));
-                var descendants = _filterSpan is { } span
+                var descendants = _walkSpan is { } span
                     ? scope.DescendantNodes(span, Descend)
                     : scope.DescendantNodes(Descend);
                 foreach (var node in descendants)
@@ -67,7 +75,7 @@ internal static class EntryRule
                     // An unmarked type can still contain a separately marked nested type.
                     return core || topLevel
                         ? VisitChildren(node)
-                        : node is BaseNamespaceDeclarationSyntax or ExtensionBlockDeclarationSyntax;
+                        : node is BaseNamespaceDeclarationSyntax;
                 }
             }
         }

@@ -5,10 +5,13 @@ rule catalog in [AGENTS.md](AGENTS.md).
 
 ## 0.1.1
 
-* Faster analysis of functional-core boundaries, mutation through aliases, written delegate types, and union cases.
+* Faster analysis of functional-core boundaries, mutation through aliases and union cases.
 * FP0501, FP0502 and FP0503 leave a constructed `closed` class or record to the compiler when it cannot list all
   cases. FP0601 treats a type parameter constrained to one like other type parameters.
-* FP0404 allows default construction of hand-written union structs whose `Value` property is computed.
+* FP0404 allows default construction of hand-written union structs whose `Value` property is computed, and
+  construction with an object initializer that assigns `Value`.
+* FP0104 and FP0105 follow a value through a target-typed `?:` or `switch` expression, as in
+  `Shape shape = pick ? square : triangle;`. A write through such a local is now reported.
 
 ## 0.1.0
 

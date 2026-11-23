@@ -33,8 +33,19 @@ public sealed class Fp0404EmptyUnionAnalyzer : DiagnosticAnalyzer
         if (!operation.IsImplicit && operation.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, IsUnion: true } union
             && operation is (IDefaultValueOperation
                 or IObjectCreationOperation { Constructor: { IsImplicitlyDeclared: true, Parameters.Length: 0 } })
+            && !AssignsValue(operation)
             && HasAutoValue(union, context.CancellationToken))
             context.ReportDiagnostic(Diagnostic.Create(Rule, operation.Syntax.GetLocation(), union.Name));
+    }
+
+    // An object initializer that sets Value fills the union it creates.
+    private static bool AssignsValue(IOperation operation)
+    {
+        return operation is IObjectCreationOperation { Initializer: { } initializer }
+               && initializer.Initializers.Any(static member => member is ISimpleAssignmentOperation
+               {
+                   Target: IPropertyReferenceOperation { Property.Name: "Value" }
+               });
     }
 
     private static bool HasAutoValue(INamedTypeSymbol union, CancellationToken cancellationToken)

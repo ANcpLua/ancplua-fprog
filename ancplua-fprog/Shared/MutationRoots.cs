@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Shared;
@@ -195,7 +196,7 @@ internal sealed class MutationRoots(
             var part = storage && assignment.Reads.IsDefaultOrEmpty
                 ? Storage(assignment.Value, start, false)
                 : Trace(assignment.Value, start, shared,
-                    assignment.Reads.IsDefaultOrEmpty ? reads : assignment.Reads.AddRange(reads), false);
+                    assignment.Reads.IsDefaultOrEmpty ? reads : Pending(assignment.Reads.AddRange(reads)), false);
             if (!part.Known)
                 return default;
 
@@ -203,6 +204,25 @@ internal sealed class MutationRoots(
         }
 
         return result;
+    }
+
+    // Only a leading tuple read can be consumed, by a tuple expression that supplies that element. The first
+    // other read stops that for good, and every read from there on counts only through whether one of them
+    // shares storage. One read stands for all of them, so a chain of projections does not grow the path.
+    private static ImmutableArray<LocalAliases.Read> Pending(ImmutableArray<LocalAliases.Read> reads)
+    {
+        var rest = 0;
+        while (rest < reads.Length && reads[rest].TupleIndex >= 0)
+            rest++;
+
+        if (reads.Length - rest < 2)
+            return reads;
+
+        var kept = reads[rest];
+        for (var index = rest + 1; index < reads.Length && !SharesStorage(kept.Type); index++)
+            kept = reads[index];
+
+        return reads.RemoveRange(rest, reads.Length - rest).Add(new LocalAliases.Read(kept.Type, -1));
     }
 
     // Classify the dependency graph before resolving a read. The same local can be reached with a
@@ -262,9 +282,10 @@ internal sealed class MutationRoots(
                 || !SymbolEqualityComparer.Default.Equals(_local, other._local))
                 return false;
 
+            // A pending read matters through its tuple index and through whether it shares storage.
             for (var index = 0; index < _reads.Length; index++)
                 if (_reads[index].TupleIndex != other._reads[index].TupleIndex
-                    || !SymbolEqualityComparer.Default.Equals(_reads[index].Type, other._reads[index].Type))
+                    || SharesStorage(_reads[index].Type) != SharesStorage(other._reads[index].Type))
                     return false;
 
             return true;
@@ -282,7 +303,7 @@ internal sealed class MutationRoots(
                 foreach (var read in _reads)
                 {
                     hash = hash * 31 + read.TupleIndex;
-                    hash = hash * 31 + (read.Type is { } type ? SymbolEqualityComparer.Default.GetHashCode(type) : 0);
+                    hash = hash * 31 + SharesStorage(read.Type).GetHashCode();
                 }
 
                 return hash;
@@ -307,6 +328,10 @@ internal sealed class MutationRoots(
     private static bool IsPreservingConversion(IConversionOperation conversion)
     {
         if (conversion.Conversion.IsIdentity || conversion.Conversion.IsReference)
+            return true;
+
+        // A target-typed conditional or switch expression hands on the value of one of its branches.
+        if (conversion.GetConversion() is { IsConditionalExpression: true } or { IsSwitchExpression: true })
             return true;
 
         return Mutators.IsView(conversion.Type)

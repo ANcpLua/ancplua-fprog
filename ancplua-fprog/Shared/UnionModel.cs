@@ -13,6 +13,7 @@ namespace ancplua_fprog.Shared;
 internal sealed class UnionModel(Compilation compilation)
 {
     private readonly Dictionary<INamedTypeSymbol, CaseSet> _casesByType = new(SymbolEqualityComparer.Default);
+    private readonly HashSet<INamedTypeSymbol> _expanding = new(SymbolEqualityComparer.Default);
 
     public INamedTypeSymbol? GetUnionType(ITypeSymbol? type, CancellationToken cancellationToken)
     {
@@ -83,14 +84,21 @@ internal sealed class UnionModel(Compilation compilation)
     public CaseSet GetCases(INamedTypeSymbol union, CancellationToken cancellationToken)
     {
         lock (_casesByType)
-            return GetOrBuildCases(union, cancellationToken);
+        {
+            if (_casesByType.TryGetValue(union, out var known))
+                return known;
+
+            var cases = BuildCases(union, cancellationToken);
+            _casesByType.Add(union, cases);
+            return cases;
+        }
     }
 
-    private CaseSet GetOrBuildCases(INamedTypeSymbol union, CancellationToken cancellationToken)
+    // A case list can name its own type again: a closed class that is also a hand-written union may take
+    // itself, or itself at another construction, as a case. Such a case is a leaf. A list built below
+    // another one can be cut short this way, so only the list that was asked for is remembered.
+    private CaseSet BuildCases(INamedTypeSymbol union, CancellationToken cancellationToken)
     {
-        if (_casesByType.TryGetValue(union, out var known))
-            return known;
-
         ImmutableArray<ITypeSymbol> direct;
         var isComplete = true;
         if (union.IsUnion)
@@ -104,10 +112,18 @@ internal sealed class UnionModel(Compilation compilation)
             isComplete = derived.IsComplete;
         }
 
-        var leaves = isComplete ? ExpandClosedCases(direct, cancellationToken) : [];
-        var cases = new CaseSet(direct, leaves, isComplete);
-        _casesByType.Add(union, cases);
-        return cases;
+        if (!isComplete)
+            return new CaseSet(direct, [], false);
+
+        _expanding.Add(union.OriginalDefinition);
+        try
+        {
+            return new CaseSet(direct, ExpandClosedCases(direct, cancellationToken), true);
+        }
+        finally
+        {
+            _expanding.Remove(union.OriginalDefinition);
+        }
     }
 
     private ImmutableArray<ITypeSymbol> ExpandClosedCases(
@@ -120,7 +136,8 @@ internal sealed class UnionModel(Compilation compilation)
         foreach (var @case in direct)
         {
             if (@case is INamedTypeSymbol { IsClosed: true } closed
-                && GetOrBuildCases(closed, cancellationToken) is { IsComplete: true } nested)
+                && !_expanding.Contains(closed.OriginalDefinition)
+                && BuildCases(closed, cancellationToken) is { IsComplete: true } nested)
                 leaves.AddRange(nested.Leaves);
             else
                 leaves.Add(@case);

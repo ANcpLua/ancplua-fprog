@@ -1468,6 +1468,35 @@ public sealed class Fp0101Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0101_DelegateTypeWrittenAfterHiddenLines_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public sealed class Hooks
+                           {
+                           #line hidden
+                               public static readonly System.
+                           #line default
+                                   {|FP0101:Action|} Run = null!;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0101_DelegateTypeWrittenInHiddenLines_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public sealed class Hooks
+                           {
+                           #line hidden
+                               public static readonly System.Action Run = null!;
+                           #line default
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0101", source, testContext.CancellationToken);

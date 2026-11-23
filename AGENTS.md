@@ -82,7 +82,8 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 - A **union** is (a) a type whose `ITypeSymbol.IsUnion` is true, or (b) a class or record with the `closed`
   modifier at a constructed type where `GetClosedDerivedTypeInfo(ct).IsComplete` is true. Its **cases** are
   (a) its `ITypeSymbol.UnionCaseTypes`, (b) its direct subtypes. A closed case with a complete case list stands
-  for its own cases.
+  for its own cases. A case list that names its own type again, as a closed class that is also a hand-written
+  union can, keeps that case as it is.
 - A **union value** is an expression whose type is a union, `Nullable<T>` of a union, or a type parameter
   constrained to a closed class that counts as a union. A union value that a cast or an implicit conversion turned
   into a base type, an interface or `object` at the head of a `switch`, `is` or `as` still counts as that union value.
@@ -147,7 +148,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0303 | (a) A method, local function, lambda, getter or operator returns `null` or `default` through a result type that can hold null, including async results, yielded values, pointers and unconstrained type parameters. (b) A method, local function or operator writes `T?` anywhere in its return type, including tuple elements and type arguments. (c) The null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
 | FP0401 | A class or record in core is open: it carries neither `sealed`, `static` nor `closed`. Cases of a closed class belong to FP0403 | the type's name |
 | FP0403 | A direct subtype of a closed class carries neither `sealed` nor `closed` | the case's name |
-| FP0404 | Creates the empty value of a union struct whose `Value` is an auto-property. This covers `default`, `default(U)`, and calls to the implicit parameterless constructor with `new U()` or target-typed `new()` | that expression |
+| FP0404 | Creates the empty value of a union struct whose `Value` is an auto-property. This covers `default`, `default(U)`, and calls to the implicit parameterless constructor with `new U()` or target-typed `new()`, unless an object initializer assigns `Value` | that expression |
 | FP0501 | A `switch` expression arm or `switch` statement label over a union value is a catch-all: `_`, `var x`, `default:`, a property pattern without subpatterns `{ }`, any `not` pattern, or a type pattern (with or without a designation) whose type every case converts to (the union itself, a shared base type or interface, `object`). The input type or a type it always converts to also counts, including for constrained parameters. A pattern naming the only case explicitly is allowed. Every pattern position whose input is a union value counts, including tuple elements, positional and property subpatterns and the sides of logical patterns. A top-level catch-all over a tuple with a union element also counts | that pattern, or the `default` keyword |
 | FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below) | the `switch` keyword |
 | FP0503 | Picks one case out of a union value outside a `switch`: an `is` expression whose pattern names a type, or an `as` expression | the type or pattern to the right of `is`; the type to the right of `as` |
@@ -338,7 +339,9 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
   implementations and generic arguments are trusted.
 - FP0404 looks at expressions that name a union struct or receive it as their target type. Array elements and
   unassigned fields also hold the empty value when the union's `Value` is an auto-property. A hand-written union
-  struct with a computed `Value` defines its own default.
+  struct with a computed `Value` defines its own default. In a referenced assembly the rule knows the auto-property
+  by the compiler's `[CompilerGenerated]` mark on its getter. A partial property carries no such mark, so there a
+  partial `Value` with an automatic getter is left to the author.
 - For a closed type with an incomplete case list, the compiler requires a catch-all in a switch expression.
   FP0501, FP0502 and FP0503 leave values of that type to the compiler. FP0601 applies the ordinary type-parameter
   checks to a type parameter constrained to it.

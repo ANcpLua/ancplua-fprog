@@ -2364,6 +2364,87 @@ public sealed class Fp0104Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    [Timeout(5000)]
+    public Task FP0104_WriteThroughDeepProjectionChain_Reports()
+    {
+        const int depth = 64;
+        var source = new StringBuilder("""
+                                       public abstract class ChainStep
+                                       {
+                                           public abstract ChainLeft Left { get; }
+                                           public abstract ChainRight Right { get; }
+                                           public int Value { get; set; }
+                                       }
+
+                                       public abstract class ChainLeft : ChainStep;
+                                       public abstract class ChainRight : ChainStep;
+
+                                       [Fprog.FunctionalCore]
+                                       public static class Ops
+                                       {
+                                           public static int Write(ChainStep origin, bool chooseLeft)
+                                           {
+                                               var x0 = origin;
+                                       """).AppendLine();
+        for (var index = 0; index < depth; index++)
+        {
+            source.AppendLine($"        if (!(x{index} is {{ Left: var a{index}, Right: var b{index} }})) return 0;");
+            source.AppendLine($"        var x{index + 1} = chooseLeft ? (ChainStep)a{index} : (ChainStep)b{index};");
+        }
+
+        source.AppendLine($$"""
+                                    return {|FP0104:x{{depth}}.Value|} = 1;
+                                }
+                            }
+                            """);
+        return VerifyAsync(source.ToString());
+    }
+
+    [TestMethod]
+    public Task FP0104_WriteThroughTargetTypedBranches_Reports()
+    {
+        return VerifyAsync("""
+                           public abstract class Shape { public int Sides { get; set; } }
+                           public sealed class Square : Shape;
+                           public sealed class Triangle : Shape;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Conditional(Square square, Triangle triangle, bool pick)
+                               {
+                                   Shape shape = pick ? square : triangle;
+                                   return {|FP0104:shape.Sides|} = 4;
+                               }
+
+                               public static int Switch(Square square, Triangle triangle, int pick)
+                               {
+                                   Shape shape = pick switch { 0 => square, _ => triangle };
+                                   return {|FP0104:shape.Sides|} = 3;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_WriteToCopyFromTargetTypedBranches_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static long Pick(int small, long large, bool pick)
+                               {
+                                   long chosen = pick ? small : large;
+                                   chosen += 1;
+                                   object boxed = pick ? small : large;
+                                   return chosen + boxed.ToString()!.Length;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);

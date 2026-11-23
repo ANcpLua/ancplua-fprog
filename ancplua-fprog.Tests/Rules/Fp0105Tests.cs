@@ -1,3 +1,4 @@
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -847,6 +848,46 @@ public sealed class Fp0105Tests(TestContext testContext)
                                public int Count => items.Count + Totals.Length;
                            }
                            """);
+    }
+
+    [TestMethod]
+    [Timeout(5000)]
+    public Task FP0105_WriteThroughDeepProjectionChain_Reports()
+    {
+        const int depth = 64;
+        var source = new StringBuilder("""
+                                       public abstract class ChainStep
+                                       {
+                                           public abstract ChainLeft Left { get; }
+                                           public abstract ChainRight Right { get; }
+                                           public int Value { get; set; }
+                                       }
+
+                                       public abstract class ChainLeft : ChainStep;
+                                       public abstract class ChainRight : ChainStep;
+                                       public static class ChainSource { public static ChainStep Make() => null!; }
+
+                                       [Fprog.FunctionalCore]
+                                       public static class Ops
+                                       {
+                                           private static readonly ChainStep Origin = ChainSource.Make();
+
+                                           public static int Write(bool chooseLeft)
+                                           {
+                                               var x0 = Origin;
+                                       """).AppendLine();
+        for (var index = 0; index < depth; index++)
+        {
+            source.AppendLine($"        if (!(x{index} is {{ Left: var a{index}, Right: var b{index} }})) return 0;");
+            source.AppendLine($"        var x{index + 1} = chooseLeft ? (ChainStep)a{index} : (ChainStep)b{index};");
+        }
+
+        source.AppendLine($$"""
+                                    return {|FP0105:x{{depth}}.Value|} = 1;
+                                }
+                            }
+                            """);
+        return VerifyAsync(source.ToString());
     }
 
     private Task VerifyAsync(string source)
