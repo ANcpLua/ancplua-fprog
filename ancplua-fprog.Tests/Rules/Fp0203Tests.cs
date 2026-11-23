@@ -105,7 +105,7 @@ public sealed class Fp0203Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0203_ObjectModelConcurrentAndNonGenericCollections_Reports()
+    public Task FP0203_ObjectModelAndNonGenericCollections_Reports()
     {
         return VerifyAsync("""
                            using System.Collections;
@@ -116,8 +116,8 @@ public sealed class Fp0203Tests(TestContext testContext)
                            public sealed record Bag(
                                ReadOnlyCollection<int> {|FP0203:ReadOnly|},
                                ObservableCollection<int> {|FP0203:Observable|},
-                               ConcurrentDictionary<string, int> {|FP0203:Concurrent|},
-                               ConcurrentBag<int> {|FP0203:Unordered|},
+                               ConcurrentDictionary<string, int> Concurrent,
+                               ConcurrentBag<int> Unordered,
                                ArrayList {|FP0203:Untyped|},
                                IEnumerable {|FP0203:NonGeneric|},
                                Hashtable {|FP0203:Table|});
@@ -155,13 +155,13 @@ public sealed class Fp0203Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0203_DecidedOtherSystemCollectionsNamespacesCount_Reports()
+    public Task FP0203_OtherSystemCollectionsNamespaces_NoReport()
     {
         return VerifyAsync("""
                            using System.Collections.Specialized;
 
                            [Fprog.FunctionalCore]
-                           public sealed record Headers(NameValueCollection {|FP0203:Values|}, BitVector32 {|FP0203:Bits|});
+                           public sealed record Headers(NameValueCollection Values, BitVector32 Bits);
                            """);
     }
 
@@ -595,14 +595,14 @@ public sealed class Fp0203Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0203_DecidedImmutableBuilderIsAllowedByNamespace_NoReport()
+    public Task FP0203_ImmutableBuilderButNotEnumerator_Reports()
     {
         return VerifyAsync("""
                            using System.Collections.Immutable;
 
                            [Fprog.FunctionalCore]
                            public sealed record Building(
-                               ImmutableArray<int>.Builder Builder,
+                               ImmutableArray<int>.Builder {|FP0203:Builder|},
                                ImmutableDictionary<string, int>.Enumerator Cursor);
                            """);
     }
@@ -909,6 +909,45 @@ public sealed class Fp0203Tests(TestContext testContext)
                                (List<int> Items, int Count)? Pair,
                                Lazy<StringBuilder> Text,
                                Func<int[]> Make);
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0203_MemoryAndArraySegmentInRecordsAndReadonlyStructs_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Immutable;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record Slice(Memory<int> {|FP0203:Memory|}, ArraySegment<int> {|FP0203:Segment|})
+                           {
+                               public ImmutableList<int>.Builder {|FP0203:Builder|} { get; init; } = ImmutableList.CreateBuilder<int>();
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public readonly struct Page
+                           {
+                               public readonly ArraySegment<int>? {|FP0203:Segment|};
+                               public Memory<int> {|FP0203:Data|} { get; init; }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0203_ReadOnlyMemoryAndReadOnlySpan_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record Slice(ReadOnlyMemory<int> Memory);
+
+                           [Fprog.FunctionalCore]
+                           public readonly ref struct Page(ReadOnlySpan<int> values)
+                           {
+                               public ReadOnlySpan<int> Values { get; } = values;
+                           }
                            """);
     }
 

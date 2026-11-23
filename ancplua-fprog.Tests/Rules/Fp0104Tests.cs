@@ -163,7 +163,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_ChainThroughMethodCallCounts_Reports()
+    public Task FP0104_ElementCallAndOrdinaryMethodResult_Reports()
     {
         return VerifyAsync("""
                            using System.Linq;
@@ -173,7 +173,7 @@ public sealed class Fp0104Tests(TestContext testContext)
                            {
                                public static int ViaCall(Box box)
                                {
-                                   {|FP0104:box.Get().Count|} = 1;
+                                   box.Get().Count = 1;
                                    {|FP0104:box.Items.First().X|} = 2;
                                    return box.Count;
                                }
@@ -631,7 +631,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_SpanAndRefFieldStructParametersByValue_NoReport()
+    public Task FP0104_SpanAndMemoryShareStorage_Reports()
     {
         return VerifyAsync("""
                            public ref struct Holder
@@ -644,11 +644,11 @@ public sealed class Fp0104Tests(TestContext testContext)
                            {
                                public static int Fill(System.Span<int> span, System.Memory<int> memory, Holder holder, params System.Span<int> rest)
                                {
-                                   span[0] = 1;
-                                   span[^1] += 1;
-                                   memory.Span[0]++;
+                                   {|FP0104:span[0]|} = 1;
+                                   {|FP0104:span[^1]|} += 1;
+                                   {|FP0104:memory.Span[0]|}++;
                                    holder.Ref = 5;
-                                   rest[0] = 6;
+                                   {|FP0104:rest[0]|} = 6;
                                    return span[0];
                                }
                            }
@@ -716,7 +716,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_SpanLambdaParameterOfStringCreate_NoReport()
+    public Task FP0104_SpanLambdaParameterOfStringCreate_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -726,14 +726,14 @@ public sealed class Fp0104Tests(TestContext testContext)
                                    => string.Create(text.Length, text, static (span, source) =>
                                    {
                                        for (var i = 0; i < span.Length; i++)
-                                           span[i] = source[source.Length - 1 - i];
+                                           {|FP0104:span[i]|} = source[source.Length - 1 - i];
                                    });
                            }
                            """);
     }
 
     [TestMethod]
-    public Task FP0104_SpanParameterOfHelperFillingLocalBuffer_NoReport()
+    public Task FP0104_SpanParameterOfHelperFillingLocalBuffer_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -748,8 +748,8 @@ public sealed class Fp0104Tests(TestContext testContext)
 
                                private static int Write(System.Span<char> destination, byte value)
                                {
-                                   destination[0] = Digit(value >> 4);
-                                   destination[1] = Digit(value & 0xF);
+                                   {|FP0104:destination[0]|} = Digit(value >> 4);
+                                   {|FP0104:destination[1]|} = Digit(value & 0xF);
                                    return 2;
                                }
 
@@ -869,7 +869,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_SpanExtensionReceiverAndInSpanParameter_NoReport()
+    public Task FP0104_SpanExtensionReceiverAndInSpanParameter_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -878,11 +878,11 @@ public sealed class Fp0104Tests(TestContext testContext)
                                public static int FillWith(this System.Span<int> span, int value)
                                {
                                    for (var i = 0; i < span.Length; i++)
-                                       span[i] = value;
+                                       {|FP0104:span[i]|} = value;
                                    return span.Length;
                                }
 
-                               public static int First(in System.Span<int> span) => span[0] = 1;
+                               public static int First(in System.Span<int> span) => {|FP0104:span[0]|} = 1;
                            }
                            """);
     }
@@ -958,7 +958,7 @@ public sealed class Fp0104Tests(TestContext testContext)
                                public static int ViaExtensions(Box box)
                                {
                                    {|FP0104:box.Self.Y|} = 1;
-                                   {|FP0104:box.Me().Count|} = 2;
+                                   box.Me().Count = 2;
                                    return box.Count;
                                }
                            }
@@ -1122,7 +1122,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_PureCoreWithMutatingCallsAndLocals_NoReport()
+    public Task FP0104_MutatingCallsDistinguishLocalAndParameter_Reports()
     {
         return VerifyAsync("""
                            using System.Collections.Generic;
@@ -1161,10 +1161,10 @@ public sealed class Fp0104Tests(TestContext testContext)
                                    _ => line.Sku
                                };
 
-                               public static int CallsAreNotAssignments(List<int> list, Box box)
+                               public static int Change(List<int> list, Box box)
                                {
-                                   list.Add(1);
-                                   list.Sort();
+                                   list.{|FP0104:Add|}(1);
+                                   list.{|FP0104:Sort|}();
                                    box.Raise();
                                    return list.Sum();
                                }
@@ -1649,7 +1649,7 @@ public sealed class Fp0104Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0104_WriteThroughLocalThatIsWrittenAgain_NoReport()
+    public Task FP0104_LocalRequiresEveryAssignmentToBeReached_Reports()
     {
         return VerifyAsync("""
                            [Fprog.FunctionalCore]
@@ -1684,7 +1684,7 @@ public sealed class Fp0104Tests(TestContext testContext)
 
                                    Box late;
                                    late = box;
-                                   late.Count = 7;
+                                   {|FP0104:late.Count|} = 7;
                                    return line.Count;
                                }
 
@@ -1813,6 +1813,284 @@ public sealed class Fp0104Tests(TestContext testContext)
                                        {|FP0104:same.Count|} = 0;
                                        return int.TryParse("1", out {|FP0104:box.Count|}) ? 1 : 0;
                                    }
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_StaticWritersAndCopyToDestination_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Load(int[] keys, int[] values, Span<int> span, List<int> items)
+                               {
+                                   Array.{|FP0104:Sort|}(keys, values);
+                                   Array.{|FP0104:Clear|}(values);
+                                   Array.{|FP0104:Fill|}(values, 1);
+                                   Array.{|FP0104:Copy|}(keys, destinationArray: values, 1);
+                                   Buffer.{|FP0104:BlockCopy|}(dst: values, dstOffset: 0, src: keys, srcOffset: 0, count: 4);
+                                   items.{|FP0104:CopyTo|}(values);
+                                   Span<int> local = stackalloc int[1];
+                                   items.CopyTo(new int[items.Count]);
+                                   keys.CopyTo(local);
+                                   var copy = new int[keys.Length];
+                                   Array.Copy(keys, copy, keys.Length);
+                                   keys.{|FP0104:CopyTo|}(span);
+                                   span.{|FP0104:TryCopyTo|}(values.AsSpan());
+                                   span.{|FP0104:Reverse|}();
+                                   MemoryExtensions.{|FP0104:Sort|}(span, values.AsSpan());
+                                   return values.Length;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_ViewLocalsPreserveTheOriginalStorage_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Fill(int[] array, Span<int> span, Memory<int> memory)
+                               {
+                                   Span<int> fromArray = array;
+                                   fromArray.{|FP0104:Clear|}();
+                                   var portion = span[1..].Slice(1);
+                                   {|FP0104:portion[0]|} = 1;
+                                   var fromMemory = memory.Slice(1);
+                                   {|FP0104:fromMemory.Span[^1]|} = 2;
+                                   var memoryFromArray = array.AsMemory(1);
+                                   memoryFromArray.Span.{|FP0104:Fill|}(3);
+                                   var spanFromArray = array.AsSpan(1);
+                                   var same = spanFromArray;
+                                   {|FP0104:same[0]|} = 4;
+                                   return same.Length;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_SpanAndArrayCopiesHaveFreshStorage_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Fill(int[] array, ReadOnlySpan<int> input)
+                               {
+                                   var span = input.ToArray().AsSpan();
+                                   span.Fill(3);
+                                   var range = array[1..];
+                                   range.AsSpan().Clear();
+                                   var memory = new Memory<int>(span.ToArray());
+                                   memory.Span[0] = 2;
+                                   return memory.Length;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_RefLocalsAndRefIteration_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(int[] values, Box box, bool first)
+                               {
+                                   ref var slot = ref values[0];
+                                   {|FP0104:slot|}++;
+                                   slot = ref values[1];
+                                   {|FP0104:slot|} = 3;
+                                   ref var chosen = ref (first ? ref values[0] : ref box.Count);
+                                   {|FP0104:chosen|} += 2;
+                                   foreach (ref int value in values.AsSpan())
+                                       {|FP0104:value|}++;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_RefLocalReboundToFreshStorage_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(int[] values)
+                               {
+                                   ref var slot = ref values[0];
+                                   slot = ref (new int[1])[0];
+                                   slot = 3;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_ReassignmentsAndChoicesStayReached_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(Box first, Box second, bool pick)
+                               {
+                                   Box alias;
+                                   if (pick)
+                                       alias = first;
+                                   else
+                                       alias = second;
+                                   alias = alias.Items[0];
+                                   {|FP0104:alias.X|} = 1;
+                                   var choice = pick ? first : new Box();
+                                   {|FP0104:choice.Y|} = 2;
+                                   var either = first.Inner ?? second;
+                                   {|FP0104:either.Y|} = 3;
+                                   var selected = pick switch { true => first, false => second };
+                                   {|FP0104:selected.Y|} = 4;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_DeconstructionTracksTheMatchingElement_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public sealed record Pair(Box First, Box Second);
+                               public sealed record Wrapped(Pair Pair, int Count);
+
+                               public static void Change(Box first, Box second, Wrapped wrapped, Pair[] pairs)
+                               {
+                                   var (copy, (selected, other)) = (new Box(), (first, second));
+                                   copy.Count++;
+                                   {|FP0104:selected.Count|}++;
+                                   {|FP0104:other.X|}++;
+                                   var tuple = (new Box(), first);
+                                   var (local, alias) = tuple;
+                                   local.Count++;
+                                   {|FP0104:alias.Count|}++;
+                                   ((selected, other), local) = ((second, first), new Box());
+                                   {|FP0104:selected.X|}++;
+                                   var (pair, _) = wrapped;
+                                   var (left, right) = pair;
+                                   {|FP0104:left.X|}++;
+                                   {|FP0104:right.X|}++;
+                                   foreach (var (item, _) in pairs)
+                                       {|FP0104:item.X|}++;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_NestedPropertyPositionalAndListPatterns_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public sealed record Pair(Box Left, Box Right);
+
+                               public static int Change(Pair pair, Box[] items, Box box)
+                               {
+                                   if (pair is Pair({ Inner: { } deeplyNested }, var other))
+                                   {
+                                       {|FP0104:deeplyNested.X|}++;
+                                       {|FP0104:other.X|}++;
+                                   }
+
+                                   if (box is { Inner.Inner: { } leaf })
+                                       {|FP0104:leaf.X|}++;
+                                   if (items is [var first, ..])
+                                       {|FP0104:first.X|}++;
+
+                                   if (box.Inner is not { } selected)
+                                       return 0;
+                                   {|FP0104:selected.X|}++;
+
+                                   switch (pair)
+                                   {
+                                       case { Left.Inner: var x } when x is not null:
+                                           {|FP0104:x.X|}++;
+                                           break;
+                                   }
+
+                                   return pair switch
+                                   {
+                                       { Right: var right } => {|FP0104:right.X|}++,
+                                       null => 0
+                                   };
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_ElementFromCollectionCallsAndOutVariables_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(List<Box> orders, Dictionary<int, Box> byId)
+                               {
+                                   var first = orders.First();
+                                   {|FP0104:first.Count|}++;
+                                   var found = orders.Find(order => order.Count > 0);
+                                   if (found is not null)
+                                       {|FP0104:found.X|} = 2;
+
+                                   if (byId.TryGetValue(1, out var selected))
+                                       {|FP0104:selected.X|} += 3;
+
+                                   Box? other;
+                                   if (byId.TryGetValue(2, out other))
+                                       {|FP0104:other.X|} += 4;
+
+                                   var copy = orders.ToArray();
+                                   copy[0] = new Box();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_PrintMembersCanAppendToItsParameter_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Text;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record Named(string Name)
+                           {
+                               private bool PrintMembers(StringBuilder builder)
+                               {
+                                   builder.Append("Name = ").Append(Name);
+                                   return true;
                                }
                            }
                            """);

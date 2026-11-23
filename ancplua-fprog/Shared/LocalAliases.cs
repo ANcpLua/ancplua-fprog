@@ -10,184 +10,319 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Shared;
 
 /// <summary>
-///     What a local variable stands for: <see cref="Source" /> itself, or, for a <c>foreach</c> iteration
-///     variable, an element of the collection <see cref="Source" />.
-/// </summary>
-internal sealed class LocalAlias(IOperation source, ITypeSymbol? elementType, bool boxes)
-{
-    /// <summary>The initializer, the tested expression of a pattern, or the collection of a <c>foreach</c>.</summary>
-    public IOperation Source { get; } = source;
-
-    /// <summary>For a <c>foreach</c> variable, the type of the elements read from the collection; otherwise null.</summary>
-    public ITypeSymbol? ElementType { get; } = elementType;
-
-    /// <summary>
-    ///     True when the local holds a box of a struct value that has no conversion operation of its own: a
-    ///     reference-typed pattern variable over a struct value, or a reference-typed <c>foreach</c> variable over
-    ///     struct elements. The local then refers to a fresh copy, not to the value it was taken from.
-    /// </summary>
-    public bool Boxes { get; } = boxes;
-}
-
-/// <summary>
-///     The locals of one operation block (a member body with its lambdas and local functions, or an initializer)
-///     that are another name for an expression: a local declared with an initializer, a <c>foreach</c> iteration
-///     variable, or a pattern variable declared by the top-level pattern (also through <c>and</c>) of an
-///     <c>is</c> expression, a <c>case</c> label or a switch-expression arm. A local that is written anywhere in
-///     the block after its declaration (assignment, compound assignment, <c>??=</c>, <c>++</c>/<c>--</c>,
-///     deconstruction, <c>ref</c>/<c>out</c>/<c>in</c> argument, <c>ref</c> alias, address taken) or that is a
-///     <c>ref</c> local is no alias: it may stand for something else by the time it is used. The table is built
-///     lazily, in one walk over the block, the first time a caller asks; it is read-only afterwards and safe to
-///     share between threads.
+///     The sources assigned to each local in an operation block. A source can project a component of a tuple,
+///     a property or positional subpattern, or an element from iteration. The table is built on first use and
+///     shared read-only by all of the block's operation actions.
 /// </summary>
 internal sealed class LocalAliases
 {
-    private readonly Lazy<(Dictionary<ILocalSymbol, LocalAlias> Aliases, HashSet<ILocalSymbol> Written)> _table;
+    private readonly Lazy<Dictionary<ILocalSymbol, List<Source>>> _sources;
 
     public LocalAliases(ImmutableArray<IOperation> blocks, CancellationToken cancellationToken)
     {
-        _table = new Lazy<(Dictionary<ILocalSymbol, LocalAlias> Aliases, HashSet<ILocalSymbol> Written)>(
-            () => Build(blocks, cancellationToken), LazyThreadSafetyMode.ExecutionAndPublication);
+        _sources = new Lazy<Dictionary<ILocalSymbol, List<Source>>>(() => Build(blocks, cancellationToken));
     }
 
-    /// <summary>
-    ///     The expression <paramref name="local" /> stands for, when it is declared in this block, never written
-    ///     again and its type may be a reference (a local of a value type is a copy and never an alias).
-    /// </summary>
-    public bool TryGet(ILocalSymbol local, out LocalAlias alias)
+    public IReadOnlyList<Source> Assignments(ILocalSymbol local)
     {
-        alias = null!;
-        if (local.RefKind != RefKind.None || !MayBeReference(local.Type))
-            return false;
-
-        var (aliases, written) = _table.Value;
-        if (written.Contains(local) || !aliases.TryGetValue(local, out var found))
-            return false;
-
-        alias = found;
-        return true;
+        return _sources.Value.TryGetValue(local, out var assignments) ? assignments : Array.Empty<Source>();
     }
 
-    private static (Dictionary<ILocalSymbol, LocalAlias>, HashSet<ILocalSymbol>) Build(
-        ImmutableArray<IOperation> blocks,
-        CancellationToken cancellationToken)
+    /// <summary>The expression assigned, followed by any unwritten reads that select the assigned value.</summary>
+    public readonly struct Source(IOperation? value)
     {
-        var aliases = new Dictionary<ILocalSymbol, LocalAlias>(SymbolEqualityComparer.Default);
-        var written = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+        private Source(IOperation value, ImmutableArray<Read> reads) : this(value)
+        {
+            Reads = reads;
+        }
+
+        public IOperation? Value { get; } = value;
+
+        public ImmutableArray<Read> Reads { get; } = [];
+
+        public ITypeSymbol? Type => Reads.IsDefaultOrEmpty ? Value?.Type : Reads[Reads.Length - 1].Type;
+
+        public Source Select(ITypeSymbol? type, int tupleIndex = -1)
+        {
+            return Value is { } value ? new Source(value, Reads.Add(new Read(type, tupleIndex))) : default;
+        }
+    }
+
+    /// <summary>A projected read. A tuple index lets the search select just that branch of a tuple expression.</summary>
+    public readonly struct Read(ITypeSymbol? type, int tupleIndex)
+    {
+        public ITypeSymbol? Type { get; } = type;
+        public int TupleIndex { get; } = tupleIndex;
+    }
+
+    /// <summary>Returns the ordinal of a tuple field, including a field addressed by its declared name.</summary>
+    public static int GetTupleIndex(IFieldSymbol field)
+    {
+        if (!field.ContainingType.IsTupleType)
+            return -1;
+
+        var fields = field.ContainingType.TupleElements;
+        for (var index = 0; index < fields.Length; index++)
+            if (SymbolEqualityComparer.Default.Equals(fields[index].CorrespondingTupleField, field.CorrespondingTupleField))
+                return index;
+
+        return -1;
+    }
+
+    /// <summary>Returns the variables in a deconstruction target through any declaration wrappers.</summary>
+    public static IOperation UnwrapDeclaration(IOperation operation)
+    {
+        return operation is IDeclarationExpressionOperation declaration ? declaration.Expression : operation;
+    }
+
+    private static Dictionary<ILocalSymbol, List<Source>> Build(
+        ImmutableArray<IOperation> blocks, CancellationToken cancellationToken)
+    {
+        var builder = new Builder();
         foreach (var block in blocks)
         foreach (var operation in block.DescendantsAndSelf())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            builder.Add(operation, cancellationToken);
+        }
+
+        return builder.Finish(cancellationToken);
+    }
+
+    private sealed class Builder
+    {
+        private readonly Dictionary<ILocalSymbol, List<Source>> _assignments = new(SymbolEqualityComparer.Default);
+        private readonly List<(ILocalSymbol Alias, Source Source)> _refWrites = [];
+
+        public void Add(IOperation operation, CancellationToken cancellationToken)
+        {
             switch (operation)
             {
-                case ILocalReferenceOperation reference when IsWritten(reference):
-                    written.Add(reference.Local);
+                case IVariableDeclaratorOperation declarator when declarator.GetVariableInitializer() is { Value: var value }:
+                    AddAssignment(declarator.Symbol, new Source(value));
                     break;
-                case IVariableDeclaratorOperation declarator
-                    when declarator.GetVariableInitializer() is { Value: var value }:
-                    aliases[declarator.Symbol] = new LocalAlias(value, null, false);
+                case IDeconstructionAssignmentOperation deconstruction:
+                    var info = deconstruction is { Syntax: AssignmentExpressionSyntax syntax, SemanticModel: { } model }
+                        ? model.GetDeconstructionInfo(syntax)
+                        : default;
+                    Deconstruct(deconstruction.Target, new Source(deconstruction.Value), info);
                     break;
-                case IForEachLoopOperation { LoopControlVariable: IVariableDeclaratorOperation variable } loop
-                    when ElementType(loop) is { } elementType:
-                    // Converting a struct element to a reference-typed variable boxes a copy of it.
-                    aliases[variable.Symbol] = new LocalAlias(
-                        loop.Collection,
-                        elementType,
-                        elementType.IsValueType && MayBeReference(variable.Symbol.Type));
+                case ISimpleAssignmentOperation assignment when assignment.IsRef:
+                    if (assignment.Target is ILocalReferenceOperation rebind)
+                        AddAssignment(rebind.Local, new Source(assignment.Value));
                     break;
-                case IIsPatternOperation isPattern:
-                    AddPatternVariables(aliases, isPattern.Pattern, isPattern.Value);
+                case ISimpleAssignmentOperation assignment:
+                    Write(assignment.Target, new Source(assignment.Value));
                     break;
-                case IPatternCaseClauseOperation { Parent.Parent: ISwitchOperation switchStatement } clause:
-                    AddPatternVariables(aliases, clause.Pattern, switchStatement.Value);
+                case ICoalesceAssignmentOperation assignment:
+                    Write(assignment.Target, new Source(assignment.Value));
                     break;
-                case ISwitchExpressionArmOperation { Parent: ISwitchExpressionOperation switchExpression } arm:
-                    AddPatternVariables(aliases, arm.Pattern, switchExpression.Value);
+                case IAssignmentOperation assignment:
+                    Write(assignment.Target, default);
+                    break;
+                case IIncrementOrDecrementOperation increment:
+                    Write(increment.Target, default);
+                    break;
+                case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument:
+                    Write(argument.Value, OutElement(argument));
+                    break;
+                case IAddressOfOperation address:
+                    Write(address.Reference, default);
+                    break;
+                case IForEachLoopOperation loop:
+                    AddIteration(loop);
+                    break;
+                case IIsPatternOperation test:
+                    AddPattern(test.Pattern, new Source(test.Value), cancellationToken);
+                    break;
+                case IPatternCaseClauseOperation { Parent.Parent: ISwitchOperation statement } label:
+                    AddPattern(label.Pattern, new Source(statement.Value), cancellationToken);
+                    break;
+                case ISwitchExpressionArmOperation { Parent: ISwitchExpressionOperation expression } arm:
+                    AddPattern(arm.Pattern, new Source(expression.Value), cancellationToken);
                     break;
             }
         }
 
-        return (aliases, written);
-    }
-
-    /// <summary>Records the variables that the top-level pattern declares for the value it tests.</summary>
-    private static void AddPatternVariables(
-        Dictionary<ILocalSymbol, LocalAlias> aliases,
-        IPatternOperation pattern,
-        IOperation tested)
-    {
-        switch (pattern)
+        public Dictionary<ILocalSymbol, List<Source>> Finish(CancellationToken cancellationToken)
         {
-            // Parentheses around a pattern have no operation of their own.
-            case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } both:
-                AddPatternVariables(aliases, both.LeftPattern, tested);
-                AddPatternVariables(aliases, both.RightPattern, tested);
-                break;
-            case IDeclarationPatternOperation { DeclaredSymbol: ILocalSymbol local }:
-                Add(local);
-                break;
-            case IRecursivePatternOperation { DeclaredSymbol: ILocalSymbol local }:
-                Add(local);
-                break;
-            case IListPatternOperation { DeclaredSymbol: ILocalSymbol local }:
-                Add(local);
-                break;
+            // Writing through a ref alias to a variable also changes what that variable stands for.
+            foreach (var (alias, source) in _refWrites)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var visited = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+                WriteThrough(alias, source, visited);
+            }
+
+            return _assignments;
         }
 
-        void Add(ILocalSymbol local)
+        private void WriteThrough(ILocalSymbol alias, Source source, HashSet<ILocalSymbol> visited)
         {
-            aliases[local] = new LocalAlias(
-                tested,
-                null,
-                // A reference-typed variable over a struct value holds a box: a copy.
-                tested.Type is { IsValueType: true } && MayBeReference(local.Type));
-        }
-    }
+            if (!visited.Add(alias) || !_assignments.TryGetValue(alias, out var assignments))
+                return;
 
-    /// <summary>The type of the elements a <c>foreach</c> reads, or null when the compiler could not tell.</summary>
-    private static ITypeSymbol? ElementType(IForEachLoopOperation loop)
-    {
-        return loop is { Syntax: CommonForEachStatementSyntax syntax, SemanticModel: { } model }
-            ? model.GetForEachStatementInfo(syntax).ElementType
-            : null;
-    }
-
-    /// <summary>
-    ///     True when <paramref name="reference" /> may give its local another value or let other code do so: it is
-    ///     the target of an assignment of any kind (also inside a deconstruction), of <c>++</c>/<c>--</c>, a
-    ///     <c>ref</c>, <c>out</c> or <c>in</c> argument, the operand of <c>ref</c> (a ref local, ref return or ref
-    ///     conditional that aliases it) or of <c>&amp;</c>. Arguments are judged by their keyword, not by the
-    ///     parameter, so that dynamic calls count too; counting an <c>in</c> argument only loses an alias.
-    /// </summary>
-    private static bool IsWritten(ILocalReferenceOperation reference)
-    {
-        IOperation current = reference;
-        while (current.Parent is ITupleOperation)
-            current = current.Parent;
-
-        switch (current.Parent)
-        {
-            case IAssignmentOperation assignment when assignment.Target == current:
-            case IIncrementOrDecrementOperation increment when increment.Target == current:
-            case IForEachLoopOperation loop when loop.LoopControlVariable == current:
-            case IAddressOfOperation:
-                return true;
+            foreach (var assignment in assignments)
+                if (assignment.Reads.IsDefaultOrEmpty)
+                    WriteStorage(assignment.Value, source, visited);
         }
 
-        var syntax = reference.Syntax;
-        while (syntax.Parent is ParenthesizedExpressionSyntax parenthesized)
-            syntax = parenthesized;
+        private void WriteStorage(IOperation? target, Source source, HashSet<ILocalSymbol> visited)
+        {
+            switch (target)
+            {
+                case ILocalReferenceOperation { Local.IsRef: true } reference:
+                    WriteThrough(reference.Local, source, visited);
+                    break;
+                case ILocalReferenceOperation reference:
+                    AddAssignment(reference.Local, source);
+                    break;
+                case IConditionalOperation { IsRef: true } conditional:
+                    WriteStorage(conditional.WhenTrue, source, visited);
+                    WriteStorage(conditional.WhenFalse, source, visited);
+                    break;
+                case IParenthesizedOperation parenthesized:
+                    WriteStorage(parenthesized.Operand, source, visited);
+                    break;
+            }
+        }
 
-        return syntax.Parent is RefExpressionSyntax
-               || (syntax.Parent is ArgumentSyntax argument && !argument.RefKindKeyword.IsKind(SyntaxKind.None));
-    }
+        private void Deconstruct(IOperation target, Source source, DeconstructionInfo info)
+        {
+            if (UnwrapDeclaration(target) is not ITupleOperation tuple)
+            {
+                Write(target, source);
+                return;
+            }
 
-    /// <summary>
-    ///     True when a value of <paramref name="type" /> may be a reference to an object: classes, interfaces,
-    ///     arrays, delegates, <c>dynamic</c> and type parameters not known to be value types.
-    /// </summary>
-    public static bool MayBeReference(ITypeSymbol? type)
-    {
-        return type is { IsValueType: false, TypeKind: not TypeKind.Pointer and not TypeKind.FunctionPointer };
+            for (var index = 0; index < tuple.Elements.Length; index++)
+            {
+                var targetElement = tuple.Elements[index];
+                var tupleIndex = source.Type is { IsTupleType: true } ? index : -1;
+                var selectedType = source.Type is INamedTypeSymbol { IsTupleType: true } sourceTuple
+                                   && index < sourceTuple.TupleElements.Length
+                    ? sourceTuple.TupleElements[index].Type
+                    : DeconstructedType(info.Method, index, targetElement.Type);
+                var nested = !info.Nested.IsDefaultOrEmpty && index < info.Nested.Length
+                    ? info.Nested[index]
+                    : default;
+                Deconstruct(targetElement, source.Select(selectedType, tupleIndex), nested);
+            }
+        }
+
+        private static ITypeSymbol? DeconstructedType(IMethodSymbol? method, int index, ITypeSymbol? fallback)
+        {
+            if (method is null)
+                return fallback;
+
+            foreach (var parameter in method.Parameters)
+                if (parameter.RefKind == RefKind.Out && index-- == 0)
+                    return parameter.Type;
+
+            return fallback;
+        }
+
+        private void AddIteration(IForEachLoopOperation loop)
+        {
+            if (loop is not { Syntax: CommonForEachStatementSyntax syntax, SemanticModel: { } model })
+                return;
+
+            var element = new Source(loop.Collection).Select(model.GetForEachStatementInfo(syntax).ElementType);
+            if (loop.LoopControlVariable is IVariableDeclaratorOperation variable)
+                AddAssignment(variable.Symbol, element);
+            else if (syntax is ForEachVariableStatementSyntax deconstruction)
+                Deconstruct(loop.LoopControlVariable, element, model.GetDeconstructionInfo(deconstruction));
+        }
+
+        private void AddPattern(IPatternOperation pattern, Source source, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            switch (pattern)
+            {
+                case IDeclarationPatternOperation { DeclaredSymbol: ILocalSymbol local }:
+                    AddAssignment(local, source);
+                    break;
+                case IBinaryPatternOperation binary:
+                    AddPattern(binary.LeftPattern, source, cancellationToken);
+                    AddPattern(binary.RightPattern, source, cancellationToken);
+                    break;
+                case INegatedPatternOperation negated:
+                    AddPattern(negated.Pattern, source, cancellationToken);
+                    break;
+                case IRecursivePatternOperation recursive:
+                    if (recursive.DeclaredSymbol is ILocalSymbol designation)
+                        AddAssignment(designation, source);
+
+                    for (var index = 0; index < recursive.DeconstructionSubpatterns.Length; index++)
+                    {
+                        var subpattern = recursive.DeconstructionSubpatterns[index];
+                        var tupleIndex = recursive.MatchedType is { IsTupleType: true } ? index : -1;
+                        AddPattern(subpattern, source.Select(subpattern.InputType, tupleIndex), cancellationToken);
+                    }
+
+                    foreach (var property in recursive.PropertySubpatterns)
+                    {
+                        var tupleIndex = property.Member is IFieldReferenceOperation field ? GetTupleIndex(field.Field) : -1;
+                        AddPattern(property.Pattern, source.Select(property.Member.Type, tupleIndex), cancellationToken);
+                    }
+
+                    break;
+                case IListPatternOperation list:
+                    if (list.DeclaredSymbol is ILocalSymbol entire)
+                        AddAssignment(entire, source);
+
+                    foreach (var element in list.Patterns)
+                        AddPattern(element, source.Select(element.InputType), cancellationToken);
+
+                    break;
+                case ISlicePatternOperation { Pattern: { } slice }:
+                    // An array slice allocates a new array. Span and memory slices keep their storage.
+                    AddPattern(slice, Mutators.IsView(slice.InputType) ? source : default, cancellationToken);
+                    break;
+            }
+        }
+
+        private static Source OutElement(IArgumentOperation argument)
+        {
+            if (argument.Parameter is not { RefKind: RefKind.Out, Type: var type }
+                || argument.Parent is not IInvocationOperation invocation
+                || Mutators.ElementReceiver(invocation, type) is not { } receiver)
+                return default;
+
+            return new Source(receiver).Select(type);
+        }
+
+        private void Write(IOperation target, Source source)
+        {
+            switch (UnwrapDeclaration(target))
+            {
+                case ILocalReferenceOperation { Local.IsRef: true } reference:
+                    _refWrites.Add((reference.Local, source));
+                    break;
+                case ILocalReferenceOperation reference:
+                    AddAssignment(reference.Local, source);
+                    break;
+                case IConditionalOperation { IsRef: true } conditional:
+                    if (conditional.WhenTrue is { } whenTrue)
+                        Write(whenTrue, source);
+                    if (conditional.WhenFalse is { } whenFalse)
+                        Write(whenFalse, source);
+                    break;
+            }
+        }
+
+        private void AddAssignment(ILocalSymbol local, Source source)
+        {
+            if (!_assignments.TryGetValue(local, out var assignments))
+            {
+                assignments = [];
+                _assignments.Add(local, assignments);
+            }
+
+            // A binding that boxes a value gets an independent copy of its storage.
+            assignments.Add(source.Type is { IsValueType: true } && Mutators.MayBeReference(local.Type)
+                ? default
+                : source);
+        }
     }
 }

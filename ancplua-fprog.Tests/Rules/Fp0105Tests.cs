@@ -688,13 +688,11 @@ public sealed class Fp0105Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0105_FieldReachedThroughLocalAlias_NoReport()
+    public Task FP0105_FieldReachedThroughLocalAlias_Reports()
     {
         return VerifyAsync("""
                            using System.Collections.Concurrent;
 
-                           // A known gap, not correct code: the local is another name for the field, but this rule follows
-                           // only chains written out from the field.
                            [Fprog.FunctionalCore]
                            public static class Nine
                            {
@@ -703,9 +701,122 @@ public sealed class Fp0105Tests(TestContext testContext)
                                public static int AliasOfField()
                                {
                                    var memo = Memo;
-                                   memo.TryAdd(-1, 1);
+                                   memo.{|FP0105:TryAdd|}(-1, 1);
                                    return memo.Count;
                                }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0105_FieldRootUsesSharedAliasesAndWriters_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Generic;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class FieldCounter
+                           {
+                               private readonly int[] cells = new int[4];
+                               private readonly List<Holder> items = [new()];
+                               public IDictionary<int, Holder> Entries { get; set; } = new Dictionary<int, Holder>();
+
+                               public int Change(int[] source)
+                               {
+                                   var span = cells.AsSpan()[1..];
+                                   span.{|FP0105:Fill|}(1);
+                                   var same = cells;
+                                   same = this.cells;
+                                   {|FP0105:same[0]|}++;
+                                   ref var slot = ref same[1];
+                                   {|FP0105:slot|} = 4;
+
+                                   Entries.{|FP0105:TryAdd|}(2, new Holder());
+                                   CollectionExtensions.{|FP0105:Remove|}(Entries, 2, out _);
+                                   {|FP0105:Entries[1]|} = new Holder();
+                                   if (Entries.TryGetValue(3, out var value))
+                                       {|FP0105:value.Value|} = 1;
+                                   var item = items.First();
+                                   {|FP0105:item.Value|} = 2;
+                                   foreach (var each in items)
+                                       {|FP0105:each.Value|}++;
+                                   var alias = (Ready: true, List: items);
+                                   var (_, list) = alias;
+                                   list.{|FP0105:Add|}(item);
+                                   Buffer.{|FP0105:BlockCopy|}(source, 0, cells, 0, 4);
+                                   source.{|FP0105:CopyTo|}(span);
+                                   return slot;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0105_EventSubscriptions_ReportsAtEventName()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Watcher
+                           {
+                               private readonly Holder holder = new();
+                               public event EventHandler? Changed;
+                               public static event EventHandler? Any;
+
+                               public Watcher(EventHandler handler)
+                               {
+                                   Changed += handler;
+                                   holder.Changed += handler;
+                               }
+
+                               public void Watch(EventHandler handler, Holder other)
+                               {
+                                   {|FP0105:Changed|} += handler;
+                                   this.{|FP0105:Changed|} -= handler;
+                                   Watcher.{|FP0105:Any|} += handler;
+                                   var alias = holder;
+                                   alias.{|FP0105:Changed|} += handler;
+                                   alias.{|FP0105:Changed|} -= handler;
+                                   other.Changed += handler;
+                                   var local = new Holder();
+                                   local.Changed += handler;
+                               }
+
+                               public void Fire() => Changed?.Invoke(this, EventArgs.Empty);
+                               public static void FireAny() => Any?.Invoke(null, EventArgs.Empty);
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0105_ConstructionViaLocalAliases_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class FieldCounter
+                           {
+                               private readonly List<int> items;
+                               private static readonly int[] Totals = new int[1];
+
+                               static FieldCounter()
+                               {
+                                   var totals = Totals;
+                                   totals[0] = 1;
+                               }
+
+                               public FieldCounter(int value)
+                               {
+                                   items = [];
+                                   var same = items;
+                                   same.Add(value);
+                               }
+
+                               public int Count => items.Count + Totals.Length;
                            }
                            """);
     }

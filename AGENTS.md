@@ -24,8 +24,8 @@ Every rule in the catalog reports each bug of its kind and stays silent on corre
 - The analyzer targets `netstandard2.0` and references `Microsoft.CodeAnalysis.CSharp` 5.9.0, the compiler version
   of the pinned SDK (a newer one fails to load, CS9057). Raise the pin when a newer version loads in the pinned
   compiler, and prove it with `make check` and the demo.
-- `ITypeSymbol.IsClosed`, `ITypeSymbol.GetClosedDerivedTypeInfo`, `UnionDeclarationSyntax` and the related
-  `SyntaxKind` members carry `[Experimental("RSEXPERIMENTAL006")]`. The analyzer and test projects set
+- `ITypeSymbol.IsClosed`, `ITypeSymbol.GetClosedDerivedTypeInfo`, `UnionDeclarationSyntax`, `UnsafeExpressionSyntax`
+  and the related `SyntaxKind` members carry `[Experimental("RSEXPERIMENTAL006")]`. The analyzer and test projects set
   `<NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>`. `ITypeSymbol.IsUnion` is stable.
 - Read the real signature of an API before you rely on it:
   `dotnet tool run ref assembly ~/.nuget/packages/microsoft.codeanalysis.csharp/5.9.0/lib/netstandard2.0/Microsoft.CodeAnalysis.CSharp.dll --type '<full type name>'`
@@ -125,13 +125,13 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0101 | A `void` result: (a) a method or local function returns `void`; (b) a delegate declaration returns `void`; (c) a written delegate type whose `Invoke` returns `void` (`Action`, `Action<…>`, `EventHandler`, …) as the type of a parameter, return, local, field, property, event or type argument; (d) a lambda, anonymous method or method group that becomes such a delegate where the delegate type is unwritten (an argument for a member outside core, a `var` local) | (a)(b) the name; (c) the type's name token; (d) the `=>` token, the `delegate` keyword, or the method group's name |
 | FP0102 | Reads a hidden input or accesses mutable static state (list below) | the name token of the member |
 | FP0103 | A `ref` or `out` parameter (`in` and `ref readonly` are allowed) | the parameter name |
-| FP0104 | Writes into memory the caller owns: the target or receiver is *reached from a parameter* (below). Forms: assignment, compound assignment, `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, a *mutating call* (below) | the target or argument expression; for a mutating call the method name |
-| FP0105 | Changes state held in a field after construction: the forms of FP0104 with a target or receiver *reached from a field*, and `+=`/`-=` on an event | as FP0104; for an event the event name |
+| FP0104 | Writes into memory the caller owns: the target or receiver is *reached from a parameter* (below). Forms: assignment, compound assignment (including event subscription), `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, a *mutating call* (below) | the target or argument expression; for a mutating call the method name |
+| FP0105 | Changes state after construction. The forms of FP0104 apply to a target or receiver *reached from a field*. Event subscriptions also count on `this` and on static events | as FP0104. For an event, the event name |
 | FP0106 | Depends on the current culture (list below) | see list |
 | FP0107 | Uses a pointer or unsafe code: a pointer or function-pointer type, the address-of operator, a `fixed` statement, the `unsafe` modifier, an `unsafe` block, an `unsafe(…)` expression | the type syntax, the `&` token, the `fixed` keyword, the `unsafe` keyword |
-| FP0201 | A field without `readonly` or `const`; a primary-constructor parameter that a member body writes | the variable declarator name; the parameter name |
+| FP0201 | A field without `readonly` or `const`, or a primary-constructor parameter that a member body writes directly or through a `ref` local | the variable declarator name or parameter name |
 | FP0202 | A property with a `set` accessor (`init` is allowed) | the `set` keyword |
-| FP0203 | A record or readonly struct has a field or property of a mutable type: an array, `StringBuilder`, `Memory<T>`, `ArraySegment<T>`, any type from `System.Collections`, `.Generic` or `.ObjectModel` (interfaces included), or a nested `Builder` type of an immutable collection. The other types of `System.Collections.Immutable` and `.Frozen` are the collections to use | the member name (for positional records: the parameter name) |
+| FP0203 | A record or readonly struct has a field or property whose type is an array (including `System.Array`), `StringBuilder`, `Memory<T>`, `ArraySegment<T>`, any type declared directly in `System.Collections`, `System.Collections.Generic` or `System.Collections.ObjectModel` (interfaces included), or a nested `Builder` type of an immutable collection. The other types of `System.Collections.Immutable` and `.Frozen` are the collections to use | the member name (for positional records: the parameter name) |
 | FP0301 | A `throw` statement or `throw` expression, including `throw;`; a call to a static `Throw…` helper of an exception type; a call to a member annotated `[DoesNotReturn]` | the `throw` keyword; the method name |
 | FP0302 | Uses a partial operation in the list below. Method entries cover calls and method groups | see list |
 | FP0303 | (a) A method, local function, lambda, getter or operator returns `null` or `default` through a result type that can hold null, including async results, yielded values, pointers and unconstrained type parameters. (b) A method, local function or operator writes `T?` anywhere in its return type, including tuple elements and type arguments. (c) The null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
@@ -209,7 +209,9 @@ pattern, a type pattern), so every report comes with a way out.
 
 ### Reached from a parameter, reached from a field, mutating call (FP0104, FP0105, FP0203)
 
-- A parameter **shares memory with the caller** when its type is a reference type, `Span<T>` or `Memory<T>`.
+- A parameter **shares memory with the caller** when its type can be a reference type, is `Span<T>` or
+  `Memory<T>`, or is passed by `ref` or `out`. A by-value parameter's slot belongs to the member. FP0103 covers
+  direct writes to the named `ref` or `out` parameter at its signature.
 - An expression is **reached from** such a parameter when it is the parameter; a field, property, indexer or element
   read from something reached; `?:`, `??` or a switch expression with a reached branch; a span or memory made from
   something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; or a local that stands for something
@@ -218,16 +220,19 @@ pattern, a type pattern), so every report comes with a way out.
 - A call on a reached collection whose result (or `out` variable) has the collection's element type, a reference
   type, hands out one of its elements, and that element is reached: `orders.First()`, `orders.Find(…)`,
   `byId.TryGetValue(id, out var order)`.
-- Every other value that a method call returns starts fresh (`values.ToArray()`, `source.ToList()`), and so do
-  `new`, `with`, a copied struct and a boxed copy.
-- **Reached from a field** uses the same steps with an instance field of `this` or a static field as the root. A
-  constructor or initializer that fills the fields of its own object is construction and lies before the rule.
+- Every other value that a method call returns starts fresh (`values.ToArray()`, `source.ToList()`), as do
+  `new`, `with`, a copied struct and a boxed copy. A writable `ref` result used as a target designates storage
+  reached from its receiver. Tuple deconstruction follows the source of each selected element.
+- **Reached from a field** uses the same steps with an instance field of `this`, a static field or a source
+  property of either kind with a backing field. A constructor or initializer that fills its
+  own fields is construction. Direct writes to a field's own storage are covered by the field-declaration and
+  static-state rules.
 - A **mutating call** writes its receiver: an instance method, or an extension method of
   `System.Collections.Generic.CollectionExtensions`, bound to `System.Array`, `StringBuilder`, `Span<T>`, or a
   `System.Collections*` type outside `.Immutable` and `.Frozen` (their nested `Builder` types count), whose name is
   in the shared table of mutating members in `ancplua-fprog/Shared/Mutators.cs`. The static writers of
   `System.Array`, `System.Buffer` and `System.MemoryExtensions` (`Sort`, `Reverse`, `Clear`, `Fill`, `Copy`,
-  `BlockCopy`, …) and every `CopyTo` write their destination argument.
+  `BlockCopy`, …) and every `CopyTo` or `TryCopyTo` write their destination argument.
 - The record member `PrintMembers(StringBuilder)` appends to its parameter by contract and is exempt from FP0104.
 
 ### Handling a case (FP0502)

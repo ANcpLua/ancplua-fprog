@@ -21,10 +21,8 @@ namespace ancplua_fprog.Rules;
 ///         <c>++</c>/<c>--</c>, a deconstruction target, or a <c>ref</c> or <c>out</c> argument. The compiler keeps
 ///         such a parameter in a field that cannot be <c>readonly</c>, so it is hidden mutable state just like a
 ///         declared field. A write in a field or property initializer or in the base constructor argument list (outside
-///         a lambda) runs only during construction and is plain parameter reassignment, so it is not reported; nor is
-///         a parameter that is only read, a parameter of a record (its positional parameters become properties), or
-///         other ways of changing the captured value (a <c>ref</c> local bound to it, a write to a field of a struct
-///         parameter).
+///         a lambda) runs during construction. A write through a ref local also counts when it writes the parameter's
+///         storage. A parameter that is only read and a record's positional parameters are exempt.
 ///     </para>
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -33,7 +31,7 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0201",
         "Do not declare mutable fields in the functional core",
-        "Make field '{0}' readonly or const");
+        "Keep '{0}' immutable by using a readonly field, a constant, or a new result value");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
@@ -115,8 +113,9 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
                                && !SymbolEqualityComparer.Default.Equals(method, constructor);
 
             var written = new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+            var aliases = new LocalAliases(context.OperationBlocks, context.CancellationToken);
             foreach (var block in context.OperationBlocks)
-                CollectWrites(block, insideMember, written);
+                CollectWrites(block, insideMember, aliases, written);
 
             if (written.Count == 0)
                 return;
@@ -143,7 +142,7 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        private void CollectWrites(IOperation root, bool insideMember, HashSet<IParameterSymbol> written)
+        private void CollectWrites(IOperation root, bool insideMember, LocalAliases aliases, HashSet<IParameterSymbol> written)
         {
             var pending = new Stack<(IOperation Operation, bool Counts)>();
             pending.Push((root, insideMember));
@@ -156,14 +155,16 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
                 if (counts)
                     switch (operation)
                     {
+                        case ISimpleAssignmentOperation { IsRef: true }:
+                            break;
                         case IAssignmentOperation assignment:
-                            AddWrittenTarget(assignment.Target, written);
+                            AddWrittenTarget(assignment.Target, aliases, written);
                             break;
                         case IIncrementOrDecrementOperation increment:
-                            AddWrittenTarget(increment.Target, written);
+                            AddWrittenTarget(increment.Target, aliases, written);
                             break;
                         case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument:
-                            AddWrittenTarget(argument.Value, written);
+                            AddWrittenTarget(argument.Value, aliases, written);
                             break;
                     }
 
@@ -172,8 +173,8 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        /// <summary>The parameter a write target names; a deconstruction target is a tuple, maybe nested.</summary>
-        private void AddWrittenTarget(IOperation? target, HashSet<IParameterSymbol> written)
+        private void AddWrittenTarget(IOperation? target, LocalAliases aliases, HashSet<IParameterSymbol> written,
+            HashSet<ILocalSymbol>? visited = null)
         {
             switch (target)
             {
@@ -183,7 +184,23 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
                     break;
                 case ITupleOperation tuple:
                     foreach (var element in tuple.Elements)
-                        AddWrittenTarget(element, written);
+                        AddWrittenTarget(element, aliases, written, visited);
+                    break;
+                case ILocalReferenceOperation { Local.IsRef: true } local:
+                    visited ??= new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+                    if (!visited.Add(local.Local))
+                        break;
+
+                    foreach (var source in aliases.Assignments(local.Local))
+                        if (source.Reads.IsDefaultOrEmpty)
+                            AddWrittenTarget(source.Value, aliases, written, visited);
+                    break;
+                case IConditionalOperation { IsRef: true } conditional:
+                    AddWrittenTarget(conditional.WhenTrue, aliases, written, visited);
+                    AddWrittenTarget(conditional.WhenFalse, aliases, written, visited);
+                    break;
+                case IFieldReferenceOperation { Field.RefKind: RefKind.None, Instance: { Type.IsValueType: true } instance }:
+                    AddWrittenTarget(instance, aliases, written, visited);
                     break;
             }
         }

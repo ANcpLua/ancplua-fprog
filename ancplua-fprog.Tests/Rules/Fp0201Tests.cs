@@ -1083,6 +1083,40 @@ public sealed class Fp0201Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0201_PrimaryConstructorParameterWrittenThroughARefLocal_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public sealed class Counter(int {|FP0201:count|}, int {|FP0201:initial|})
+                           {
+                               public int Next(bool first)
+                               {
+                                   ref var alias = ref (first ? ref count : ref initial);
+                                   ref var next = ref alias;
+                                   return ++next;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0201_ReadThroughRefLocalAndWriteToCopy_NoReport()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public sealed class Counter(int count)
+                           {
+                               public int Next()
+                               {
+                                   ref readonly var alias = ref count;
+                                   var copy = alias;
+                                   return ++copy;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0201", source, testContext.CancellationToken);
