@@ -269,7 +269,8 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
 ## Conventions
 
 - One analyzer per rule: `ancplua-fprog/Rules/Fp####<Name>Analyzer.cs`. Shared models live in
-  `ancplua-fprog/Shared/`: `CoreScope`, `Purity`, `UnionModel` (unions, cases, coverage), `Mutators`, `LocalAliases`.
+  `ancplua-fprog/Shared/`: `CoreScope`, `Purity`, `EntryRule`, `UnionModel`, `Mutators`, `LocalAliases`,
+  `MutationRoots` and `PartialUseGuards`.
 - Descriptors come from `FpDescriptors.Create(id, title, messageFormat)`: category `Functional`, severity `Warning`,
   enabled by default. The message tells the reader what to write instead.
 - `ancplua-fprog/AnalyzerReleases.Unshipped.md` lists exactly the IDs of the catalog.

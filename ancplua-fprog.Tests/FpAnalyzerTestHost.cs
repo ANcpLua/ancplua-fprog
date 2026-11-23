@@ -90,6 +90,14 @@ internal static class FpAnalyzerTestHost
         return test.RunAsync(cancellationToken);
     }
 
+    public static Task VerifyAllAsync(string source, CancellationToken cancellationToken,
+        IEnumerable<KeyValuePair<string, string>>? parseFeatures = null)
+    {
+        var test = CreateTest(new RuleTest(AllAnalyzers.Value, parseFeatures), source, []);
+        test.CompilerDiagnostics = CompilerDiagnostics.Warnings;
+        return test.RunAsync(cancellationToken);
+    }
+
     /// <summary>Runs a single analyzer type. Useful while developing one rule.</summary>
     public static Task VerifyAsync<TAnalyzer>(
         string source,
@@ -149,7 +157,8 @@ internal static class FpAnalyzerTestHost
     ///     because <c>CSharpAnalyzerTest</c> runs exactly one analyzer type, and a placeholder analyzer
     ///     declared in this test assembly would trigger RS1036 and RS1038.
     /// </summary>
-    private sealed class RuleTest(ImmutableArray<DiagnosticAnalyzer> analyzers) : AnalyzerTest<DefaultVerifier>
+    private sealed class RuleTest(ImmutableArray<DiagnosticAnalyzer> analyzers,
+        IEnumerable<KeyValuePair<string, string>>? parseFeatures = null) : AnalyzerTest<DefaultVerifier>
     {
         public override string Language => LanguageNames.CSharp;
 
@@ -162,7 +171,8 @@ internal static class FpAnalyzerTestHost
 
         protected override ParseOptions CreateParseOptions()
         {
-            return new CSharpParseOptions(LanguageVersion.Preview, DocumentationMode.Diagnose);
+            var options = new CSharpParseOptions(LanguageVersion.Preview, DocumentationMode.Diagnose);
+            return parseFeatures is null ? options : options.WithFeatures(parseFeatures);
         }
 
         protected override IEnumerable<DiagnosticAnalyzer> GetDiagnosticAnalyzers()

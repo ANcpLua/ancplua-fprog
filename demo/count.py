@@ -21,13 +21,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECTS = ["HappyPath", "UnhappyPath", "KnownGaps"]
 EXPECT = re.compile(r"//\s*expect:\s*([A-Z0-9, ]+?)\s*$")
 LEVELS = {"error": "errors", "warning": "warnings", "note": "infos"}
+BUILD_COUNT = re.compile(r"^(\d+) (Warning|Error)\(s\)$")
 
 
 def build():
     command = ["dotnet", "build", os.path.join(HERE, "Demo.slnx"), "-c", "Release", "--no-incremental", "-v", "quiet", "-nologo"]
     result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.stderr.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        raise SystemExit(f"dotnet build failed (exit {result.returncode}).")
     tail = [line for line in result.stdout.splitlines() if "Warning(s)" in line or "Error(s)" in line]
-    return result.returncode, [line.strip() for line in tail]
+    return [line.strip() for line in tail]
 
 
 def expected(project):
@@ -95,9 +100,7 @@ def main():
         return 0
     build_lines = []
     if "--no-build" not in arguments:
-        code, build_lines = build()
-        if code != 0 and not build_lines:
-            raise SystemExit("dotnet build failed before it could report; run `dotnet build Demo.slnx` to see why.")
+        build_lines = build()
 
     summary = {"build": build_lines, "projects": {}}
     all_as_expected = True
@@ -126,6 +129,17 @@ def main():
             "infos": sum(row["infos"] for row in rows),
             "files": rows,
         }
+    build_mismatches = []
+    for line in build_lines:
+        match = BUILD_COUNT.fullmatch(line)
+        if match:
+            level = match[2].lower() + "s"
+            displayed = sum(project[level] for project in summary["projects"].values())
+            if displayed != int(match[1]):
+                build_mismatches.append(f"Build reports {match[1]} {level}. The demo files account for {displayed}.")
+
+    all_as_expected &= not build_mismatches
+    summary["build_mismatches"] = build_mismatches
     summary["as_expected"] = all_as_expected
 
     if "--json" in arguments:
@@ -133,6 +147,8 @@ def main():
     else:
         for line in build_lines:
             print("dotnet build:", line)
+        for mismatch in build_mismatches:
+            print(mismatch)
         for project, data in summary["projects"].items():
             print(f"\n{project}: {data['errors']} errors, {data['warnings']} warnings, {data['infos']} infos")
             for row in data["files"]:

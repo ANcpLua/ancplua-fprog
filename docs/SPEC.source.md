@@ -1,4 +1,4 @@
-> **Unverified source.** Written by Gemini; its definitions and claims have not been checked. AGENTS.md is binding where the two differ.
+> [AGENTS.md](../AGENTS.md) is the source of truth for the analyzer catalog. This document explains its functional-programming principles.
 
 # Textbook Specification: Functional Programming (FP) Rules for C# Static Analysis
 
