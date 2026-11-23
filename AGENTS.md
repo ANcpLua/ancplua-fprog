@@ -19,37 +19,43 @@ Every rule in the catalog reports each bug of its kind and stays silent on corre
 
 ## Environment
 
-- .NET SDK `11.0.100`, pinned in `global.json`. The analyzed code is C# 15 (`LangVersion preview`) on .NET 11. The
-  rules assume C# 15 and build on its `union` types and `closed` classes.
-- The analyzer targets `netstandard2.0` and references `Microsoft.CodeAnalysis.CSharp` 5.9.0, the compiler version
-  of the pinned SDK (a newer one fails to load, CS9057). Raise the pin when a newer version loads in the pinned
+- .NET SDK `11.0.100`, pinned in `global.json`. The analyzed code is C# 15 on .NET 11. C# 15 is the default
+  language version of `net11.0`; `LangVersion preview` adds only the memory-safety preview. The rules assume C# 15
+  and build on its `union` types and `closed` classes.
+- The analyzer targets `netstandard2.0` and references `Microsoft.CodeAnalysis.CSharp` 5.12.0, the compiler version
+  inside the pinned SDK (a newer one fails to load, CS9057). The test project pins the same version, so tests run
+  on the compiler that runs the analyzers in a build. Raise the pin when a newer version loads in the pinned
   compiler, and prove it with `make check` and the demo.
-- `ITypeSymbol.IsClosed`, `ITypeSymbol.GetClosedDerivedTypeInfo`, `UnionDeclarationSyntax`, `UnsafeExpressionSyntax`
-  and the related `SyntaxKind` members carry `[Experimental("RSEXPERIMENTAL006")]`. The analyzer and test projects set
-  `<NoWarn>$(NoWarn);RSEXPERIMENTAL006</NoWarn>`. `ITypeSymbol.IsUnion` is stable.
+- In Roslyn 5.12.0 the union and closed-class API is stable: `IsUnion`, `UnionCaseTypes`, `IsClosed`,
+  `GetClosedDerivedTypeInfo`, `UnionDeclarationSyntax`, `WithElementSyntax`, `LanguageVersion.CSharp15`. Still
+  `[Experimental("RSEXPERIMENTAL006")]`: `UnsafeExpressionSyntax`, `SyntaxKind.UnsafeExpression`,
+  `SyntaxKind.SafeKeyword`, `ISymbol.RequiresUnsafeContext` and the memory-safety options. A file that uses one of
+  these carries its own `#pragma warning disable RSEXPERIMENTAL006` with the reason; the projects set no
+  suppression.
 - Read the real signature of an API before you rely on it:
-  `dotnet tool run ref assembly ~/.nuget/packages/microsoft.codeanalysis.csharp/5.9.0/lib/netstandard2.0/Microsoft.CodeAnalysis.CSharp.dll --type '<full type name>'`
+  `dotnet tool run ref assembly ~/.nuget/packages/microsoft.codeanalysis.csharp/5.12.0/lib/netstandard2.0/Microsoft.CodeAnalysis.CSharp.dll --type '<full type name>'`
 - Tests run on MSTest with Microsoft.Testing.Platform. Reference assemblies come from
   `Basic.Reference.Assemblies.Net110`; tests work offline.
 
 ### C# 15 facts the rules build on
 
-Observed with SDK 11.0.100 and Roslyn 5.9.0.
+Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0 packages.
 
 | Fact | Consequence |
 | --- | --- |
-| `public union Pet(Cat, Dog, Bird);` declares a struct: `TypeKind.Struct`, `IsUnion` is true, it implements `System.Runtime.CompilerServices.IUnion`, and has one implicit public constructor per case type plus the parameterless one | The case types of a union are the parameter types of its public one-parameter constructors |
+| `public union Pet(Cat, Dog, Bird);` declares a struct: `TypeKind.Struct`, `IsUnion` is true, it implements `System.Runtime.CompilerServices.IUnion`. `ITypeSymbol.UnionCaseTypes` returns its case types with type arguments substituted, also for a hand-written `[Union]` type. It is empty for a closed class and for `Nullable<T>` of a union | Cases of a union come from `UnionCaseTypes`; unwrap `Nullable<T>` first |
 | `default(Pet)` and `new Pet()` hold no case. A switch expression that names every case then throws `SwitchExpressionException`, and the compiler stays silent | FP0404 |
 | A `null` arm on a union struct compiles and makes the switch complete for the empty value | A `null` arm is ordinary handling, FP0501 leaves it alone |
 | `closed` applies to classes and record classes, makes the type abstract (`new` gives CS0144) and keeps its direct subtypes in the same assembly. `GetClosedDerivedTypeInfo(ct).ClosedDerivedTypes` lists them | A closed class is a union; its direct subtypes are its cases |
 | A case may itself be `closed`. A switch expression that names the leaf types is complete for the compiler | Nested unions; a case is finished when it is `sealed` or `closed` (FP0403) |
 | The compiler checks switch **expressions** over unions and closed classes (CS8509, CS8655 for a missing `null`) | Switch statements are FP0502's job; switch expressions are the compiler's |
 | A `_`, `var x` or `object` arm satisfies the compiler and hides every case added later | FP0501 |
-| For `T s where T : Closed`, the compiler asks for a catch-all even when every case is named. `((Closed)s) switch { … }` is complete | Convert the value to the closed type; FP0501 reports the catch-all |
+| For `T s where T : Closed`, a switch expression that names every case is complete for the compiler, as it is for the closed type itself | A type parameter constrained to a closed class is a union value |
 | Pattern operations over a union carry `InputType` = the union and `NarrowedType` = the case. For `x is Cat` the type pattern operation is implicit and its syntax is the whole `is` expression | Take spans from syntax for `is` |
 | `(object)pet` is a boxing conversion whose operand has the union type | Look through casts on the governing expression |
-| `ISwitchExpressionOperation.IsExhaustive` is false for a complete switch over a nested closed hierarchy | Compute coverage from the cases |
-| A pointer declaration and `unsafe(expr)` compile outside an `unsafe` block | FP0107 is syntactic |
+| `ISwitchExpressionOperation.IsExhaustive` is false for a complete switch over a closed hierarchy and over a union struct without a `null` arm | Compute coverage from the cases |
+| With `LangVersion preview`, a pointer declaration and `unsafe(expr)` compile outside an `unsafe` block. With C# 15 they are errors (CS0214, CS8652) | FP0107 is syntactic and covers both |
+| A syntax node action runs once per node, also inside a union body. The driver skips the defining part of a partial constructor | Syntax node actions need no containing-symbol filter; FP0103 walks the semantic model |
 | Extension indexers, collection expression arguments `[with(...), ..]` and labeled `break`/`continue` compile and analyze cleanly | Each has a test that pins this |
 | Runtime async (`<Features>runtime-async=on</Features>`) changes code generation only; syntax and symbols are the same | FP0802 behaves the same with the feature on; one test pins this |
 
@@ -72,7 +78,7 @@ Observed with SDK 11.0.100 and Roslyn 5.9.0.
   (`Fprog.FunctionalCoreAttribute`), in source and in referenced assemblies. It applies to assemblies, classes,
   structs, interfaces, enums and delegates. `FpAnalyzerTestHost` and `demo/Fprog.Annotations.cs` declare it.
 - A **union** is (a) a type whose `ITypeSymbol.IsUnion` is true, or (b) a class or record with the `closed`
-  modifier. Its **cases** are (a) the parameter types of its public one-parameter constructors, (b) its direct
+  modifier. Its **cases** are (a) its `ITypeSymbol.UnionCaseTypes`, (b) its direct
   subtypes. A case that is itself closed stands for its own cases.
 - A **union value** is an expression whose type is a union, `Nullable<T>` of a union, or a type parameter
   constrained to a closed class. A union value that a cast or an implicit conversion turned into a base type,
@@ -209,10 +215,13 @@ pattern, a type pattern), so every report comes with a way out.
 
 ### Reached from a parameter, reached from a field, mutating call (FP0104, FP0105, FP0203)
 
-- A parameter **shares memory with the caller** when its type can be a reference type, is `Span<T>` or
-  `Memory<T>`, or is passed by `ref` or `out`. A by-value parameter's slot belongs to the member. FP0103 covers
-  direct writes to the named `ref` or `out` parameter at its signature.
-- An expression is **reached from** such a parameter when it is the parameter; a field, property, indexer or element
+- A write lands in **memory the caller owns** when the path from the parameter to the written location passes
+  through a reference. That reference is the parameter itself when its type can be a reference type, is `Span<T>`
+  or `Memory<T>`, or is passed by `ref` or `out`; or it is a reference-typed field, property or element read on
+  the way: `orders[0].Lines.Add(x)` for an `ImmutableArray<Order>`, `pair.First.Total = 0` for a tuple or a
+  `record struct`. A write that stays inside a by-value parameter's own storage (`pair.First = other`) belongs to
+  the member. FP0103 covers direct writes to the named `ref` or `out` parameter at its signature.
+- An expression is **reached from** a parameter when it is the parameter; a field, property, indexer or element
   read from something reached; `?:`, `??` or a switch expression with a reached branch; a span or memory made from
   something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; or a local that stands for something
   reached. A local stands for it when each of its assignments is such an expression: declared locals, `ref` locals,
@@ -259,9 +268,11 @@ A Shell value (for FP0802: an Async value) is reported once, where it enters cor
    - an expression of such a type used as the operand of `foreach`, `using` or `await`, as an argument, as the
      target of a delegate call, or as a returned value: that expression.
 
-An expression is **anchored** when it, or a receiver inside it, is already reported by this rule, or when it reads a
-parameter, local, field or property whose type syntax carries a reported name. The target type of a target-typed
-`new` also anchors it when that type is written and reported in core. An anchored expression adds nothing.
+An expression is **anchored** when it, or a receiver inside it, is already reported by this rule; when it reads a
+parameter, local, field or property whose type syntax carries a reported name; or when it reads a local whose
+every assignment is an anchored expression (`var r = new StreamReader(path); r.ReadLine();` reports `StreamReader`
+once). The target type of a target-typed `new` also anchors it when that type is written and reported in core. An
+anchored expression adds nothing.
 Attribute lists, `using` directives, `nameof` operands and documentation comments lie outside the rule.
 
 FP0601 reports `dynamic`, so a call bound at run time is already marked at its source.
@@ -280,7 +291,9 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
   `FP####_<What>_Reports` or `FP####_<What>_NoReport`, run through
   `FpAnalyzerTestHost.VerifyRuleAsync("FP####", source, cancellationToken)` with markup `{|FP####:span|}`. Each
   form in a catalog row has a `_Reports` test, and each exemption and each neighbouring correct form has a
-  `_NoReport` test. Test sources are C# 15: unions are `union` declarations and `closed` records.
+  `_NoReport` test. Test sources are C# 15 and parse with `LanguageVersion.CSharp15`; a test asks for `Preview`
+  only to reach the memory-safety preview. Unions are `union` declarations and `closed` records. Every rule that
+  reads a union or a core type has a test where that type comes from a referenced assembly.
 - Demo: every case is a pair `demo/UnhappyPath/<Rule>_<Case>.cs` (each reported line ends in `// expect: <ID>`) and
   `demo/HappyPath/<Rule>_<Case>.cs` (the same job done correctly, silent under every rule).
   `demo/KnownGaps/` holds real bugs that still pass, each with its reason in `demo/FINDINGS.md`.
