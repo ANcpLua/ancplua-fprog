@@ -132,6 +132,11 @@ internal static class EntryRule
                     break;
                 case CommonForEachStatementSyntax each:
                     ReportValueUse(each.Expression);
+                    var iteration = _model.GetForEachStatementInfo(each);
+                    ReportUnnamedExtension(each.Expression, each.Expression, iteration.GetEnumeratorMethod);
+                    if (each is ForEachVariableStatementSyntax elements && !Matches(iteration.ElementType))
+                        ReportUnnamedExtension(
+                            elements.Variable, each.Expression, Deconstructor(_model.GetDeconstructionInfo(elements)));
                     break;
                 case UsingStatementSyntax usingStatement:
                     if (usingStatement.Expression is { } resource)
@@ -143,6 +148,23 @@ internal static class EntryRule
                     break;
                 case AwaitExpressionSyntax awaitExpression:
                     ReportValueUse(awaitExpression.Expression);
+                    ReportUnnamedExtension(awaitExpression.Expression, awaitExpression.Expression,
+                        _model.GetAwaitExpressionInfo(awaitExpression).GetAwaiterMethod);
+                    break;
+                case AssignmentExpressionSyntax
+                {
+                    RawKind: (int)SyntaxKind.SimpleAssignmentExpression, Left: TupleExpressionSyntax or DeclarationExpressionSyntax
+                } deconstruction:
+                    ReportUnnamedExtension(deconstruction.Right, deconstruction.Right,
+                        Deconstructor(_model.GetDeconstructionInfo(deconstruction)));
+                    break;
+                case RecursivePatternSyntax { PositionalPatternClause: { } positions } pattern:
+                    if (_model.GetOperation(pattern, _cancellationToken) is IRecursivePatternOperation
+                        {
+                            DeconstructSymbol: IMethodSymbol deconstruct
+                        } positional
+                        && !Matches(positional.InputType) && UnnamedExtensionType(deconstruct) is { } extensionType)
+                        Report(positions.GetLocation(), extensionType.Name);
                     break;
             }
 
@@ -224,6 +246,39 @@ internal static class EntryRule
         private bool NameHasWrittenTypeArguments(SimpleNameSyntax name)
         {
             return name is GenericNameSyntax generic && HasWrittenTypeName(generic.TypeArgumentList, _model);
+        }
+
+        // A foreach, an await, a deconstruction or a positional pattern can bind to an extension method without
+        // naming it. Its class enters core code there, unless the value it works on has entered already.
+        private void ReportUnnamedExtension(SyntaxNode at, ExpressionSyntax operand, IMethodSymbol? method)
+        {
+            if (UnnamedExtensionType(method) is { } type && BoundaryType(operand) is null && !IsAnchored(operand))
+                Report(at.GetLocation(), type.Name);
+        }
+
+        private INamedTypeSymbol? UnnamedExtensionType(IMethodSymbol? method)
+        {
+            if ((method?.ReducedFrom ?? method) is not { } declared)
+                return null;
+
+            var type = declared.ContainingType;
+            var extension = declared.IsExtensionMethod || type is { IsExtension: true };
+            if (type is { IsExtension: true })
+                type = type.ContainingType;
+
+            return extension && Matches(type) ? type : null;
+        }
+
+        private static IMethodSymbol? Deconstructor(DeconstructionInfo info)
+        {
+            if (info.Method is { } method)
+                return method;
+
+            foreach (var nested in info.Nested)
+                if (Deconstructor(nested) is { } inner)
+                    return inner;
+
+            return null;
         }
 
         private ITypeSymbol? MemberType(ISymbol? symbol, ExpressionSyntax? receiver)

@@ -715,6 +715,65 @@ public sealed class Fp0502Tests(TestContext testContext)
             : VerifyAsync(source + library);
     }
 
+    // Behind the cast the labels test the Choice wrapper, so neither label is ever taken.
+    [TestMethod]
+    public Task FP0502_CastInFrontOfUnionThatHoldsItsCase_Reports()
+    {
+        return VerifyAsync("""
+                           public union Choice(string, int);
+
+                           public static class Format
+                           {
+                               public static int Tag(Choice choice)
+                               {
+                                   {|FP0502:switch|} ((object)choice)
+                                   {
+                                       case string: return 1;
+                                       case int: return 2;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0502_CastInFrontOfClosedClassWithEveryCase_NoReport()
+    {
+        return VerifyAsync("""
+                           public closed record Figure;
+                           public sealed record Point : Figure;
+                           public sealed record Curve : Figure;
+                           public union Choice(string, int);
+
+                           public static class Format
+                           {
+                               public static int Tag(Figure figure)
+                               {
+                                   switch ((object)figure)
+                                   {
+                                       case Point: return 1;
+                                       case Curve: return 2;
+                                   }
+
+                                   return 0;
+                               }
+
+                               public static int Tag(Choice choice)
+                               {
+                                   switch (choice)
+                                   {
+                                       case string: return 1;
+                                       case int: return 2;
+                                   }
+
+                                   return 0;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", source, testContext.CancellationToken);

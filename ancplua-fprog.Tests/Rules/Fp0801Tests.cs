@@ -441,6 +441,111 @@ public sealed class Fp0801Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0801_ExtensionOfShellClassBoundWithoutItsName_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record ReportInput(string Path);
+
+                           public static class ReportReading
+                           {
+                               public static IEnumerator<string> GetEnumerator(this ReportInput input)
+                                   => System.IO.File.ReadLines(input.Path).GetEnumerator();
+
+                               public static void Deconstruct(this ReportInput input, out string text, out int length)
+                               {
+                                   text = System.IO.File.ReadAllText(input.Path);
+                                   length = text.Length;
+                               }
+
+                               public static System.Runtime.CompilerServices.TaskAwaiter<string> GetAwaiter(this ReportInput input)
+                                   => System.IO.File.ReadAllTextAsync(input.Path).GetAwaiter();
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Reports
+                           {
+                               public static int Count(ReportInput input)
+                               {
+                                   var count = 0;
+                                   foreach (var line in {|FP0801:input|})
+                                       count += line.Length;
+
+                                   return count;
+                               }
+
+                               public static int Split(ReportInput input)
+                               {
+                                   var (text, length) = {|FP0801:input|};
+                                   return text.Length + length;
+                               }
+
+                               public static int Assign(ReportInput input)
+                               {
+                                   string text;
+                                   int length;
+                                   (text, length) = {|FP0801:input|};
+                                   return text.Length + length;
+                               }
+
+                               public static int Match(ReportInput input) => input is {|FP0801:(var text, var length)|} ? length : 0;
+
+                               public static async System.Threading.Tasks.Task<int> Wait(ReportInput input)
+                                   => (await {|FP0801:input|}).Length;
+
+                               public static int Named(ReportInput input)
+                               {
+                                   using var lines = input.{|FP0801:GetEnumerator|}();
+                                   return lines.MoveNext() ? 1 : 0;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_ExtensionOfCoreClassBoundWithoutItsName_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+                           using System.Collections.Immutable;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record Lines(ImmutableArray<string> Items);
+
+                           [Fprog.FunctionalCore]
+                           public static class LineReading
+                           {
+                               public static ImmutableArray<string>.Enumerator GetEnumerator(this Lines lines)
+                                   => lines.Items.GetEnumerator();
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Reports
+                           {
+                               public static int Count(Lines lines)
+                               {
+                                   var count = 0;
+                                   foreach (var line in lines)
+                                       count += line.Length;
+
+                                   return count;
+                               }
+
+                               public static int Pairs(KeyValuePair<string, int> pair, ImmutableDictionary<string, int> all)
+                               {
+                                   var (key, value) = pair;
+                                   foreach (var (name, size) in all)
+                                       value += name.Length + size;
+
+                                   return key.Length + value;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public async Task FP0801_FilterSpanTouchingTheName_Reports()
     {
         var compilation = TestCompilation.Create("""

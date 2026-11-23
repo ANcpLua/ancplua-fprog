@@ -8,6 +8,10 @@ rule catalog in [AGENTS.md](AGENTS.md).
 * A type parameter constrained to a closed class that is also a hand-written union is matched by the subtypes of
   that class. FP0502 asks for those subtypes, and where the compiler cannot list them, FP0601 applies in place of
   FP0501, FP0502 and FP0503.
+* FP0502 reports a `switch` statement on a `union` value behind a cast, as in `switch ((object)choice)`: there
+  the labels test the union itself and no case is handled.
+* FP0801 and FP0802 report an extension method of a Shell or Async class that a `foreach`, an `await`, a
+  deconstruction or a positional pattern binds without naming it.
 * FP0501 allows a pattern that names the only case of a union also when that case is `object` or an interface.
 * FP0104 and FP0105 follow each element of a tuple local on its own around a cycle of assignments. An element
   that is refilled with a fresh value is no longer reported.

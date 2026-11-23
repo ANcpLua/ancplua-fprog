@@ -53,7 +53,7 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 | A `_`, `var x` or `object` arm satisfies the compiler and hides every case added later | FP0501 |
 | For `T s where T : Closed`, a switch expression that names every case is complete for the compiler when the `Closed` case list is complete | A type parameter constrained to a closed class with a complete case list is a union value |
 | Pattern operations over a union carry `InputType` = the union and `NarrowedType` = the case. For `x is Cat` the type pattern operation is implicit and its syntax is the whole `is` expression | Take spans from syntax for `is` |
-| `(object)pet` is a boxing conversion whose operand has the union type | Look through casts on the governing expression |
+| `(object)pet` is a boxing conversion whose operand has the union type. A switch on the boxed value tests the `Pet` wrapper: `case Cat:` is never taken. A closed class behind such a cast is still matched by its subtypes | Look through casts on the governing expression; FP0502 reports every case of a union struct behind one |
 | `ISwitchExpressionOperation.IsExhaustive` is false for a complete switch over a closed hierarchy and over a union struct without a `null` arm | Compute coverage from the cases |
 | With `LangVersion preview`, a pointer declaration and `unsafe(expr)` compile outside an `unsafe` block. With C# 15 they are errors (CS0214, CS8652) | FP0107 is syntactic and covers both |
 | A syntax node action runs once per node, also inside a union body. The driver skips the defining part of a partial constructor | Syntax node actions need no containing-symbol filter; FP0103 walks the semantic model |
@@ -152,7 +152,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0403 | A direct subtype of a closed class carries neither `sealed` nor `closed` | the case's name |
 | FP0404 | Creates the empty value of a union struct whose `Value` is an auto-property. This covers `default`, `default(U)`, and calls to the implicit parameterless constructor with `new U()` or target-typed `new()`, unless an object initializer assigns `Value` | that expression |
 | FP0501 | A `switch` expression arm or `switch` statement label over a union value is a catch-all: `_`, `var x`, `default:`, a property pattern without subpatterns `{ }`, any `not` pattern, or a type pattern (with or without a designation) whose type every case converts to (the union itself, a shared base type or interface, `object`). The input type or a type it always converts to also counts, including for constrained parameters. A pattern naming the only case explicitly is allowed, also when that case is `object` or an interface. Every pattern position whose input is a union value counts, including tuple elements, positional and property subpatterns and the sides of logical patterns. A top-level catch-all over a tuple with a union element also counts | that pattern, or the `default` keyword |
-| FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below) | the `switch` keyword |
+| FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below). Behind a cast to `object` or an interface, no label handles a case of a union that holds its case in `Value` | the `switch` keyword |
 | FP0503 | Picks one case out of a union value outside a `switch`: an `is` expression whose pattern names a type, or an `as` expression | the type or pattern to the right of `is`; the type to the right of `as` |
 | FP0601 | Inspects a runtime type that the static type hides. The inspected value has static type `object`, `dynamic`, a type parameter or `Nullable<T>` of a type parameter. Union values are exempt and keep their identity through upcasts at the head of `switch`, `is` or `as`. Reports `is` and `as` type tests, type patterns in switches, explicit reference downcasts, unboxing casts, casts from `dynamic` to a more specific type, and calls to `Object.GetType()` or its dynamic equivalent. Tests for null alone are allowed. An `object` parameter of a member that overrides or implements a member declared outside core (`Equals(object)`, `CompareTo(object)`) may be inspected within that member. Also reports `typeof(T)` and `typeof(T?)` of a type parameter and every written use of `dynamic` | the `is` or `as` keyword, the switch pattern, the cast or `typeof` expression, the `GetType` name, the `dynamic` identifier |
 | FP0701 | A lambda or local function captures a local or parameter that is assigned anywhere after its declaration, inside or outside the closure (including `++`, `--`, compound assignment, `ref`/`out` argument) | the first use of that variable inside the closure body |
@@ -285,7 +285,10 @@ A Shell value (for FP0802: an Async value) is reported once, where it enters cor
    - an operator or user-defined conversion of such a type: the operator token, the opening parenthesis of an
      explicit cast, or the operand for an implicit conversion;
    - an expression of such a type used as the operand of `foreach`, `using` or `await`, as an argument, as the
-     target of a delegate call, or as a returned value: that expression.
+     target of a delegate call, or as a returned value: that expression;
+   - an extension method of such a type that a `foreach`, an `await`, a deconstruction or a positional pattern
+     binds without naming it (`GetEnumerator`, `GetAwaiter`, `Deconstruct`): the operand, the deconstructed
+     value, or the positional pattern.
 
 An expression is **anchored** when it, or a receiver inside it, is already reported by this rule, or when it
 reads a parameter, local, field or property whose type syntax carries a reported name. A local is also anchored

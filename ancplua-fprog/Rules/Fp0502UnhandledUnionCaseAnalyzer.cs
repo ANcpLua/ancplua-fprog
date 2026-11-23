@@ -15,7 +15,10 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0502",
         "Handle every case of a union in a switch statement",
-        "Add unguarded labels to handle every case of '{0}': {1}");
+        "Add unguarded labels to handle every case of '{0}': {1}{2}");
+
+    private const string BehindCast =
+        "; switch on the union value itself, because behind the cast the labels test the union and not the case it holds";
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 
@@ -34,9 +37,17 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     {
         var statement = (ISwitchOperation)context.Operation;
         var cancellationToken = context.CancellationToken;
-        if (statement.Syntax is not SwitchStatementSyntax syntax
-            || unions.GetUnionOfExpression(statement.Value, cancellationToken) is not { } union)
+        if (statement.Syntax is not SwitchStatementSyntax syntax)
             return;
+
+        // The static type at the head of the switch decides what the labels test. Behind a cast to object or
+        // an interface, a closed class is still matched by its subtypes, but a union that holds its case in
+        // Value is matched as the wrapper it is: no label reaches a case.
+        var switched = unions.GetUnionType(statement.Value.Type, cancellationToken);
+        if ((switched ?? unions.GetUnionOfExpression(statement.Value, cancellationToken)) is not { } union)
+            return;
+
+        var behindCast = switched is null && !union.BySubtypes;
 
         var patterns = ImmutableArray.CreateBuilder<IPatternOperation>();
         foreach (var section in statement.Cases)
@@ -56,11 +67,12 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
         }
 
         var missing = unions.GetCases(union, cancellationToken).Leaves
-            .Where(@case => !patterns.Any(pattern => unions.CoversCase(pattern, @case)))
+            .Where(@case => behindCast || !patterns.Any(pattern => unions.CoversCase(pattern, @case)))
             .Select(@case => @case.Name)
             .ToArray();
         if (missing.Length > 0)
             context.ReportDiagnostic(Diagnostic.Create(
-                Rule, syntax.SwitchKeyword.GetLocation(), union.Type.Name, string.Join(", ", missing)));
+                Rule, syntax.SwitchKeyword.GetLocation(), union.Type.Name, string.Join(", ", missing),
+                behindCast ? BehindCast : ""));
     }
 }
