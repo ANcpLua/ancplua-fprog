@@ -323,7 +323,8 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
   warnings as errors, so it is a minor version below 1.0 and a major version from 1.0 on.
 - A new ID goes into `AnalyzerReleases.Unshipped.md`. At a release its rows move to a `## Release <version>`
   section in `AnalyzerReleases.Shipped.md`.
-- `tools/feed` carries the RefTrace package for `make verify-dll` until RefTrace is on nuget.org.
+- `make verify-dll` runs RefTrace, the local tool `ref`. `dotnet-tools.json` pins its version, and `make tools`
+  restores it from nuget.org, the only package source in `nuget.config`.
 
 ## Boundaries
 
