@@ -14,6 +14,78 @@ public sealed class Fp0404Tests(TestContext testContext)
                                  public union Pet(Cat, Dog);
                                  """;
 
+    private const string HandWrittenUnions = """
+
+                                              namespace Custom
+                                              {
+                                                  using System.Runtime.CompilerServices;
+
+                                                  [Union]
+                                                  public readonly struct BoxedAmount : IUnion
+                                                  {
+                                                      public BoxedAmount(int number) => Value = number;
+                                                      public BoxedAmount(string text) => Value = text;
+                                                      public object? Value { get; }
+                                                  }
+
+                                                  [Union]
+                                                  public readonly struct Amount : IUnion
+                                                  {
+                                                      private readonly int _number;
+                                                      private readonly string? _text;
+
+                                                      public Amount(int number) => _number = number;
+                                                      public Amount(string text) => _text = text;
+                                                      public object Value => _text is null ? (object)_number : _text;
+                                                  }
+
+                                                  [Union]
+                                                  public struct FieldBackedAmount : IUnion
+                                                  {
+                                                      public FieldBackedAmount(int number) => Value = number;
+                                                      public FieldBackedAmount(string text) => Value = text;
+                                                      public object? Value { get => field ?? 0; private set; }
+                                                  }
+                                              }
+                                              """;
+
+    private const string AutoValueUses = """
+                                         #nullable enable
+                                         using Custom;
+
+                                         public static class Amounts
+                                         {
+                                             public static BoxedAmount ByDefaultLiteral() => {|FP0404:default|};
+                                             public static BoxedAmount ByDefaultExpression() => {|FP0404:default(BoxedAmount)|};
+                                             public static BoxedAmount ByConstructor() => {|FP0404:new BoxedAmount()|};
+                                             public static BoxedAmount ByTargetTypedConstructor() => {|FP0404:new()|};
+                                         }
+                                         """;
+
+    private const string ComputedValueUses = """
+                                              #nullable enable
+                                              using Custom;
+
+                                              public static class Amounts
+                                              {
+                                                  public static Amount ByDefaultLiteral() => default;
+                                                  public static Amount ByDefaultExpression() => default(Amount);
+                                                  public static Amount ByConstructor() => new Amount();
+                                                  public static Amount ByTargetTypedConstructor() => new();
+
+                                                  public static int Evaluate(Amount amount) => amount switch
+                                                  {
+                                                      int number => number,
+                                                      string text => text.Length
+                                                  };
+
+                                                  public static FieldBackedAmount BackedByDefaultLiteral() => default;
+                                                  public static FieldBackedAmount BackedByDefaultExpression() => default(FieldBackedAmount);
+                                                  public static FieldBackedAmount BackedByConstructor() => new FieldBackedAmount();
+                                                  public static FieldBackedAmount BackedByTargetTypedConstructor() => new();
+                                              }
+                                              """;
+
     [TestMethod]
     public Task FP0404_DefaultLiteral_Reports()
     {
@@ -86,9 +158,11 @@ public sealed class Fp0404Tests(TestContext testContext)
     }
 
     [TestMethod]
-    public Task FP0404_EmptyReferencedUnionStruct_Reports()
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0404_EmptyReferencedUnionStruct_Reports(bool referenceAssembly)
     {
-        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0404", """
+        return VerifyFromMetadataAsync("""
             using Domain;
 
             public static class Shelter
@@ -98,7 +172,35 @@ public sealed class Fp0404Tests(TestContext testContext)
                 public static Pet ByConstructor() => {|FP0404:new Pet()|};
                 public static Pet ByTargetTypedConstructor() => {|FP0404:new()|};
             }
-            """, ReferencedAssemblySources.Unions, testContext.CancellationToken);
+            """, ReferencedAssemblySources.Unions, referenceAssembly);
+    }
+
+    [TestMethod]
+    public Task FP0404_HandWrittenAutoValueProperty_Reports()
+    {
+        return VerifyAsync(AutoValueUses + HandWrittenUnions);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0404_ReferencedHandWrittenAutoValueProperty_Reports(bool referenceAssembly)
+    {
+        return VerifyFromMetadataAsync(AutoValueUses, HandWrittenUnions, referenceAssembly);
+    }
+
+    [TestMethod]
+    public Task FP0404_HandWrittenComputedValueProperty_NoReport()
+    {
+        return VerifyAsync(ComputedValueUses + HandWrittenUnions);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0404_ReferencedHandWrittenComputedValueProperty_NoReport(bool referenceAssembly)
+    {
+        return VerifyFromMetadataAsync(ComputedValueUses, HandWrittenUnions, referenceAssembly);
     }
 
     [TestMethod]
@@ -128,5 +230,14 @@ public sealed class Fp0404Tests(TestContext testContext)
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0404", source, testContext.CancellationToken);
+    }
+
+    private Task VerifyFromMetadataAsync(string source, string librarySource, bool referenceAssembly)
+    {
+        return referenceAssembly
+            ? FpAnalyzerTestHost.VerifyRuleWithReferenceAssemblyAsync(
+                "FP0404", source, librarySource, testContext.CancellationToken)
+            : FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync(
+                "FP0404", source, librarySource, testContext.CancellationToken);
     }
 }

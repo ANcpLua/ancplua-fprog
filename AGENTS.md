@@ -44,13 +44,14 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 | Fact | Consequence |
 | --- | --- |
 | `public union Pet(Cat, Dog, Bird);` declares a struct: `TypeKind.Struct`, `IsUnion` is true, it implements `System.Runtime.CompilerServices.IUnion`. `ITypeSymbol.UnionCaseTypes` returns its case types with type arguments substituted, also for a hand-written `[Union]` type. It is empty for a closed class and for `Nullable<T>` of a union | Cases of a union come from `UnionCaseTypes`; unwrap `Nullable<T>` first |
-| `default(Pet)` and `new Pet()` hold no case. A switch expression that names every case then throws `SwitchExpressionException`, and the compiler stays silent | FP0404 |
+| `default(Pet)` and `new Pet()`, including their target-typed forms, hold no case because `Pet.Value` is an `object?` auto-property. A switch expression that names every case then throws `SwitchExpressionException`, and the compiler stays silent. A hand-written `[Union]` struct can compute `Value` from its own fields | FP0404 checks zero initialization of unions with a `Value` auto-property |
 | A `null` arm on a union struct compiles and makes the switch complete for the empty value | A `null` arm is ordinary handling, FP0501 leaves it alone |
-| `closed` applies to classes and record classes, makes the type abstract (`new` gives CS0144) and keeps its direct subtypes in the same assembly (CS9382 for a direct subtype elsewhere). `GetClosedDerivedTypeInfo(ct).ClosedDerivedTypes` lists them | A closed class is a union; its direct subtypes are its cases |
+| `closed` applies to classes and record classes, makes the type abstract (`new` gives CS0144) and keeps its direct subtypes in the same assembly (CS9382 for a direct subtype elsewhere). `GetClosedDerivedTypeInfo(ct).ClosedDerivedTypes` lists them | A closed class is a union where the compiler can list all its cases |
+| For `closed class Root<T>` with `Marked<T> : Root<T>` and `Extra<T> : Root<List<T>>`, `GetClosedDerivedTypeInfo(ct)` at `Root<T>` gives `IsComplete` false and lists only `Marked<T>`. It is complete at `Root<int>` with `Marked<int>` and at `Root<List<int>>` with `Marked<List<int>>` and `Extra<int>` | A switch expression over `Root<T>` that names only `Marked<T>` gets CS8509. The compiler requires a catch-all when the list is incomplete |
 | A case may itself be `closed`. A switch expression that names the leaf types is complete for the compiler | Nested unions; a case is finished when it is `sealed` or `closed` (FP0403) |
 | The compiler checks switch **expressions** over unions and closed classes (CS8509, CS8655 for a missing `null`) | Switch statements are FP0502's job; switch expressions are the compiler's |
 | A `_`, `var x` or `object` arm satisfies the compiler and hides every case added later | FP0501 |
-| For `T s where T : Closed`, a switch expression that names every case is complete for the compiler, as it is for the closed type itself | A type parameter constrained to a closed class is a union value |
+| For `T s where T : Closed`, a switch expression that names every case is complete for the compiler when the `Closed` case list is complete | A type parameter constrained to a closed class with a complete case list is a union value |
 | Pattern operations over a union carry `InputType` = the union and `NarrowedType` = the case. For `x is Cat` the type pattern operation is implicit and its syntax is the whole `is` expression | Take spans from syntax for `is` |
 | `(object)pet` is a boxing conversion whose operand has the union type | Look through casts on the governing expression |
 | `ISwitchExpressionOperation.IsExhaustive` is false for a complete switch over a closed hierarchy and over a union struct without a `null` arm | Compute coverage from the cases |
@@ -79,14 +80,16 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
   (`Fprog.FunctionalCoreAttribute`), in source and in referenced assemblies. It applies to assemblies, classes,
   structs, interfaces, enums and delegates. `FpAnalyzerTestHost` and `demo/Fprog.Annotations.cs` declare it.
 - A **union** is (a) a type whose `ITypeSymbol.IsUnion` is true, or (b) a class or record with the `closed`
-  modifier. Its **cases** are (a) its `ITypeSymbol.UnionCaseTypes`, (b) its direct
-  subtypes. A case that is itself closed stands for its own cases.
+  modifier at a constructed type where `GetClosedDerivedTypeInfo(ct).IsComplete` is true. Its **cases** are
+  (a) its `ITypeSymbol.UnionCaseTypes`, (b) its direct subtypes. A closed case with a complete case list stands
+  for its own cases.
 - A **union value** is an expression whose type is a union, `Nullable<T>` of a union, or a type parameter
-  constrained to a closed class. A union value that a cast or an implicit conversion turned into a base type,
-  an interface or `object` at the head of a `switch`, `is` or `as` still counts as that union value.
+  constrained to a closed class that counts as a union. A union value that a cast or an implicit conversion turned
+  into a base type, an interface or `object` at the head of a `switch`, `is` or `as` still counts as that union value.
 - Where the rules apply:
   - inside core: FP0101 to FP0303, FP0401, FP0601 to FP0802;
-  - on every union and union value in the compilation: FP0403, FP0404, FP0501, FP0502, FP0503;
+  - on direct subtypes of every closed class: FP0403;
+  - on every union and union value in the compilation: FP0404, FP0501, FP0502, FP0503;
   - on types outside core: FP0803.
 - Only members declared in source count. Compiler-synthesized members (record `Deconstruct`, copy constructors,
   `EqualityContract`, backing fields) are exempt.
@@ -144,7 +147,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0303 | (a) A method, local function, lambda, getter or operator returns `null` or `default` through a result type that can hold null, including async results, yielded values, pointers and unconstrained type parameters. (b) A method, local function or operator writes `T?` anywhere in its return type, including tuple elements and type arguments. (c) The null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
 | FP0401 | A class or record in core is open: it carries neither `sealed`, `static` nor `closed`. Cases of a closed class belong to FP0403 | the type's name |
 | FP0403 | A direct subtype of a closed class carries neither `sealed` nor `closed` | the case's name |
-| FP0404 | Creates an empty value of a union struct: `default`, `default(U)` or `new U()` | that expression |
+| FP0404 | Creates the empty value of a union struct whose `Value` is an auto-property. This covers `default`, `default(U)`, and calls to the implicit parameterless constructor with `new U()` or target-typed `new()` | that expression |
 | FP0501 | A `switch` expression arm or `switch` statement label over a union value is a catch-all: `_`, `var x`, `default:`, a property pattern without subpatterns `{ }`, any `not` pattern, or a type pattern (with or without a designation) whose type every case converts to (the union itself, a shared base type or interface, `object`). The input type or a type it always converts to also counts, including for constrained parameters. A pattern naming the only case explicitly is allowed. Every pattern position whose input is a union value counts, including tuple elements, positional and property subpatterns and the sides of logical patterns. A top-level catch-all over a tuple with a union element also counts | that pattern, or the `default` keyword |
 | FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below) | the `switch` keyword |
 | FP0503 | Picks one case out of a union value outside a `switch`: an `is` expression whose pattern names a type, or an `as` expression | the type or pattern to the right of `is`; the type to the right of `as` |
@@ -249,10 +252,11 @@ pattern, a type pattern), so every report comes with a way out.
 
 ### Handling a case (FP0502)
 
-A label handles a case when it has no `when` clause and its pattern accepts every value of the case: a type or
-declaration pattern that names the case or one of its base types or interfaces; a recursive pattern of such a type
-whose subpatterns are all `_` or `var`; an `or` pattern with such a side. A closed case is handled when each of its
-own cases is handled. FP0502 speaks when the statement has no catch-all; a statement with one gets FP0501 there.
+A label handles a case when it has no `when` clause and its pattern accepts every value of the case. This includes
+a type or declaration pattern that names the case or one of its base types or interfaces, a recursive pattern of
+such a type whose subpatterns are all `_` or `var`, and an `or` pattern with such a side. A closed case with a
+complete case list is handled when each of its own cases is handled. FP0502 speaks when the statement has no
+catch-all. A statement with a catch-all gets FP0501 there.
 
 ### Entry rule (FP0801, FP0802)
 
@@ -332,8 +336,12 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
 
 - Delegates, interface calls and type parameters hide their target: `Func<…>` values, `IEnumerable<T>`
   implementations and generic arguments are trusted.
-- FP0404 looks at expressions that name the union. Array elements and unassigned fields of a union struct hold the
-  empty value too.
+- FP0404 looks at expressions that name a union struct or receive it as their target type. Array elements and
+  unassigned fields also hold the empty value when the union's `Value` is an auto-property. A hand-written union
+  struct with a computed `Value` defines its own default.
+- For a closed type with an incomplete case list, the compiler requires a catch-all in a switch expression.
+  FP0501, FP0502 and FP0503 leave values of that type to the compiler. FP0601 applies the ordinary type-parameter
+  checks to a type parameter constrained to it.
 - FP0302 guards are syntactic. FP0303 (b) relies on nullable annotations.
 - A record's copy constructor is protected by the language (CS8878), so a record union can be copied by a subtype
   that FP0403 reports in its own project.

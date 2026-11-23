@@ -131,13 +131,15 @@ All rules have category `Functional` and severity `Warning`.
 | FP0801 | a shell type: I/O, network, processes, threads, third-party libraries, your types outside the core; `lock` | take the result as a parameter, or return a value that describes the effect |
 | FP0802 | an asynchronous type or an `async` lambda | await in the shell and pass the plain result |
 
-| ID | On every union, the rule reports | Write instead |
+| ID | On unions and closed classes, the rule reports | Write instead |
 | --- | --- | --- |
 | FP0403 | a direct subtype of a closed class that is neither `sealed` nor `closed` | add the modifier |
-| FP0404 | an empty union value: `default` or `new U()` | create the union from one of its cases |
+| FP0404 | zero initialization of a union struct whose `Value` is an auto-property | create the union from one of its cases |
 | FP0501 | a catch-all in a `switch`: `_`, `var x`, `default:`, `{ }`, a `not` pattern, the base type | one arm or label per case |
 | FP0502 | a `switch` statement that leaves a case unhandled | add the missing labels |
 | FP0503 | `is` or `as` that picks one case | a `switch` that names every case |
+
+FP0501, FP0502 and FP0503 apply to a closed class when the compiler can list every case for the type being matched.
 
 | ID | Outside the core, the rule reports | Write instead |
 | --- | --- | --- |

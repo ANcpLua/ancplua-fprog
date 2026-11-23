@@ -10,37 +10,37 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Shared;
 
 /// <summary>Compiler-native unions, their values and pattern coverage.</summary>
-internal static class UnionModel
+internal sealed class UnionModel(Compilation compilation)
 {
-    public static bool IsUnion(ITypeSymbol? type)
-    {
-        return type is { IsUnion: true } or { TypeKind: TypeKind.Class, IsClosed: true };
-    }
+    private readonly Dictionary<INamedTypeSymbol, CaseSet> _casesByType = new(SymbolEqualityComparer.Default);
 
-    public static INamedTypeSymbol? GetUnionType(ITypeSymbol? type)
+    public INamedTypeSymbol? GetUnionType(ITypeSymbol? type, CancellationToken cancellationToken)
     {
         return type switch
         {
-            INamedTypeSymbol named when IsUnion(named) => named,
+            INamedTypeSymbol { IsUnion: true } union => union,
+            INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
+                when GetCases(closed, cancellationToken).IsComplete => closed,
             INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
-                => GetUnionType(nullable.TypeArguments[0]),
-            ITypeParameterSymbol parameter => GetClosedConstraint(parameter, null),
+                => GetUnionType(nullable.TypeArguments[0], cancellationToken),
+            ITypeParameterSymbol parameter => GetClosedConstraint(parameter, null, cancellationToken),
             _ => null
         };
     }
 
-    private static INamedTypeSymbol? GetClosedConstraint(
-        ITypeParameterSymbol parameter, HashSet<ITypeParameterSymbol>? visited)
+    private INamedTypeSymbol? GetClosedConstraint(
+        ITypeParameterSymbol parameter, HashSet<ITypeParameterSymbol>? visited, CancellationToken cancellationToken)
     {
         foreach (var constraint in parameter.ConstraintTypes)
         {
-            if (constraint is INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed)
+            if (constraint is INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
+                && GetCases(closed, cancellationToken).IsComplete)
                 return closed;
 
             if (constraint is ITypeParameterSymbol other)
             {
                 visited ??= new HashSet<ITypeParameterSymbol>(SymbolEqualityComparer.Default) { parameter };
-                if (visited.Add(other) && GetClosedConstraint(other, visited) is { } union)
+                if (visited.Add(other) && GetClosedConstraint(other, visited, cancellationToken) is { } union)
                     return union;
             }
         }
@@ -48,110 +48,133 @@ internal static class UnionModel
         return null;
     }
 
-    public static INamedTypeSymbol? GetUnionOfExpression(IOperation value, Compilation compilation)
+    public INamedTypeSymbol? GetUnionOfExpression(IOperation value, CancellationToken cancellationToken)
     {
-        var union = GetUnionType(value.Type);
-        while (GetUpcastOperand(value, compilation) is { } operand)
+        var union = GetUnionType(value.Type, cancellationToken);
+        while (GetUpcastOperand(value) is { } operand)
         {
             value = operand;
-            union = GetUnionType(value.Type) ?? union;
+            union = GetUnionType(value.Type, cancellationToken) ?? union;
         }
 
         return union;
     }
 
     /// <summary>Finds the original value through parentheses, upcasts and boxing.</summary>
-    public static IOperation ValueBeforeUpcast(IOperation value, Compilation compilation)
+    public IOperation ValueBeforeUpcast(IOperation value)
     {
-        while (GetUpcastOperand(value, compilation) is { } operand)
+        while (GetUpcastOperand(value) is { } operand)
             value = operand;
 
         return value;
     }
 
-    private static IOperation? GetUpcastOperand(IOperation value, Compilation compilation)
+    private IOperation? GetUpcastOperand(IOperation value)
     {
         return value switch
         {
             IParenthesizedOperation parenthesized => parenthesized.Operand,
             IConversionOperation { Type: { } target, Operand.Type: { } source } conversion
-                when AlwaysConvertsTo(compilation, source, target) => conversion.Operand,
+                when AlwaysConvertsTo(source, target) => conversion.Operand,
             _ => null
         };
     }
 
-    public static ImmutableArray<ITypeSymbol> GetCases(INamedTypeSymbol union, CancellationToken cancellationToken)
+    public CaseSet GetCases(INamedTypeSymbol union, CancellationToken cancellationToken)
     {
+        lock (_casesByType)
+            return GetOrBuildCases(union, cancellationToken);
+    }
+
+    private CaseSet GetOrBuildCases(INamedTypeSymbol union, CancellationToken cancellationToken)
+    {
+        if (_casesByType.TryGetValue(union, out var known))
+            return known;
+
+        ImmutableArray<ITypeSymbol> direct;
+        var isComplete = true;
         if (union.IsUnion)
-            return union.UnionCaseTypes;
-
-        return union.IsClosed
-            ? [.. union.GetClosedDerivedTypeInfo(cancellationToken).ClosedDerivedTypes]
-            : [];
-    }
-
-    public static IEnumerable<ITypeSymbol> GetLeafCases(INamedTypeSymbol union, CancellationToken cancellationToken)
-    {
-        foreach (var @case in GetCases(union, cancellationToken))
         {
-            if (@case is INamedTypeSymbol { IsClosed: true } closed)
-            {
-                foreach (var leaf in GetLeafCases(closed, cancellationToken))
-                    yield return leaf;
-            }
-            else
-            {
-                yield return @case;
-            }
+            direct = union.UnionCaseTypes;
         }
+        else
+        {
+            var derived = union.GetClosedDerivedTypeInfo(cancellationToken);
+            direct = [.. derived.ClosedDerivedTypes];
+            isComplete = derived.IsComplete;
+        }
+
+        var leaves = isComplete ? ExpandClosedCases(direct, cancellationToken) : [];
+        var cases = new CaseSet(direct, leaves, isComplete);
+        _casesByType.Add(union, cases);
+        return cases;
     }
 
-    public static bool AlwaysConvertsTo(Compilation compilation, ITypeSymbol source, ITypeSymbol? target)
+    private ImmutableArray<ITypeSymbol> ExpandClosedCases(
+        ImmutableArray<ITypeSymbol> direct, CancellationToken cancellationToken)
+    {
+        if (!direct.Any(static @case => @case.IsClosed))
+            return direct;
+
+        var leaves = ImmutableArray.CreateBuilder<ITypeSymbol>();
+        foreach (var @case in direct)
+        {
+            if (@case is INamedTypeSymbol { IsClosed: true } closed
+                && GetOrBuildCases(closed, cancellationToken) is { IsComplete: true } nested)
+                leaves.AddRange(nested.Leaves);
+            else
+                leaves.Add(@case);
+        }
+
+        return leaves.ToImmutable();
+    }
+
+    public bool AlwaysConvertsTo(ITypeSymbol source, ITypeSymbol? target)
     {
         return target is not null && compilation.ClassifyConversion(source, target) is
             { IsIdentity: true } or { IsImplicit: true, IsReference: true } or { IsImplicit: true, IsBoxing: true };
     }
 
-    public static INamedTypeSymbol? GetTupleWithUnionElement(IOperation value, Compilation compilation)
+    public INamedTypeSymbol? GetTupleWithUnionElement(IOperation value, CancellationToken cancellationToken)
     {
-        var original = ValueBeforeUpcast(value, compilation);
+        var original = ValueBeforeUpcast(value);
         if (original.Type is not INamedTypeSymbol { IsTupleType: true } tuple)
             return null;
 
-        return tuple.TupleElements.Any(static element => GetUnionType(element.Type) is not null)
+        return tuple.TupleElements.Any(element => GetUnionType(element.Type, cancellationToken) is not null)
                || original is ITupleOperation tupleValue
-               && tupleValue.Elements.Any(element => GetUnionOfExpression(element, compilation) is not null)
+               && tupleValue.Elements.Any(element => GetUnionOfExpression(element, cancellationToken) is not null)
             ? tuple
             : null;
     }
 
-    public static IEnumerable<SyntaxNode> GetCatchAlls(
-        Compilation compilation, IOperation value, IPatternOperation pattern, CancellationToken cancellationToken)
+    public IEnumerable<SyntaxNode> GetCatchAlls(
+        IOperation value, IPatternOperation pattern, CancellationToken cancellationToken)
     {
-        return GetCatchAlls(compilation, pattern, value, GetTupleWithUnionElement(value, compilation), cancellationToken);
+        return GetCatchAlls(pattern, value, GetTupleWithUnionElement(value, cancellationToken), cancellationToken);
     }
 
-    private static IEnumerable<SyntaxNode> GetCatchAlls(Compilation compilation, IPatternOperation pattern,
+    private IEnumerable<SyntaxNode> GetCatchAlls(IPatternOperation pattern,
         IOperation? input, ITypeSymbol? tuple, CancellationToken cancellationToken)
     {
-        var union = (input is not null ? GetUnionOfExpression(input, compilation) : null)
-                    ?? GetUnionType(pattern.InputType);
+        var union = (input is not null ? GetUnionOfExpression(input, cancellationToken) : null)
+                    ?? GetUnionType(pattern.InputType, cancellationToken);
         if (union is not null || tuple is not null)
         {
             var syntax = GetPatternSyntax(pattern);
-            if (syntax is VarPatternSyntax || IsCatchAll(compilation, pattern, union, tuple, cancellationToken))
+            if (syntax is VarPatternSyntax || IsCatchAll(pattern, union, tuple, cancellationToken))
                 yield return syntax;
         }
 
         var tupleInput = pattern is IRecursivePatternOperation && input is not null
-            ? ValueBeforeUpcast(input, compilation) as ITupleOperation
+            ? ValueBeforeUpcast(input) as ITupleOperation
             : null;
         var position = 0;
         foreach (var child in pattern.ChildOperations)
         {
             if (child is IPropertySubpatternOperation property)
             {
-                foreach (var catchAll in GetCatchAlls(compilation, property.Pattern, null, null, cancellationToken))
+                foreach (var catchAll in GetCatchAlls(property.Pattern, null, null, cancellationToken))
                     yield return catchAll;
             }
             else if (child is IPatternOperation subpattern)
@@ -164,7 +187,7 @@ internal static class UnionModel
                     : tupleInput is not null && position < tupleInput.Elements.Length
                         ? tupleInput.Elements[position]
                         : null;
-                foreach (var catchAll in GetCatchAlls(compilation, subpattern, subpatternInput,
+                foreach (var catchAll in GetCatchAlls(subpattern, subpatternInput,
                              sameInput ? tuple : null, cancellationToken))
                     yield return catchAll;
                 position++;
@@ -172,7 +195,7 @@ internal static class UnionModel
         }
     }
 
-    private static bool IsCatchAll(Compilation compilation, IPatternOperation pattern, INamedTypeSymbol? union,
+    private bool IsCatchAll(IPatternOperation pattern, INamedTypeSymbol? union,
         ITypeSymbol? tuple, CancellationToken cancellationToken)
     {
         switch (pattern)
@@ -199,20 +222,20 @@ internal static class UnionModel
             return false;
 
         if (union is null)
-            return tuple is not null && AlwaysConvertsTo(compilation, tuple, tested);
+            return tuple is not null && AlwaysConvertsTo(tuple, tested);
 
-        if (AlwaysConvertsTo(compilation, union, tested)
-            || AlwaysConvertsTo(compilation, pattern.InputType, tested))
+        if (AlwaysConvertsTo(union, tested)
+            || AlwaysConvertsTo(pattern.InputType, tested))
             return true;
 
         var cases = GetCases(union, cancellationToken);
-        if (cases.Length == 1 && SymbolEqualityComparer.Default.Equals(cases[0], tested))
+        if (cases.Direct.Length == 1 && SymbolEqualityComparer.Default.Equals(cases.Direct[0], tested))
             return false;
 
-        var leaves = GetLeafCases(union, cancellationToken).ToArray();
+        var leaves = cases.Leaves;
         return leaves.Length > 0
                && !(leaves.Length == 1 && SymbolEqualityComparer.Default.Equals(leaves[0], tested))
-               && leaves.All(@case => AlwaysConvertsTo(compilation, @case, tested));
+               && leaves.All(@case => AlwaysConvertsTo(@case, tested));
     }
 
     private static SyntaxNode GetPatternSyntax(IPatternOperation pattern)
@@ -235,20 +258,20 @@ internal static class UnionModel
         };
     }
 
-    public static bool CoversCase(Compilation compilation, IPatternOperation pattern, ITypeSymbol caseType)
+    public bool CoversCase(IPatternOperation pattern, ITypeSymbol caseType)
     {
         return pattern switch
         {
-            ITypePatternOperation type => AlwaysConvertsTo(compilation, caseType, type.MatchedType),
+            ITypePatternOperation type => AlwaysConvertsTo(caseType, type.MatchedType),
             IDeclarationPatternOperation { MatchedType: { } type }
-                => AlwaysConvertsTo(compilation, caseType, type),
+                => AlwaysConvertsTo(caseType, type),
             IRecursivePatternOperation recursive
-                => AlwaysConvertsTo(compilation, caseType, recursive.MatchedType)
+                => AlwaysConvertsTo(caseType, recursive.MatchedType)
                    && recursive.DeconstructionSubpatterns.All(IsUnconditionalSubpattern)
                    && recursive.PropertySubpatterns.All(static property => IsUnconditionalSubpattern(property.Pattern)),
             IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.Or } either
-                => CoversCase(compilation, either.LeftPattern, caseType)
-                   || CoversCase(compilation, either.RightPattern, caseType),
+                => CoversCase(either.LeftPattern, caseType)
+                   || CoversCase(either.RightPattern, caseType),
             _ => false
         };
     }
@@ -256,5 +279,12 @@ internal static class UnionModel
     private static bool IsUnconditionalSubpattern(IPatternOperation pattern)
     {
         return pattern is IDiscardPatternOperation or IDeclarationPatternOperation { MatchesNull: true };
+    }
+
+    public sealed class CaseSet(ImmutableArray<ITypeSymbol> direct, ImmutableArray<ITypeSymbol> leaves, bool isComplete)
+    {
+        public ImmutableArray<ITypeSymbol> Direct { get; } = direct;
+        public ImmutableArray<ITypeSymbol> Leaves { get; } = leaves;
+        public bool IsComplete { get; } = isComplete;
     }
 }

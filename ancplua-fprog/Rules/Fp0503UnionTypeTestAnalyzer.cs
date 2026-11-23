@@ -24,10 +24,15 @@ public sealed class Fp0503UnionTypeTestAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterOperationAction(Analyze, OperationKind.IsType, OperationKind.IsPattern, OperationKind.Conversion);
+        context.RegisterCompilationStartAction(start =>
+        {
+            var unions = new UnionModel(start.Compilation);
+            start.RegisterOperationAction(operation => Analyze(operation, unions),
+                OperationKind.IsType, OperationKind.IsPattern, OperationKind.Conversion);
+        });
     }
 
-    private static void Analyze(OperationAnalysisContext context)
+    private static void Analyze(OperationAnalysisContext context, UnionModel unions)
     {
         var operation = context.Operation;
         var value = operation switch
@@ -38,7 +43,7 @@ public sealed class Fp0503UnionTypeTestAnalyzer : DiagnosticAnalyzer
                 when syntax.IsKind(SyntaxKind.AsExpression) => conversion.Operand,
             _ => null
         };
-        if (value is null || UnionModel.GetUnionOfExpression(value, context.Compilation) is not { } union)
+        if (value is null || unions.GetUnionOfExpression(value, context.CancellationToken) is not { } union)
             return;
 
         // An is-expression without designation can have an implicit pattern spanning the whole expression.

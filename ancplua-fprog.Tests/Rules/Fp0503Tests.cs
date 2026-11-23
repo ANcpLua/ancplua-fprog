@@ -111,6 +111,44 @@ public sealed class Fp0503Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0503_IncompleteGenericClosedHierarchy_NoReport(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            #nullable enable
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool IsMarked<T>(Root<T> value) => value is Marked<T>;
+                public static IMarked? AsMarked<T, TValue>(TValue value) where TValue : Root<T>
+                    => (object)value as IMarked;
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0503_CompleteGenericClosedHierarchies_Reports(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            #nullable enable
+            using System.Collections.Generic;
+            using Domain;
+
+            public static class Checks
+            {
+                public static bool IsMarked(Root<int> value) => value is {|FP0503:Marked<int>|};
+                public static bool IsExtra(Root<List<int>> value) => value is {|FP0503:Extra<int>|};
+                public static Ok<T>? AsOk<T, TValue>(TValue value) where TValue : Result<T>
+                    => (object)value as {|FP0503:Ok<T>|};
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
     public Task FP0503_GeneratedCode_NoReport()
     {
         return VerifyAsync("""
@@ -125,5 +163,13 @@ public sealed class Fp0503Tests(TestContext testContext)
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0503", source, testContext.CancellationToken);
+    }
+
+    private Task VerifyGenericClosedHierarchiesAsync(string source, bool fromReference)
+    {
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync(
+                "FP0503", source, ReferencedAssemblySources.GenericClosedHierarchies, testContext.CancellationToken)
+            : VerifyAsync(source + "\n" + ReferencedAssemblySources.GenericClosedHierarchies);
     }
 }

@@ -23,16 +23,19 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterOperationAction(Analyze, OperationKind.Switch);
+        context.RegisterCompilationStartAction(start =>
+        {
+            var unions = new UnionModel(start.Compilation);
+            start.RegisterOperationAction(operation => Analyze(operation, unions), OperationKind.Switch);
+        });
     }
 
-    private static void Analyze(OperationAnalysisContext context)
+    private static void Analyze(OperationAnalysisContext context, UnionModel unions)
     {
         var statement = (ISwitchOperation)context.Operation;
-        var compilation = context.Compilation;
         var cancellationToken = context.CancellationToken;
         if (statement.Syntax is not SwitchStatementSyntax syntax
-            || UnionModel.GetUnionOfExpression(statement.Value, compilation) is not { } union)
+            || unions.GetUnionOfExpression(statement.Value, cancellationToken) is not { } union)
             return;
 
         var patterns = ImmutableArray.CreateBuilder<IPatternOperation>();
@@ -45,15 +48,15 @@ public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer
             if (clause is not IPatternCaseClauseOperation label)
                 continue;
 
-            if (UnionModel.GetCatchAlls(compilation, statement.Value, label.Pattern, cancellationToken).Any())
+            if (unions.GetCatchAlls(statement.Value, label.Pattern, cancellationToken).Any())
                 return;
 
             if (label.Guard is null)
                 patterns.Add(label.Pattern);
         }
 
-        var missing = UnionModel.GetLeafCases(union, cancellationToken)
-            .Where(@case => !patterns.Any(pattern => UnionModel.CoversCase(compilation, pattern, @case)))
+        var missing = unions.GetCases(union, cancellationToken).Leaves
+            .Where(@case => !patterns.Any(pattern => unions.CoversCase(pattern, @case)))
             .Select(@case => @case.Name)
             .ToArray();
         if (missing.Length > 0)

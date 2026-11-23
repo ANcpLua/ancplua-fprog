@@ -1670,6 +1670,61 @@ public sealed class Fp0501Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0501_IncompleteGenericClosedHierarchy_NoReport(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag<T>(Root<T> value) => value switch { Marked<T> => 1, _ => 0 };
+
+                public static int TagByInterface<T>(Root<T> value)
+                {
+                    switch (value)
+                    {
+                        case IMarked: return 1;
+                    }
+                    return 0;
+                }
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0501_CompleteGenericClosedHierarchies_Reports(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            using System.Collections.Generic;
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Root<int> value)
+                {
+                    switch (value)
+                    {
+                        case {|FP0501:IMarked|}: return 1;
+                    }
+                    return 0;
+                }
+
+                public static int Tag(Root<List<int>> value) => value switch
+                {
+                    Marked<List<int>> => 1,
+                    {|FP0501:_|} => 0
+                };
+
+                public static int Tag<T>(Result<T> value) => value switch { Ok<T> => 1, {|FP0501:_|} => 0 };
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
     public Task FP0501_CatchAllOverReferencedUnions_Reports()
     {
         return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0501", """
@@ -1709,5 +1764,13 @@ public sealed class Fp0501Tests(TestContext testContext)
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0501", source, testContext.CancellationToken);
+    }
+
+    private Task VerifyGenericClosedHierarchiesAsync(string source, bool fromReference)
+    {
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync(
+                "FP0501", source, ReferencedAssemblySources.GenericClosedHierarchies, testContext.CancellationToken)
+            : VerifyAsync(source + "\n" + ReferencedAssemblySources.GenericClosedHierarchies);
     }
 }

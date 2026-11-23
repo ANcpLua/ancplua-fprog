@@ -22,38 +22,44 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterOperationAction(AnalyzeSwitchExpression, OperationKind.SwitchExpression);
-        context.RegisterOperationAction(AnalyzeSwitchStatement, OperationKind.Switch);
+        context.RegisterCompilationStartAction(start =>
+        {
+            var unions = new UnionModel(start.Compilation);
+            start.RegisterOperationAction(operation => AnalyzeSwitchExpression(operation, unions), OperationKind.SwitchExpression);
+            start.RegisterOperationAction(operation => AnalyzeSwitchStatement(operation, unions), OperationKind.Switch);
+        });
     }
 
-    private static void AnalyzeSwitchExpression(OperationAnalysisContext context)
+    private static void AnalyzeSwitchExpression(OperationAnalysisContext context, UnionModel unions)
     {
         var expression = (ISwitchExpressionOperation)context.Operation;
         foreach (var arm in expression.Arms)
-            ReportCatchAlls(context, expression.Value, arm.Pattern);
+            ReportCatchAlls(context, unions, expression.Value, arm.Pattern);
     }
 
-    private static void AnalyzeSwitchStatement(OperationAnalysisContext context)
+    private static void AnalyzeSwitchStatement(OperationAnalysisContext context, UnionModel unions)
     {
         var statement = (ISwitchOperation)context.Operation;
+        var cancellationToken = context.CancellationToken;
         foreach (var section in statement.Cases)
         foreach (var clause in section.Clauses)
             switch (clause)
             {
                 case IDefaultCaseClauseOperation { Syntax: DefaultSwitchLabelSyntax label }
-                    when UnionModel.GetUnionOfExpression(statement.Value, context.Compilation) is not null
-                         || UnionModel.GetTupleWithUnionElement(statement.Value, context.Compilation) is not null:
+                    when unions.GetUnionOfExpression(statement.Value, cancellationToken) is not null
+                         || unions.GetTupleWithUnionElement(statement.Value, cancellationToken) is not null:
                     context.ReportDiagnostic(Diagnostic.Create(Rule, label.Keyword.GetLocation()));
                     break;
                 case IPatternCaseClauseOperation pattern:
-                    ReportCatchAlls(context, statement.Value, pattern.Pattern);
+                    ReportCatchAlls(context, unions, statement.Value, pattern.Pattern);
                     break;
             }
     }
 
-    private static void ReportCatchAlls(OperationAnalysisContext context, IOperation value, IPatternOperation pattern)
+    private static void ReportCatchAlls(
+        OperationAnalysisContext context, UnionModel unions, IOperation value, IPatternOperation pattern)
     {
-        foreach (var catchAll in UnionModel.GetCatchAlls(context.Compilation, value, pattern, context.CancellationToken))
+        foreach (var catchAll in unions.GetCatchAlls(value, pattern, context.CancellationToken))
             context.ReportDiagnostic(Diagnostic.Create(Rule, catchAll.GetLocation()));
     }
 }

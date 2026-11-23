@@ -1374,6 +1374,32 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0601_TypeParameterConstrainedToIncompleteClosedHierarchy_Reports(bool fromReference)
+    {
+        const string source = """
+                              #nullable enable
+                              using Domain;
+
+                              [Fprog.FunctionalCore]
+                              public static class Inspect
+                              {
+                                  public static bool IsMarked<T, TValue>(TValue value) where TValue : Root<T>
+                                      => value {|FP0601:is|} Marked<T>;
+                                  public static IMarked? AsMarked<T, TValue>(TValue value) where TValue : Root<T>
+                                      => (object)value {|FP0601:as|} IMarked;
+                                  public static int Tag<T, TValue>(TValue value) where TValue : Root<T>
+                                      => value switch { {|FP0601:Marked<T>|} => 1, _ => 0 };
+                              }
+                              """;
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync(
+                "FP0601", source, ReferencedAssemblySources.GenericClosedHierarchies, testContext.CancellationToken)
+            : VerifyAsync(source + "\n" + ReferencedAssemblySources.GenericClosedHierarchies);
+    }
+
+    [TestMethod]
     public Task FP0601_OverrideAndExternalImplicitAndExplicitInterfaceContracts_NoReport()
     {
         return VerifyAsync("""

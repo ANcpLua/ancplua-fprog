@@ -30,7 +30,7 @@ public sealed class UnionModelTests(TestContext testContext)
                                                  public union Pet(Cat, Dog);
                                                  """);
         var pet = compilation.GetNamedType("Pet");
-        AssertCases(["Cat", "Dog"], UnionModel.GetCases(pet, testContext.CancellationToken));
+        AssertCases(["Cat", "Dog"], new UnionModel(compilation).GetCases(pet, testContext.CancellationToken).Direct);
     }
 
     [TestMethod]
@@ -40,7 +40,7 @@ public sealed class UnionModelTests(TestContext testContext)
                                                  public union Choice<T>(T, string);
                                                  """);
         var choice = compilation.GetNamedType("Choice`1").Construct(compilation.GetSpecialType(SpecialType.System_Int32));
-        AssertCases(["int", "string"], UnionModel.GetCases(choice, testContext.CancellationToken));
+        AssertCases(["int", "string"], new UnionModel(compilation).GetCases(choice, testContext.CancellationToken).Direct);
     }
 
     [TestMethod]
@@ -58,7 +58,8 @@ public sealed class UnionModelTests(TestContext testContext)
                                                      public object Value { get; }
                                                  }
                                                  """);
-        AssertCases(["int", "string"], UnionModel.GetCases(compilation.GetNamedType("Choice"), testContext.CancellationToken));
+        var unions = new UnionModel(compilation);
+        AssertCases(["int", "string"], unions.GetCases(compilation.GetNamedType("Choice"), testContext.CancellationToken).Direct);
     }
 
     [TestMethod]
@@ -69,9 +70,10 @@ public sealed class UnionModelTests(TestContext testContext)
         var nullable = compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(choice);
 
         AssertCases([], nullable.UnionCaseTypes);
-        var union = UnionModel.GetUnionType(nullable);
+        var unions = new UnionModel(compilation);
+        var union = unions.GetUnionType(nullable, testContext.CancellationToken);
         Assert.IsNotNull(union);
-        AssertCases(["int", "string"], UnionModel.GetCases(union, testContext.CancellationToken));
+        AssertCases(["int", "string"], unions.GetCases(union, testContext.CancellationToken).Direct);
     }
 
     [TestMethod]
@@ -79,9 +81,11 @@ public sealed class UnionModelTests(TestContext testContext)
     {
         var compilation = TestCompilation.Create(Hierarchy);
         var shape = compilation.GetNamedType("Shape");
-        AssertCases(["Circle", "Polygon"], UnionModel.GetCases(shape, testContext.CancellationToken));
-        AssertCases(["Circle", "Square", "Triangle"], UnionModel.GetLeafCases(shape, testContext.CancellationToken));
-        Assert.IsNull(UnionModel.GetUnionType(compilation.GetNamedType("Square")));
+        var unions = new UnionModel(compilation);
+        var cases = unions.GetCases(shape, testContext.CancellationToken);
+        AssertCases(["Circle", "Polygon"], cases.Direct);
+        AssertCases(["Circle", "Square", "Triangle"], cases.Leaves);
+        Assert.IsNull(unions.GetUnionType(compilation.GetNamedType("Square"), testContext.CancellationToken));
     }
 
     [TestMethod]
@@ -91,7 +95,7 @@ public sealed class UnionModelTests(TestContext testContext)
         var compilation = TestCompilation.Create("public sealed class Consumer;", "Consumer",
             TestCompilation.ToImageReference(library));
         AssertCases(["Circle", "Square", "Triangle"],
-            UnionModel.GetLeafCases(compilation.GetNamedType("Shape"), testContext.CancellationToken));
+            new UnionModel(compilation).GetCases(compilation.GetNamedType("Shape"), testContext.CancellationToken).Leaves);
     }
 
     [TestMethod]
@@ -101,7 +105,58 @@ public sealed class UnionModelTests(TestContext testContext)
     {
         var compilation = TestCompilation.Create(Hierarchy);
         var result = compilation.GetNamedType("Result`1").Construct(compilation.GetSpecialType(argument));
-        AssertCases(expected, UnionModel.GetCases(result, testContext.CancellationToken));
+        AssertCases(expected, new UnionModel(compilation).GetCases(result, testContext.CancellationToken).Direct);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ClosedCaseListCompletenessDependsOnTypeArguments(bool fromReference)
+    {
+        var library = TestCompilation.Create(ReferencedAssemblySources.GenericClosedHierarchies, "Domain");
+        var compilation = fromReference
+            ? TestCompilation.Create("public sealed class Consumer;", "Consumer", TestCompilation.ToImageReference(library))
+            : library;
+        var cancellationToken = testContext.CancellationToken;
+        var root = compilation.GetNamedType("Domain.Root`1");
+        var intType = compilation.GetSpecialType(SpecialType.System_Int32);
+        var intList = compilation.GetNamedType("System.Collections.Generic.List`1").Construct(intType);
+        var unions = new UnionModel(compilation);
+
+        var open = unions.GetCases(root, cancellationToken);
+        Assert.IsFalse(open.IsComplete);
+        AssertCases(["Domain.Marked<T>"], open.Direct);
+        Assert.IsNull(unions.GetUnionType(root, cancellationToken));
+
+        var withInt = unions.GetCases(root.Construct(intType), cancellationToken);
+        Assert.IsTrue(withInt.IsComplete);
+        AssertCases(["Domain.Marked<int>"], withInt.Leaves);
+
+        var withList = unions.GetCases(root.Construct(intList), cancellationToken);
+        Assert.IsTrue(withList.IsComplete);
+        AssertCases(["Domain.Marked<System.Collections.Generic.List<int>>", "Domain.Extra<int>"], withList.Leaves);
+
+        var result = compilation.GetNamedType("Domain.Result`1");
+        Assert.AreEqual<ITypeSymbol>(result, unions.GetUnionType(result, cancellationToken)!);
+        AssertCases(["Domain.Ok<T>", "Domain.Err<T>"], unions.GetCases(result, cancellationToken).Leaves);
+    }
+
+    [TestMethod]
+    public void IncompleteNestedCaseRemainsALeafOfCompleteOuterCaseList()
+    {
+        var compilation = TestCompilation.Create("""
+                                                 using System.Collections.Generic;
+
+                                                 public closed class Outer<T>;
+                                                 public closed class Inner<T> : Outer<T>;
+                                                 public sealed class Known<T> : Inner<T>;
+                                                 public sealed class Extra<T> : Inner<List<T>>;
+                                                 """);
+        var outer = compilation.GetNamedType("Outer`1");
+        var unions = new UnionModel(compilation);
+        var cases = unions.GetCases(outer, testContext.CancellationToken);
+        Assert.IsTrue(cases.IsComplete);
+        AssertCases(["Inner<T>"], cases.Leaves);
     }
 
     [TestMethod]
@@ -131,7 +186,8 @@ public sealed class UnionModelTests(TestContext testContext)
                                                             """);
 
         var operation = compilation.GetSwitchExpression("Run");
-        Assert.AreEqual(expected, UnionModel.GetUnionOfExpression(operation.Value, compilation)?.Name);
+        Assert.AreEqual(expected,
+            new UnionModel(compilation).GetUnionOfExpression(operation.Value, testContext.CancellationToken)?.Name);
     }
 
     [TestMethod]
@@ -157,8 +213,8 @@ public sealed class UnionModelTests(TestContext testContext)
                                                             }
                                                             """);
         var operation = compilation.GetSwitchExpression("Run");
-        Assert.AreEqual(expected, UnionModel.CoversCase(
-            compilation, operation.Arms[0].Pattern, compilation.GetNamedType("Circle")));
+        Assert.AreEqual(expected, new UnionModel(compilation).CoversCase(
+            operation.Arms[0].Pattern, compilation.GetNamedType("Circle")));
     }
 
     private static void AssertCases(string[] expected, IEnumerable<ITypeSymbol> cases)

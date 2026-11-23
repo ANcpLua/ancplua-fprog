@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -27,10 +28,14 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSyntaxNodeAction(AnalyzeDynamicType, SyntaxKind.IdentifierName);
-        context.RegisterOperationAction(Analyze,
-            OperationKind.IsType, OperationKind.IsPattern, OperationKind.Conversion, OperationKind.TypeOf,
-            OperationKind.Invocation, OperationKind.DynamicInvocation, OperationKind.DeclarationPattern,
-            OperationKind.TypePattern, OperationKind.RecursivePattern);
+        context.RegisterCompilationStartAction(start =>
+        {
+            var unions = new UnionModel(start.Compilation);
+            start.RegisterOperationAction(operation => Analyze(operation, unions),
+                OperationKind.IsType, OperationKind.IsPattern, OperationKind.Conversion, OperationKind.TypeOf,
+                OperationKind.Invocation, OperationKind.DynamicInvocation, OperationKind.DeclarationPattern,
+                OperationKind.TypePattern, OperationKind.RecursivePattern);
+        });
     }
 
     private static void AnalyzeDynamicType(SyntaxNodeAnalysisContext context)
@@ -42,26 +47,27 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation()));
     }
 
-    private static void Analyze(OperationAnalysisContext context)
+    private static void Analyze(OperationAnalysisContext context, UnionModel unions)
     {
         if (!CoreScope.IsInCore(context.ContainingSymbol) ||
             context.Operation is { IsImplicit: true } and not IPatternOperation)
             return;
 
-        if (FindTypeTest(context.Operation, context.Compilation) is { } location)
+        if (FindTypeTest(context, unions) is { } location)
             context.ReportDiagnostic(Diagnostic.Create(Rule, location));
     }
 
-    private static Location? FindTypeTest(IOperation operation, Compilation compilation)
+    private static Location? FindTypeTest(OperationAnalysisContext context, UnionModel unions)
     {
-        return operation switch
+        var cancellationToken = context.CancellationToken;
+        return context.Operation switch
         {
             IIsTypeOperation { Syntax: BinaryExpressionSyntax syntax } typeTest
-                when InspectsOperand(typeTest.ValueOperand, typeTest.TypeOperand, compilation)
+                when InspectsOperand(typeTest.ValueOperand, typeTest.TypeOperand, unions, cancellationToken)
                 => syntax.OperatorToken.GetLocation(),
             IIsPatternOperation patternTest
                 when patternTest.Pattern.DescendantsAndSelf().OfType<IPatternOperation>()
-                    .Any(pattern => InspectsPatternInput(pattern, compilation))
+                    .Any(pattern => InspectsPatternInput(pattern, unions, cancellationToken))
                 => patternTest.Syntax switch
                 {
                     IsPatternExpressionSyntax syntax => syntax.IsKeyword.GetLocation(),
@@ -69,32 +75,34 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
                     _ => null
                 },
             IConversionOperation { IsTryCast: true, Syntax: BinaryExpressionSyntax syntax } conversion
-                when InspectsOperand(conversion.Operand, conversion.Type, compilation)
+                when InspectsOperand(conversion.Operand, conversion.Type, unions, cancellationToken)
                 => syntax.OperatorToken.GetLocation(),
             IConversionOperation { Syntax: CastExpressionSyntax syntax } conversion
-                when IsRuntimeCast(conversion, compilation)
+                when IsRuntimeCast(conversion, context, unions)
                 => syntax.GetLocation(),
             ITypeOfOperation typeOf when UnwrapNullable(typeOf.TypeOperand) is ITypeParameterSymbol
                 => typeOf.Syntax.GetLocation(),
             IInvocationOperation invocation when IsObjectGetType(invocation) &&
-                                              IsHiddenOperand(invocation.Instance, compilation)
+                                              IsHiddenOperand(invocation.Instance, unions, cancellationToken)
                 => GetMethodNameLocation(invocation.Syntax),
             IDynamicInvocationOperation invocation when IsDynamicGetType(invocation)
                 => GetMethodNameLocation(invocation.Syntax),
-            IPatternOperation pattern when IsInSwitchPattern(pattern) && InspectsPatternInput(pattern, compilation)
+            IPatternOperation pattern when IsInSwitchPattern(pattern) && InspectsPatternInput(pattern, unions, cancellationToken)
                 => pattern.Syntax.GetLocation(),
             _ => null
         };
     }
 
-    private static bool InspectsOperand(IOperation value, ITypeSymbol? tested, Compilation compilation)
+    private static bool InspectsOperand(
+        IOperation value, ITypeSymbol? tested, UnionModel unions, CancellationToken cancellationToken)
     {
-        return IsHiddenOperand(value, compilation)
-               && UnionModel.GetUnionOfExpression(value, compilation) is null
-               && !IsNullCheck(WrittenOperand(value)?.Type, tested, compilation);
+        return IsHiddenOperand(value, unions, cancellationToken)
+               && unions.GetUnionOfExpression(value, cancellationToken) is null
+               && !IsNullCheck(WrittenOperand(value)?.Type, tested, unions);
     }
 
-    private static bool InspectsPatternInput(IPatternOperation pattern, Compilation compilation)
+    private static bool InspectsPatternInput(
+        IPatternOperation pattern, UnionModel unions, CancellationToken cancellationToken)
     {
         var testedType = pattern switch
         {
@@ -105,12 +113,13 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
             _ => null
         };
 
-        if (testedType is null || !IsHiddenType(pattern.InputType) || IsNullCheck(pattern.InputType, testedType, compilation))
+        if (testedType is null || !IsHiddenType(pattern.InputType, unions, cancellationToken)
+                               || IsNullCheck(pattern.InputType, testedType, unions))
             return false;
 
         // Logical patterns keep testing the same value. A positional or property subpattern has its own input.
         return GoverningPatternValue(pattern) is not { } value
-               || (UnionModel.GetUnionOfExpression(value, compilation) is null && !IsContractParameter(value, compilation));
+               || (unions.GetUnionOfExpression(value, cancellationToken) is null && !IsContractParameter(value, unions));
     }
 
     private static bool IsInSwitchPattern(IPatternOperation pattern)
@@ -138,13 +147,13 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
         };
     }
 
-    private static bool IsRuntimeCast(IConversionOperation conversion, Compilation compilation)
+    private static bool IsRuntimeCast(IConversionOperation conversion, OperationAnalysisContext context, UnionModel unions)
     {
         if (conversion.Operand.Type is not { } source || conversion.Type is not { } target
-            || !IsHiddenOperand(conversion.Operand, compilation))
+            || !IsHiddenOperand(conversion.Operand, unions, context.CancellationToken))
             return false;
 
-        var kind = compilation.ClassifyConversion(source, target);
+        var kind = context.Compilation.ClassifyConversion(source, target);
         return kind is { IsExplicit: true, IsReference: true } or { IsUnboxing: true }
                || (kind.IsDynamic && target.SpecialType != SpecialType.System_Object);
     }
@@ -186,22 +195,24 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
         };
     }
 
-    private static bool IsHiddenOperand(IOperation? value, Compilation compilation)
+    private static bool IsHiddenOperand(IOperation? value, UnionModel unions, CancellationToken cancellationToken)
     {
-        return WrittenOperand(value) is { } written && IsHiddenType(written.Type)
-               && !IsContractParameter(written, compilation);
+        return WrittenOperand(value) is { } written && IsHiddenType(written.Type, unions, cancellationToken)
+               && !IsContractParameter(written, unions);
     }
 
-    private static bool IsHiddenType(ITypeSymbol? type)
+    private static bool IsHiddenType(ITypeSymbol? type, UnionModel unions, CancellationToken cancellationToken)
     {
-        return UnwrapNullable(type) is { } actual && UnionModel.GetUnionType(actual) is null &&
-               actual is ITypeParameterSymbol or { SpecialType: SpecialType.System_Object } or { TypeKind: TypeKind.Dynamic };
+        return UnwrapNullable(type) is (ITypeParameterSymbol
+                   or { SpecialType: SpecialType.System_Object }
+                   or { TypeKind: TypeKind.Dynamic }) and { } actual
+               && unions.GetUnionType(actual, cancellationToken) is null;
     }
 
-    private static bool IsNullCheck(ITypeSymbol? input, ITypeSymbol? tested, Compilation compilation)
+    private static bool IsNullCheck(ITypeSymbol? input, ITypeSymbol? tested, UnionModel unions)
     {
         return UnwrapNullable(input) is { } value && UnwrapNullable(tested) is { } target &&
-               UnionModel.AlwaysConvertsTo(compilation, value, target);
+               unions.AlwaysConvertsTo(value, target);
     }
 
     private static ITypeSymbol? UnwrapNullable(ITypeSymbol? type)
@@ -235,9 +246,9 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static bool IsContractParameter(IOperation value, Compilation compilation)
+    private static bool IsContractParameter(IOperation value, UnionModel unions)
     {
-        var original = UnionModel.ValueBeforeUpcast(value, compilation);
+        var original = unions.ValueBeforeUpcast(value);
         if (original is not IParameterReferenceOperation
             { Parameter: { Type.SpecialType: SpecialType.System_Object } parameter })
             return false;

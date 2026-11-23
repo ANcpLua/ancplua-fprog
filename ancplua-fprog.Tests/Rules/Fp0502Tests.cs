@@ -366,6 +366,112 @@ public sealed class Fp0502Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0502_IncompleteGenericClosedHierarchy_NoReport(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag<T>(Root<T> value, bool include)
+                {
+                    switch (value)
+                    {
+                        case Marked<T> when include: return 1;
+                    }
+                    return 0;
+                }
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0502_CompleteGenericClosedHierarchiesWithMissingCases_Reports(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            using System.Collections.Generic;
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Root<int> value, bool include)
+                {
+                    {|FP0502:switch|} (value)
+                    {
+                        case Marked<int> when include: return 1;
+                    }
+                    return 0;
+                }
+
+                public static int Tag(Root<List<int>> value)
+                {
+                    {|FP0502:switch|} (value)
+                    {
+                        case Marked<List<int>>: return 1;
+                    }
+                    return 0;
+                }
+
+                public static int Tag<T>(Result<T> value)
+                {
+                    {|FP0502:switch|} (value)
+                    {
+                        case Ok<T>: return 1;
+                    }
+                    return 0;
+                }
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task FP0502_CompleteGenericClosedHierarchiesWithEveryCase_NoReport(bool fromReference)
+    {
+        return VerifyGenericClosedHierarchiesAsync("""
+            using System.Collections.Generic;
+            using Domain;
+
+            public static class Format
+            {
+                public static int Tag(Root<int> value)
+                {
+                    switch (value)
+                    {
+                        case Marked<int>: return 1;
+                    }
+                    return 0;
+                }
+
+                public static int Tag(Root<List<int>> value)
+                {
+                    switch (value)
+                    {
+                        case Marked<List<int>>: return 1;
+                        case Extra<int>: return 2;
+                    }
+                    return 0;
+                }
+
+                public static int Tag<T>(Result<T> value)
+                {
+                    switch (value)
+                    {
+                        case Ok<T>: return 1;
+                        case Err<T>: return 2;
+                    }
+                    return 0;
+                }
+            }
+            """, fromReference);
+    }
+
+    [TestMethod]
     public Task CompilerAcceptsCompleteSwitchExpressionOverClosedConstraint()
     {
         return FpAnalyzerTestHost.VerifyCompilerAsync("""
@@ -409,5 +515,13 @@ public sealed class Fp0502Tests(TestContext testContext)
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", source, testContext.CancellationToken);
+    }
+
+    private Task VerifyGenericClosedHierarchiesAsync(string source, bool fromReference)
+    {
+        return fromReference
+            ? FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync(
+                "FP0502", source, ReferencedAssemblySources.GenericClosedHierarchies, testContext.CancellationToken)
+            : VerifyAsync(source + "\n" + ReferencedAssemblySources.GenericClosedHierarchies);
     }
 }
