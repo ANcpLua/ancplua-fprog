@@ -1,0 +1,859 @@
+From 01822e6b2d98e12eae0f5bd0ca37bd4354630dcc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:18:36 +0100
+Subject: [PATCH 09/12] FP0104: report writes through a local that is another
+ name for a parameter's object
+
+The receiver walk now goes through a local of a type that may be a reference and that is never written
+again in the member: a local with an initializer, a foreach variable (an element of the collection) or a
+top-level pattern variable of is/case/switch arm (the tested value), when that stands for an access path
+(parameter, alias, field/property/indexer/element read, casts, as, !, ?.). Method calls, ranges, new,
+with, collection expressions, choices and boxed struct copies end the path. Reported at the target as
+written (`same.Total`, `line.Quantity`).
+
+Shared helper: new ancplua-fprog/Shared/LocalAliases.cs, a per-operation-block alias table built once,
+lazily and thread-safely. FP0104 now registers its operation actions from an operation-block start action
+to own one table per block.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0104Tests.cs      | 324 ++++++++++++++++++
+ .../Rules/Fp0104ParameterWriteAnalyzer.cs     | 202 ++++++++---
+ ancplua-fprog/Shared/LocalAliases.cs          | 186 ++++++++++
+ 3 files changed, 664 insertions(+), 48 deletions(-)
+ create mode 100644 ancplua-fprog/Shared/LocalAliases.cs
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0104Tests.cs b/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
+index 1ef5752..6e84148 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
+@@ -1272,6 +1272,330 @@ public sealed class Fp0104Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0104_WriteThroughLocalAliasOfParameter_Reports() => VerifyAsync("""
++        using System.Collections.Generic;
++
++        [Fprog.FunctionalCore]
++        public static class Normalizer
++        {
++            public static int ViaLocal(Box box)
++            {
++                var same = box;
++                {|FP0104:same.Count|} = 0;
++                return same.Count;
++            }
++
++            public static int ViaMember(Box box)
++            {
++                var first = box.Inner;
++                if (first is null) return 0;
++                {|FP0104:first.Count|}++;
++                var item = box.Items[0];
++                {|FP0104:item.X|} = 1;
++                var values = box.Values;
++                {|FP0104:values[0]|} += 2;
++                return first.Count;
++            }
++
++            public static int Chained(Box box, object any)
++            {
++                var a = box;
++                var b = a.Inner;
++                {|FP0104:b!.Count|} = 1;
++                var derived = box as DerivedBox;
++                {|FP0104:derived!.X|} = 2;
++                var maybe = box?.Inner?.Inner;
++                {|FP0104:maybe!.Y|} = 3;
++                object o = box;
++                {|FP0104:((Box)o).Count|} = 4;
++                var cast = (Box)any;
++                {|FP0104:cast.Items[0]|} = new Box();
++                return int.TryParse("5", out {|FP0104:a.Count|}) ? a.Count : 0;
++            }
++
++            public static System.Func<int> InLambda(Box box)
++            {
++                var same = box;
++                return () => {|FP0104:same.Count|} = 1;
++            }
++
++            public static int Deconstructed(Box box)
++            {
++                var same = box;
++                ({|FP0104:same.X|}, {|FP0104:same.Y|}) = (1, 2);
++                return same.X;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughForeachVariable_Reports() => VerifyAsync("""
++        using System.Collections.Generic;
++
++        [Fprog.FunctionalCore]
++        public static class Normalizer
++        {
++            public static int Reset(Box box, List<Box> list, IEnumerable<Box> sequence)
++            {
++                foreach (var item in box.Items)
++                    {|FP0104:item.Count|} = 0;
++                foreach (var item in list)
++                    {|FP0104:item.X|}++;
++                foreach (Box item in sequence)
++                    {|FP0104:item.Name|} ??= "x";
++                var items = box.Items;
++                foreach (var item in items)
++                    {|FP0104:item.Items[0]|} = item;
++                return list.Count;
++            }
++
++            public static T[] Generic<T>(T[] values) where T : IHasCount
++            {
++                foreach (var value in values)
++                    {|FP0104:value.Count|} = 0;
++                return values;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughPatternVariable_Reports() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Normalizer
++        {
++            public static int ViaIs(object any, Box box)
++            {
++                if (any is Box b)
++                    {|FP0104:b.Count|} = 1;
++                if (any is Box { Count: > 0 } c and { X: 0 })
++                    {|FP0104:c.X|} = 2;
++                if (any is (DerivedBox d))
++                    {|FP0104:d.Y|} = 3;
++                if (box.Inner is { } inner)
++                    {|FP0104:inner.Count|}++;
++                if (any is Box[] and [var head, ..] array)
++                    {|FP0104:array[0]|} = head;
++                return 0;
++            }
++
++            public static int ViaCase(object any)
++            {
++                switch (any)
++                {
++                    case Box { Count: 0 } b when b.X > 0:
++                        {|FP0104:b.X|} = 1;
++                        return 1;
++                    default:
++                        return 0;
++                }
++            }
++
++            public static int ViaArm(object any) => any switch
++            {
++                Box b => {|FP0104:b.Count|} = 2,
++                _ => 0
++            };
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughLocalHoldingFreshObjectOrCopy_NoReport() => VerifyAsync("""
++        using System.Collections.Generic;
++        using System.Collections.Immutable;
++        using System.Linq;
++
++        public sealed record Tag(string Name)
++        {
++            public int[] Slots { get; init; } = [];
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int Copies(int[] values, IEnumerable<int> source, ImmutableArray<int> frozen, List<int> list)
++            {
++                var copy = values.ToArray();
++                copy[0] = 1;
++                var fromSource = source.ToList();
++                fromSource[0] = 2;
++                var builder = frozen.ToBuilder();
++                builder[0] = 3;
++                var tail = values[1..];
++                tail[0] = 4;
++                var part = list[1..];
++                part[0] = 5;
++                return copy[0] + fromSource[0] + builder[0] + tail[0] + part[0];
++            }
++
++            public static int Fresh(Box box, Tag tag)
++            {
++                var fresh = new Box { Count = box.Count };
++                fresh.Count++;
++                var renamed = tag with { Slots = [1] };
++                renamed.Slots[0] = 2;
++                Box[] array = [box];
++                array[0] = new Box();
++                return fresh.Count + renamed.Slots[0];
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughLocalThatIsWrittenAgain_NoReport() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int Reassigned(Box box, object any)
++            {
++                var line = box;
++                line = new Box();
++                line.Count = 5;
++                var pair = box;
++                (pair, _) = (new Box(), 1);
++                pair.X = 1;
++                var maybe = box.Inner;
++                maybe ??= new Box();
++                maybe.Y = 2;
++                var renewed = box;
++                Renew(out renewed);
++                renewed.Count = 3;
++                var target = box;
++                ref var slot = ref target;
++                slot = new Box();
++                target.Count = 4;
++                var captured = box;
++                System.Action reset = () => captured = new Box();
++                captured.X = 5;
++                if (any is Box b)
++                {
++                    b = new Box();
++                    b.Count = 6;
++                }
++
++                Box late;
++                late = box;
++                late.Count = 7;
++                return line.Count;
++            }
++
++            private static bool Renew(out Box box)
++            {
++                box = new Box();
++                return true;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughStructCopyOrBoxedCopy_NoReport() => VerifyAsync("""
++        public struct Counter : IHasCount
++        {
++            public int Count { get; set; }
++        }
++
++        public sealed class Holder
++        {
++            public Counter C;
++            public Counter[] All = new Counter[1];
++            public Point P;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int Copies(Holder holder, Point point, object any)
++            {
++                var moved = point;
++                moved.X++;
++                var inner = holder.P;
++                inner.Y = 1;
++                if (any is Point p)
++                {
++                    p.X = 5;
++                }
++
++                foreach (var counter in holder.All)
++                {
++                    var local = counter;
++                    local.Count = 2;
++                }
++
++                return moved.X + inner.Y;
++            }
++
++            public static int Boxed(Holder holder)
++            {
++                if (holder.C is IHasCount c)
++                    c.Count = 1;
++                foreach (IHasCount each in holder.All)
++                    each.Count = 2;
++                IHasCount boxed = holder.C;
++                boxed.Count = 3;
++                object o = holder.P;
++                return holder.C.Count + (o is Point q ? q.X : 0);
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_ReadOnlyLoopsAndPatternsOverParameter_NoReport() => VerifyAsync("""
++        using System.Collections.Generic;
++
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int Sum(List<Box> boxes, object any)
++            {
++                var total = 0;
++                foreach (var box in boxes)
++                    total += box.Count;
++                if (any is Box b)
++                    total += b.X;
++                var first = boxes[0];
++                return total + first.Count + (any switch { Box c => c.Y, _ => 0 });
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughAliasOutsideCore_NoReport() => VerifyAsync("""
++        public static class Shell
++        {
++            public static int Reset(Box box, object any)
++            {
++                var same = box;
++                same.Count = 0;
++                foreach (var item in box.Items)
++                    item.X = 1;
++                if (any is Box b)
++                    b.Y = 2;
++                return same.Count;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_WriteThroughAliasInUnionBody_ReportsOnce() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Pets
++        {
++            public record Cat;
++
++            public record Dog;
++
++            public union Pet(Cat, Dog)
++            {
++                public static int Reset(Box box)
++                {
++                    var same = box;
++                    {|FP0104:same.Count|} = 0;
++                    return int.TryParse("1", out {|FP0104:box.Count|}) ? 1 : 0;
++                }
++            }
++        }
++        """);
++
+     private Task VerifyAsync(string source)
+         => FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);
+ }
+diff --git a/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs b/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
+index 0980d46..d9c8454 100644
+--- a/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
+@@ -1,5 +1,7 @@
+ using System;
++using System.Collections.Generic;
+ using System.Collections.Immutable;
++using System.Linq;
+ using ancplua_fprog.Shared;
+ using Microsoft.CodeAnalysis;
+ using Microsoft.CodeAnalysis.CSharp.Syntax;
+@@ -12,23 +14,48 @@ namespace ancplua_fprog.Rules;
+ /// <summary>
+ /// FP0104: inside the functional core, an assignment, compound assignment, <c>??=</c>, deconstruction
+ /// assignment, event subscription, <c>++</c>, <c>--</c>, or argument bound to a <c>ref</c> or <c>out</c>
+-/// parameter, whose target is a field, property, event or element reached from a parameter whose type may be a reference (class, interface, array, delegate,
+-/// <c>dynamic</c>, type parameter not known to be a value type) or from a <c>ref</c>/<c>out</c>
+-/// parameter. The chain from the parameter to the target may pass through fields, properties, indexers,
+-/// array elements, casts, null-conditional access and method calls. When the chain meets a choice between
+-/// objects (<c>?:</c>, also by <c>ref</c>, <c>??</c> or a switch expression), every branch is followed, and
+-/// the write is reported when any branch is reached from such a parameter; a branch that is a fresh object
+-/// or a boxed copy of a struct does not count. A ref choice that is itself the target is not followed:
+-/// <c>(f ? ref a : ref b) = x</c> assigns the parameter variables and is correct, and
+-/// <c>(f ? ref a.X : ref b.X) = 1</c> is a known gap. Writes through a struct parameter
+-/// passed by value, <c>in</c> or <c>ref readonly</c> (<c>Span&lt;T&gt;</c> and structs holding references
+-/// included) are not reported. Writes into a boxed copy are not reported unless the chain above the box
+-/// reads a reference or passes through a member that returns by reference. Whether an argument counts
+-/// is decided by the kind of the parameter it is bound to, not by the keyword at the call: arguments to
+-/// <c>in</c> and <c>ref readonly</c> parameters (<c>Volatile.Read(ref p.Total)</c>) are reads; passing a
+-/// local, an <c>out var</c> or a parameter itself is not reported. Arguments of dynamic calls are not
+-/// checked. Reported at the whole assignment target expression (for an argument: the expression after
++/// parameter, whose target is a field, property, event or element reached from a parameter whose type may
++/// be a reference (class, interface, array, delegate, <c>dynamic</c>, type parameter not known to be a value
++/// type) or from a <c>ref</c>/<c>out</c> parameter.
++/// <para>
++/// The chain from the parameter to the target may pass through fields, properties, indexers, array elements,
++/// casts, null-conditional access and method calls. When the chain meets a choice between objects
++/// (<c>?:</c>, also by <c>ref</c>, <c>??</c> or a switch expression), every branch is followed, and the write
++/// is reported when any branch is reached from such a parameter; a branch that is a fresh object or a boxed
++/// copy of a struct does not count.
++/// </para>
++/// <para>
++/// The chain may also pass through a local that is another name for the parameter's data, because writing
++/// through it changes the caller's object just the same. Such a local has a type that may be a reference, is
++/// never written again in the member (no assignment of any kind, <c>++</c>/<c>--</c>, deconstruction,
++/// <c>ref</c>/<c>out</c>/<c>in</c> argument or <c>ref</c> alias), and is one of: a local declared with an
++/// initializer (it stands for the initializer), a <c>foreach</c> variable (an element of the collection),
++/// or a variable declared by the top-level pattern, also through <c>and</c>, of an <c>is</c>, a <c>case</c>
++/// label or a switch-expression arm (the tested value). What it stands for must be an access path: a
++/// parameter, another such local, or a field, property, indexer or element read from one, through casts,
++/// <c>as</c>, <c>!</c> and <c>?.</c>. A method call, a range, <c>new</c>, <c>with</c>, a collection
++/// expression, a choice (<c>?:</c>, <c>??</c>, switch), a dynamic access or a user-defined conversion ends
++/// the path, because the result may be a fresh object (<c>var copy = values.ToArray()</c>). A local of a
++/// value type is a copy, and a reference-typed pattern or <c>foreach</c> variable over a struct value holds
++/// a boxed copy; neither is followed.
++/// </para>
++/// <para>
++/// Not reported: writes through a struct parameter passed by value, <c>in</c> or <c>ref readonly</c>
++/// (<c>Span&lt;T&gt;</c> and structs holding references included); writes into a boxed copy unless the
++/// chain above the box reads a reference or passes through a member that returns by reference; arguments
++/// to <c>in</c> and <c>ref readonly</c> parameters (<c>Volatile.Read(ref p.Total)</c>), decided by the kind
++/// of the parameter and not by the keyword at the call; passing a local, an <c>out var</c> or a parameter
++/// itself; assigning a ref choice of parameter variables (<c>(f ? ref a : ref b) = x</c>). Known gaps,
++/// left out because the analysis cannot tell them from copies cheaply: arguments of dynamic calls, a ref
++/// choice that is itself the target (<c>(f ? ref a.X : ref b.X) = 1</c>), <c>ref</c> locals and
++/// <c>ref</c> iteration variables, spans over a parameter's array, locals assigned after their declaration,
++/// deconstructed locals, <c>out var</c> results, nested pattern variables, and locals that stand for a
++/// method call or a choice.
++/// </para>
++/// <para>
++/// Reported at the whole assignment target expression (for an argument: the expression after
+ /// <c>ref</c>/<c>out</c>), including enclosing parentheses.
++/// </para>
+ /// </summary>
+ [DiagnosticAnalyzer(LanguageNames.CSharp)]
+ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+@@ -46,19 +73,33 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+     {
+         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+         context.EnableConcurrentExecution();
+-        context.RegisterOperationAction(
+-            Analyze,
+-            OperationKind.SimpleAssignment,
+-            OperationKind.CompoundAssignment,
+-            OperationKind.CoalesceAssignment,
+-            OperationKind.DeconstructionAssignment,
+-            OperationKind.EventAssignment,
+-            OperationKind.Increment,
+-            OperationKind.Decrement,
+-            OperationKind.Argument);
++        context.RegisterOperationBlockStartAction(start =>
++        {
++            if (!CoreScope.IsInCore(start.OwningSymbol))
++                return;
++
++            // One alias table per block: it is built at most once, on the first write whose receiver is a
++            // local, so that no write rescans the member.
++            var aliases = new LocalAliases(start.OperationBlocks, start.CancellationToken);
++            start.RegisterOperationAction(
++                operationContext => Analyze(operationContext, aliases),
++                Kinds);
++        });
+     }
+ 
+-    private static void Analyze(OperationAnalysisContext context)
++    private static readonly ImmutableArray<OperationKind> Kinds =
++    [
++        OperationKind.SimpleAssignment,
++        OperationKind.CompoundAssignment,
++        OperationKind.CoalesceAssignment,
++        OperationKind.DeconstructionAssignment,
++        OperationKind.EventAssignment,
++        OperationKind.Increment,
++        OperationKind.Decrement,
++        OperationKind.Argument
++    ];
++
++    private static void Analyze(OperationAnalysisContext context, LocalAliases aliases)
+     {
+         if (!CoreScope.IsInCore(context.ContainingSymbol))
+             return;
+@@ -66,41 +107,41 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+         switch (context.Operation)
+         {
+             case IDeconstructionAssignmentOperation deconstruction:
+-                Check(context, deconstruction.Target, rebinds: false);
++                Check(context, aliases, deconstruction.Target, rebinds: false);
+                 break;
+             case ISimpleAssignmentOperation simple:
+                 // `x.F = ref y` rebinds the ref field F; it writes nothing through the storage F referred to.
+-                Check(context, simple.Target, simple.IsRef);
++                Check(context, aliases, simple.Target, simple.IsRef);
+                 break;
+             case IAssignmentOperation assignment:
+-                Check(context, assignment.Target, rebinds: false);
++                Check(context, aliases, assignment.Target, rebinds: false);
+                 break;
+             case IEventAssignmentOperation eventAssignment:
+-                Check(context, eventAssignment.EventReference, rebinds: false);
++                Check(context, aliases, eventAssignment.EventReference, rebinds: false);
+                 break;
+             case IIncrementOrDecrementOperation increment:
+-                Check(context, increment.Target, rebinds: false);
++                Check(context, aliases, increment.Target, rebinds: false);
+                 break;
+             case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument:
+                 // The callee may write the storage it receives. The parameter decides, not the keyword at the
+                 // call: `ref x` passed to a `ref readonly` parameter, and every `in` argument, cannot be written.
+-                Check(context, argument.Value, rebinds: false);
++                Check(context, aliases, argument.Value, rebinds: false);
+                 break;
+         }
+     }
+ 
+-    private static void Check(OperationAnalysisContext context, IOperation target, bool rebinds)
++    private static void Check(OperationAnalysisContext context, LocalAliases aliases, IOperation target, bool rebinds)
+     {
+         if (target is ITupleOperation tuple)
+         {
+             foreach (var element in tuple.Elements)
+-                Check(context, element, rebinds: false);
++                Check(context, aliases, element, rebinds: false);
+ 
+             return;
+         }
+ 
+         var start = target.Syntax.SpanStart;
+-        if (Reaches(Receiver(target), shared: !rebinds && ReturnsByRef(target), ref start))
++        if (Reaches(aliases, Receiver(target), shared: !rebinds && ReturnsByRef(target), path: false, ref start, depth: 0))
+             Report(context, target, start);
+     }
+ 
+@@ -109,9 +150,17 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+     /// object or storage the caller sees. <paramref name="shared"/> is true when the chain between the
+     /// target and <paramref name="receiver"/> already read a reference or a member that returns by
+     /// reference, so a box further down no longer isolates the write. <paramref name="start"/> moves to
+-    /// the start of a null-conditional access that the chain passes through.
++    /// the start of a null-conditional access that the target's own chain passes through.
++    /// <paramref name="path"/> is true once the walk has gone through a local alias: from there on only an
++    /// access path counts (see <see cref="Fp0104ParameterWriteAnalyzer"/>).
+     /// </summary>
+-    private static bool Reaches(IOperation? receiver, bool shared, ref int start)
++    private static bool Reaches(
++        LocalAliases aliases,
++        IOperation? receiver,
++        bool shared,
++        bool path,
++        ref int start,
++        int depth)
+     {
+         while (receiver is not null)
+         {
+@@ -119,23 +168,52 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+             {
+                 // `(f ? a : b).X = 1`, `(a ?? b).X = 1` and `(i switch { ... }).X = 1` write into whichever
+                 // object is chosen, so each branch is followed on its own. The choice itself is no step of the
+-                // chain: its type says nothing about whether a branch is a boxed copy.
++                // chain: its type says nothing about whether a branch is a boxed copy. Stored in a local, a
++                // choice is no access path.
+                 case IConditionalOperation conditional:
+-                    return Reaches(conditional.WhenTrue, shared, ref start)
+-                           || Reaches(conditional.WhenFalse, shared, ref start);
++                    return !path
++                           && (Reaches(aliases, conditional.WhenTrue, shared, path, ref start, depth)
++                               || Reaches(aliases, conditional.WhenFalse, shared, path, ref start, depth));
+                 case ICoalesceOperation coalesce:
+-                    return Reaches(coalesce.Value, shared, ref start)
+-                           || Reaches(coalesce.WhenNull, shared, ref start);
++                    return !path
++                           && (Reaches(aliases, coalesce.Value, shared, path, ref start, depth)
++                               || Reaches(aliases, coalesce.WhenNull, shared, path, ref start, depth));
+                 case ISwitchExpressionOperation switchExpression:
++                    if (path)
++                        return false;
++
+                     foreach (var arm in switchExpression.Arms)
+                     {
+-                        if (Reaches(arm.Value, shared, ref start))
++                        if (Reaches(aliases, arm.Value, shared, path, ref start, depth))
+                             return true;
+                     }
+ 
+                     return false;
++                // Another name for an expression: the walk goes on in what the local stands for. Like a cast,
++                // the local is no step of its own; whether it holds a box is decided where the value was taken.
++                case ILocalReferenceOperation { Local: var local }:
++                    if (depth >= MaxAliasDepth || !aliases.TryGet(local, out var alias))
++                        return false;
++
++                    if (alias.Boxes && !shared)
++                        return false;
++
++                    if (alias.ElementType is { } elementType)
++                        shared |= MayBeReference(elementType);
++
++                    path = true;
++                    depth++;
++                    receiver = alias.Source;
++                    continue;
++                case IConditionalAccessOperation access when path:
++                    // `var inner = box?.Inner`: the value read when the receiver is not null.
++                    receiver = access.WhenNotNull;
++                    continue;
+             }
+ 
++            if (path && !IsAccessPathStep(receiver))
++                return false;
++
+             if (receiver is IConversionOperation boxing && IsBoxing(boxing))
+             {
+                 // The box is a fresh copy: a write into it reaches the caller only through a reference
+@@ -154,11 +232,13 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+                     // A struct parameter (Span<T> included) is not a reference-type parameter unless ref/out.
+                     return MayBeReference(parameter.Type) || parameter.RefKind is RefKind.Ref or RefKind.Out;
+                 case IConditionalAccessInstanceOperation instance:
+-                    var access = EnclosingAccess(instance);
+-                    if (access is null)
++                    var enclosing = EnclosingAccess(instance);
++                    if (enclosing is null)
+                         return false;
+-                    start = access.Syntax.SpanStart;
+-                    receiver = access.Operation;
++                    // Only the target's own `?.` widens the report; one inside an alias's source is elsewhere.
++                    if (!path)
++                        start = enclosing.Syntax.SpanStart;
++                    receiver = enclosing.Operation;
+                     break;
+                 case IConversionOperation conversion:
+                     receiver = conversion.Operand;
+@@ -172,6 +252,32 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+         return false;
+     }
+ 
++    /// <summary>Bounds a chain of aliases; it is finite in code that compiles.</summary>
++    private const int MaxAliasDepth = 32;
++
++    /// <summary>
++    /// True when <paramref name="operation"/> may be a step of an access path, the only thing a local alias
++    /// may stand for: a parameter, another local, a field, property, indexer or array element read, a cast
++    /// or <c>as</c> without a user-defined operator, or the receiver of a <c>?.</c>. A method call ends the
++    /// path, because its result may be a fresh object (<c>values.ToArray()</c>), and so does a range
++    /// (<c>values[1..]</c> copies the array) and a dynamic access, whose meaning is decided at run time.
++    /// </summary>
++    private static bool IsAccessPathStep(IOperation operation) => operation switch
++    {
++        IParameterReferenceOperation or IConditionalAccessInstanceOperation => true,
++        IFieldReferenceOperation or IEventReferenceOperation => true,
++        IPropertyReferenceOperation property => !HasRange(property.Arguments.Select(argument => argument.Value)),
++        IArrayElementReferenceOperation element => !HasRange(element.Indices),
++        IImplicitIndexerReferenceOperation indexer => !IsRange(indexer.Argument),
++        IConversionOperation conversion => conversion.OperatorMethod is null,
++        _ => false
++    };
++
++    private static bool HasRange(IEnumerable<IOperation> indices) => indices.Any(IsRange);
++
++    private static bool IsRange(IOperation index)
++        => index.Type is { Name: "Range", ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } };
++
+     /// <summary>
+     /// The value a field, property, event, element or method result is reached from, or null. For an
+     /// extension method that is the argument passed to its <c>this</c> parameter.
+diff --git a/ancplua-fprog/Shared/LocalAliases.cs b/ancplua-fprog/Shared/LocalAliases.cs
+new file mode 100644
+index 0000000..d33dfa2
+--- /dev/null
++++ b/ancplua-fprog/Shared/LocalAliases.cs
+@@ -0,0 +1,186 @@
++using System;
++using System.Collections.Generic;
++using System.Collections.Immutable;
++using System.Threading;
++using Microsoft.CodeAnalysis;
++using Microsoft.CodeAnalysis.CSharp;
++using Microsoft.CodeAnalysis.CSharp.Syntax;
++using Microsoft.CodeAnalysis.Operations;
++
++namespace ancplua_fprog.Shared;
++
++/// <summary>
++/// What a local variable stands for: <see cref="Source"/> itself, or, for a <c>foreach</c> iteration
++/// variable, an element of the collection <see cref="Source"/>.
++/// </summary>
++internal sealed class LocalAlias(IOperation source, ITypeSymbol? elementType, bool boxes)
++{
++    /// <summary>The initializer, the tested expression of a pattern, or the collection of a <c>foreach</c>.</summary>
++    public IOperation Source { get; } = source;
++
++    /// <summary>For a <c>foreach</c> variable, the type of the elements read from the collection; otherwise null.</summary>
++    public ITypeSymbol? ElementType { get; } = elementType;
++
++    /// <summary>
++    /// True when the local holds a box of a struct value that has no conversion operation of its own: a
++    /// reference-typed pattern variable over a struct value, or a reference-typed <c>foreach</c> variable over
++    /// struct elements. The local then refers to a fresh copy, not to the value it was taken from.
++    /// </summary>
++    public bool Boxes { get; } = boxes;
++}
++
++/// <summary>
++/// The locals of one operation block (a member body with its lambdas and local functions, or an initializer)
++/// that are another name for an expression: a local declared with an initializer, a <c>foreach</c> iteration
++/// variable, or a pattern variable declared by the top-level pattern (also through <c>and</c>) of an
++/// <c>is</c> expression, a <c>case</c> label or a switch-expression arm. A local that is written anywhere in
++/// the block after its declaration (assignment, compound assignment, <c>??=</c>, <c>++</c>/<c>--</c>,
++/// deconstruction, <c>ref</c>/<c>out</c>/<c>in</c> argument, <c>ref</c> alias, address taken) or that is a
++/// <c>ref</c> local is no alias: it may stand for something else by the time it is used. The table is built
++/// lazily, in one walk over the block, the first time a caller asks; it is read-only afterwards and safe to
++/// share between threads.
++/// </summary>
++internal sealed class LocalAliases
++{
++    private readonly Lazy<(Dictionary<ILocalSymbol, LocalAlias> Aliases, HashSet<ILocalSymbol> Written)> _table;
++
++    public LocalAliases(ImmutableArray<IOperation> blocks, CancellationToken cancellationToken)
++        => _table = new(() => Build(blocks, cancellationToken), LazyThreadSafetyMode.ExecutionAndPublication);
++
++    /// <summary>
++    /// The expression <paramref name="local"/> stands for, when it is declared in this block, never written
++    /// again and its type may be a reference (a local of a value type is a copy and never an alias).
++    /// </summary>
++    public bool TryGet(ILocalSymbol local, out LocalAlias alias)
++    {
++        alias = null!;
++        if (local.RefKind != RefKind.None || !MayBeReference(local.Type))
++            return false;
++
++        var (aliases, written) = _table.Value;
++        if (written.Contains(local) || !aliases.TryGetValue(local, out var found))
++            return false;
++
++        alias = found;
++        return true;
++    }
++
++    private static (Dictionary<ILocalSymbol, LocalAlias>, HashSet<ILocalSymbol>) Build(
++        ImmutableArray<IOperation> blocks,
++        CancellationToken cancellationToken)
++    {
++        var aliases = new Dictionary<ILocalSymbol, LocalAlias>(SymbolEqualityComparer.Default);
++        var written = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
++        foreach (var block in blocks)
++        {
++            foreach (var operation in block.DescendantsAndSelf())
++            {
++                cancellationToken.ThrowIfCancellationRequested();
++                switch (operation)
++                {
++                    case ILocalReferenceOperation reference when IsWritten(reference):
++                        written.Add(reference.Local);
++                        break;
++                    case IVariableDeclaratorOperation declarator
++                        when declarator.GetVariableInitializer() is { Value: var value }:
++                        aliases[declarator.Symbol] = new LocalAlias(value, elementType: null, boxes: false);
++                        break;
++                    case IForEachLoopOperation { LoopControlVariable: IVariableDeclaratorOperation variable } loop
++                        when ElementType(loop) is { } elementType:
++                        // Converting a struct element to a reference-typed variable boxes a copy of it.
++                        aliases[variable.Symbol] = new LocalAlias(
++                            loop.Collection,
++                            elementType,
++                            boxes: elementType.IsValueType && MayBeReference(variable.Symbol.Type));
++                        break;
++                    case IIsPatternOperation isPattern:
++                        AddPatternVariables(aliases, isPattern.Pattern, isPattern.Value);
++                        break;
++                    case IPatternCaseClauseOperation { Parent.Parent: ISwitchOperation switchStatement } clause:
++                        AddPatternVariables(aliases, clause.Pattern, switchStatement.Value);
++                        break;
++                    case ISwitchExpressionArmOperation { Parent: ISwitchExpressionOperation switchExpression } arm:
++                        AddPatternVariables(aliases, arm.Pattern, switchExpression.Value);
++                        break;
++                }
++            }
++        }
++
++        return (aliases, written);
++    }
++
++    /// <summary>Records the variables that the top-level pattern declares for the value it tests.</summary>
++    private static void AddPatternVariables(
++        Dictionary<ILocalSymbol, LocalAlias> aliases,
++        IPatternOperation pattern,
++        IOperation tested)
++    {
++        switch (pattern)
++        {
++            // Parentheses around a pattern have no operation of their own.
++            case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } both:
++                AddPatternVariables(aliases, both.LeftPattern, tested);
++                AddPatternVariables(aliases, both.RightPattern, tested);
++                break;
++            case IDeclarationPatternOperation { DeclaredSymbol: ILocalSymbol local }:
++                Add(local);
++                break;
++            case IRecursivePatternOperation { DeclaredSymbol: ILocalSymbol local }:
++                Add(local);
++                break;
++            case IListPatternOperation { DeclaredSymbol: ILocalSymbol local }:
++                Add(local);
++                break;
++        }
++
++        void Add(ILocalSymbol local)
++            => aliases[local] = new LocalAlias(
++                tested,
++                elementType: null,
++                // A reference-typed variable over a struct value holds a box: a copy.
++                boxes: tested.Type is { IsValueType: true } && MayBeReference(local.Type));
++    }
++
++    /// <summary>The type of the elements a <c>foreach</c> reads, or null when the compiler could not tell.</summary>
++    private static ITypeSymbol? ElementType(IForEachLoopOperation loop)
++        => loop is { Syntax: CommonForEachStatementSyntax syntax, SemanticModel: { } model }
++            ? model.GetForEachStatementInfo(syntax).ElementType
++            : null;
++
++    /// <summary>
++    /// True when <paramref name="reference"/> may give its local another value or let other code do so: it is
++    /// the target of an assignment of any kind (also inside a deconstruction), of <c>++</c>/<c>--</c>, a
++    /// <c>ref</c>, <c>out</c> or <c>in</c> argument, the operand of <c>ref</c> (a ref local, ref return or ref
++    /// conditional that aliases it) or of <c>&amp;</c>. Arguments are judged by their keyword, not by the
++    /// parameter, so that dynamic calls count too; counting an <c>in</c> argument only loses an alias.
++    /// </summary>
++    private static bool IsWritten(ILocalReferenceOperation reference)
++    {
++        IOperation current = reference;
++        while (current.Parent is ITupleOperation)
++            current = current.Parent;
++
++        switch (current.Parent)
++        {
++            case IAssignmentOperation assignment when assignment.Target == current:
++            case IIncrementOrDecrementOperation increment when increment.Target == current:
++            case IForEachLoopOperation loop when loop.LoopControlVariable == current:
++            case IAddressOfOperation:
++                return true;
++        }
++
++        var syntax = reference.Syntax;
++        while (syntax.Parent is ParenthesizedExpressionSyntax parenthesized)
++            syntax = parenthesized;
++
++        return syntax.Parent is RefExpressionSyntax
++               || (syntax.Parent is ArgumentSyntax argument && !argument.RefKindKeyword.IsKind(SyntaxKind.None));
++    }
++
++    /// <summary>
++    /// True when a value of <paramref name="type"/> may be a reference to an object: classes, interfaces,
++    /// arrays, delegates, <c>dynamic</c> and type parameters not known to be value types.
++    /// </summary>
++    public static bool MayBeReference(ITypeSymbol? type)
++        => type is { IsValueType: false, TypeKind: not TypeKind.Pointer and not TypeKind.FunctionPointer };
++}
+-- 
+2.43.0
+

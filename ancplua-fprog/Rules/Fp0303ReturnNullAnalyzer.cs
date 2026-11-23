@@ -7,11 +7,14 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0303: a <c>return</c> (explicit, expression-bodied, lambda or <c>yield return</c>) inside the
-/// functional core whose value is a <c>null</c> literal or a <c>default</c> expression, converted to a
-/// type that is not a non-nullable value type (pointers count as nullable). Conversions, conditional branches, switch-expression
-/// arms, the right side of <c>??</c> and the value of <c>=</c> and <c>??=</c> are looked through. Reported at the literal or
-/// expression. A <c>null</c> constant reached through a name, and <c>new int?()</c>, are not literals and are not reported.
+///     FP0303: a <c>return</c> (explicit, expression-bodied, lambda or <c>yield return</c>) inside the
+///     functional core whose value is a <c>null</c> literal or a <c>default</c> expression, converted to a
+///     type that is not a non-nullable value type (pointers count as nullable). Conversions, conditional branches,
+///     switch-expression
+///     arms, the right side of <c>??</c> and the value of <c>=</c> and <c>??=</c> are looked through. Reported at the
+///     literal or
+///     expression. A <c>null</c> constant reached through a name, and <c>new int?()</c>, are not literals and are not
+///     reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
@@ -37,17 +40,17 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
         if (context.Operation is not IReturnOperation { ReturnedValue: { Type: { } type } value }
             || !CanBeNull(type)
             || !CoreScope.IsInCore(context.ContainingSymbol))
-        {
             return;
-        }
 
         ReportNullOrDefault(context, value);
     }
 
     private static bool CanBeNull(ITypeSymbol type)
-        => !type.IsValueType
-           || type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer
-           || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+    {
+        return !type.IsValueType
+               || type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer
+               || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+    }
 
     private static void ReportNullOrDefault(OperationAnalysisContext context, IOperation value)
     {

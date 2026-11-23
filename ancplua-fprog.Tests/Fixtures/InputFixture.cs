@@ -8,7 +8,6 @@ namespace ancplua_fprog.Tests.Fixtures;
 
 public sealed class InputFixture : IFixture<InputFixture>
 {
-    internal static ConcurrentBag<string> CreatedPaths { get; } = new();
     private readonly string _directory;
 
     private InputFixture(string directory)
@@ -17,11 +16,14 @@ public sealed class InputFixture : IFixture<InputFixture>
         Path = System.IO.Path.Combine(directory, "input.txt");
     }
 
+    internal static ConcurrentBag<string> CreatedPaths { get; } = new();
+
     public string Path { get; }
 
     public static async Task<InputFixture> CreateAsync(CancellationToken cancellationToken)
     {
-        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fixture-example-" + Guid.NewGuid().ToString("N"));
+        var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+            "fixture-example-" + Guid.NewGuid().ToString("N"));
         var fixture = new InputFixture(directory);
         try
         {
@@ -39,7 +41,7 @@ public sealed class InputFixture : IFixture<InputFixture>
 
     public ValueTask DisposeAsync()
     {
-        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
         return ValueTask.CompletedTask;
     }
 }

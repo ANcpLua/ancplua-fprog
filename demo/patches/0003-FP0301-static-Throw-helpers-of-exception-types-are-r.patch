@@ -1,0 +1,318 @@
+From a7c2247be82b2acf2b244bded6e267f227029063 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:11:01 +0100
+Subject: [PATCH 03/12] FP0301: static Throw* helpers of exception types are
+ reported
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0301Tests.cs   | 213 +++++++++++++++++++++
+ ancplua-fprog/Rules/Fp0301ThrowAnalyzer.cs |  53 ++++-
+ 2 files changed, 265 insertions(+), 1 deletion(-)
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0301Tests.cs b/ancplua-fprog.Tests/Rules/Fp0301Tests.cs
+index ece723e..392fc85 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0301Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0301Tests.cs
+@@ -569,6 +569,219 @@ public sealed class Fp0301Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0301_FrameworkThrowHelpersInCore_Reports() => VerifyAsync("""
++        using System;
++
++        [Fprog.FunctionalCore]
++        public static class Guard
++        {
++            public static int Positive(int value)
++            {
++                ArgumentOutOfRangeException.{|FP0301:ThrowIfNegativeOrZero|}(value);
++                ArgumentOutOfRangeException.{|FP0301:ThrowIfGreaterThan|}<int>(value, 10);
++                System.ArgumentOutOfRangeException.{|FP0301:ThrowIfEqual|}(value, 3);
++                return value;
++            }
++
++            public static string Named(string? name)
++            {
++                ArgumentNullException.{|FP0301:ThrowIfNull|}(name);
++                ArgumentException.{|FP0301:ThrowIfNullOrWhiteSpace|}(name);
++                global::System.ArgumentException.{|FP0301:ThrowIfNullOrEmpty|}(name);
++                return name;
++            }
++
++            public static int Disposed(bool gone, object owner)
++            {
++                ObjectDisposedException.{|FP0301:ThrowIf|}(gone, owner);
++                return 1;
++            }
++
++            public static int Inherited(string text)
++            {
++                ArgumentNullException.{|FP0301:ThrowIfNullOrEmpty|}(text);
++                return text.Length;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0301_ThrowHelperThroughUsingStaticLambdaAndLocalFunction_Reports() => VerifyAsync("""
++        using System;
++        using static System.ArgumentNullException;
++
++        [Fprog.FunctionalCore]
++        public static class Guard
++        {
++            public static string Named(string? name)
++            {
++                {|FP0301:ThrowIfNull|}(name);
++                return name;
++            }
++
++            public static Func<int, int> Check() => n =>
++            {
++                ArgumentOutOfRangeException.{|FP0301:ThrowIfNegative|}(n);
++                return Local(n);
++
++                int Local(int m)
++                {
++                    ArgumentOutOfRangeException.{|FP0301:ThrowIfZero|}(m);
++                    return m;
++                }
++            };
++
++            public static int Initialized { get; } = Make(1);
++
++            private static int Make(int n)
++            {
++                ArgumentOutOfRangeException.{|FP0301:ThrowIfNegative|}(n);
++                return n;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0301_StaticThrowHelperOnUserExceptionType_Reports() => VerifyAsync("""
++        using System;
++
++        public sealed class NotFoundException(string message) : InvalidOperationException(message)
++        {
++            public static void Throw(string what) => throw new NotFoundException(what);
++
++            public static void ThrowIfMissing(object? value, string what)
++            {
++                if (value is null)
++                    throw new NotFoundException(what);
++            }
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Lookup
++        {
++            public static object Find(object? value)
++            {
++                NotFoundException.{|FP0301:ThrowIfMissing|}(value, "value");
++                if (value is string)
++                    NotFoundException.{|FP0301:Throw|}("text");
++                return value!;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0301_ThrowHelperInUnionBodyInCoreReportedOnce_Reports() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Pets
++        {
++            public record Cat;
++            public record Dog;
++
++            public union Pet(Cat, Dog)
++            {
++                public static Pet Make(Cat? cat)
++                {
++                    System.ArgumentNullException.{|FP0301:ThrowIfNull|}(cat);
++                    return cat;
++                }
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0301_ThrowHelpersOutOfScope_NoReport() => VerifyAsync("""
++        using System;
++        using System.Runtime.ExceptionServices;
++        using System.Threading;
++
++        public static class ShellGuard
++        {
++            public static T Fail<T>(string message) => throw new InvalidOperationException(message);
++
++            public static void ThrowIfNegative(int value)
++            {
++                if (value < 0)
++                    throw new ArgumentOutOfRangeException(nameof(value));
++            }
++        }
++
++        public sealed class RichException(string message) : Exception(message)
++        {
++            public void ThrowAgain() => throw this;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Uses
++        {
++            public static int Cancel(CancellationToken ct)
++            {
++                ct.ThrowIfCancellationRequested();
++                return 1;
++            }
++
++            public static int Dispatch(Exception e)
++            {
++                ExceptionDispatchInfo.Throw(e);
++                ExceptionDispatchInfo.Capture(e).Throw();
++                return 1;
++            }
++
++            public static int Debugging()
++            {
++                System.Diagnostics.Debug.Fail("x");
++                return 1;
++            }
++
++            public static int Helper(int v)
++            {
++                ShellGuard.ThrowIfNegative(v);
++                return v < 0 ? ShellGuard.Fail<int>("negative") : v;
++            }
++
++            public static int Instance(RichException e)
++            {
++                e.ThrowAgain();
++                return 1;
++            }
++
++            public static int Marshalled(int hr)
++            {
++                System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(hr);
++                return hr;
++            }
++
++            public static Action<object?, string?> Group() => ArgumentNullException.ThrowIfNull;
++
++            public static string Name() => nameof(ArgumentNullException.ThrowIfNull);
++
++            public static Exception Make() => new ArgumentNullException("x");
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0301_ThrowHelperOutsideCoreAndInGeneratedCode_NoReport() => VerifyAsync("""
++        // <auto-generated/>
++        public static class Shell
++        {
++            public static string Named(string? name)
++            {
++                System.ArgumentNullException.ThrowIfNull(name);
++                return name;
++            }
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Generated
++        {
++            public static int Positive(int value)
++            {
++                System.ArgumentOutOfRangeException.ThrowIfNegative(value);
++                return value;
++            }
++        }
++        """);
++
+     private Task VerifyAsync(string source)
+         => FpAnalyzerTestHost.VerifyRuleAsync("FP0301", source, testContext.CancellationToken);
+ }
+diff --git a/ancplua-fprog/Rules/Fp0301ThrowAnalyzer.cs b/ancplua-fprog/Rules/Fp0301ThrowAnalyzer.cs
+index fa62d27..758ea62 100644
+--- a/ancplua-fprog/Rules/Fp0301ThrowAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0301ThrowAnalyzer.cs
+@@ -4,12 +4,21 @@ using Microsoft.CodeAnalysis;
+ using Microsoft.CodeAnalysis.CSharp;
+ using Microsoft.CodeAnalysis.CSharp.Syntax;
+ using Microsoft.CodeAnalysis.Diagnostics;
++using Microsoft.CodeAnalysis.Operations;
+ 
+ namespace ancplua_fprog.Rules;
+ 
+ /// <summary>
+ /// FP0301: a <c>throw</c> statement or <c>throw</c> expression inside the functional core, including
+-/// a rethrow (<c>throw;</c>). Reported at the <c>throw</c> keyword.
++/// a rethrow (<c>throw;</c>), reported at the <c>throw</c> keyword; and a call of a throw helper, reported at
++/// the method name token. A throw helper is a static method whose name starts with <c>Throw</c> on a type
++/// that derives from <c>System.Exception</c>, such as <c>ArgumentNullException.ThrowIfNull</c> or
++/// <c>ObjectDisposedException.ThrowIf</c>: it throws without the keyword, and .NET's code fixes for
++/// CA1510 to CA1513 rewrite <c>if (...) throw</c> into exactly these calls. In the .NET 11 framework every
++/// such public method is a <c>ThrowIf*</c> guard. Deliberately not reported: instance helpers such as
++/// <c>CancellationToken.ThrowIfCancellationRequested()</c>, <c>ExceptionDispatchInfo.Throw</c> (not an
++/// exception type), <c>Debug.Fail</c>, helpers on user types that are not exceptions, and method groups of
++/// a throw helper (a reference, not a throw).
+ /// </summary>
+ [DiagnosticAnalyzer(LanguageNames.CSharp)]
+ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
+@@ -28,8 +37,50 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
+         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+         context.EnableConcurrentExecution();
+         context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ThrowStatement, SyntaxKind.ThrowExpression);
++        context.RegisterOperationAction(AnalyzeInvocation, OperationKind.Invocation);
+     }
+ 
++    private static void AnalyzeInvocation(OperationAnalysisContext context)
++    {
++        var invocation = (IInvocationOperation)context.Operation;
++        if (!IsThrowHelper(invocation.TargetMethod)
++            || invocation.Syntax is not InvocationExpressionSyntax syntax
++            || !CoreScope.IsInCore(context.ContainingSymbol))
++        {
++            return;
++        }
++
++        var name = NameToken(syntax.Expression);
++        if (name.IsKind(SyntaxKind.IdentifierToken))
++            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation()));
++    }
++
++    private static bool IsThrowHelper(IMethodSymbol method)
++        => method.IsStatic
++           && method.Name.StartsWith("Throw", System.StringComparison.Ordinal)
++           && IsExceptionType(method.ContainingType);
++
++    private static bool IsExceptionType(INamedTypeSymbol? type)
++    {
++        for (var current = type; current is not null; current = current.BaseType)
++        {
++            if (current is { Name: "Exception", ContainingType: null, ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } })
++                return true;
++        }
++
++        return false;
++    }
++
++    /// <summary>The method name token of the invoked expression, also when it is parenthesized.</summary>
++    private static SyntaxToken NameToken(ExpressionSyntax expression) => expression switch
++    {
++        ParenthesizedExpressionSyntax parenthesized => NameToken(parenthesized.Expression),
++        MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
++        MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier,
++        SimpleNameSyntax simpleName => simpleName.Identifier,
++        _ => default
++    };
++
+     private static void Analyze(SyntaxNodeAnalysisContext context)
+     {
+         // Roslyn 5.9.0 runs a syntax node action inside the body of a C# 15 union declaration once with
+-- 
+2.43.0
+

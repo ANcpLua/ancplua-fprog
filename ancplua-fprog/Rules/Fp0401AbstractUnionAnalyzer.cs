@@ -6,8 +6,8 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0401: a union (a class or record annotated <c>[Fprog.Union]</c>) that is not abstract, inside or
-/// outside the functional core. Reported once, at the union's name in its first declaration.
+///     FP0401: a union (a class or record annotated <c>[Fprog.Union]</c>) that is not abstract, inside or
+///     outside the functional core. Reported once, at the union's name in its first declaration.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0401AbstractUnionAnalyzer : DiagnosticAnalyzer

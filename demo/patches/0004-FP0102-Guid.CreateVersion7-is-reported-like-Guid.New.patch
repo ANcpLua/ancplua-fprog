@@ -1,0 +1,102 @@
+From 9e03613ad35374080d48a555acf3054604960085 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:12:42 +0100
+Subject: [PATCH 04/12] FP0102: Guid.CreateVersion7 is reported like
+ Guid.NewGuid
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0102Tests.cs      | 51 +++++++++++++++++++
+ .../Rules/Fp0102HiddenInputAnalyzer.cs        |  6 ++-
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0102Tests.cs b/ancplua-fprog.Tests/Rules/Fp0102Tests.cs
+index 788128c..f0ca397 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0102Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0102Tests.cs
+@@ -47,6 +47,57 @@ public sealed class Fp0102Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0102_GuidCreateVersion7CallAndMethodGroup_Reports() => VerifyAsync("""
++        using System;
++
++        [Fprog.FunctionalCore]
++        public static unsafe class Ids
++        {
++            public static Guid Next() => Guid.{|FP0102:CreateVersion7|}();
++
++            public static Guid At(DateTimeOffset time) => global::System.Guid.{|FP0102:CreateVersion7|}(time);
++
++            public static Func<Guid> Factory() => Guid.{|FP0102:CreateVersion7|};
++
++            public static Func<DateTimeOffset, Guid> Timed() => new Func<DateTimeOffset, Guid>(Guid.{|FP0102:CreateVersion7|});
++
++            public static Guid Pointer()
++            {
++                delegate*<Guid> make = &Guid.{|FP0102:CreateVersion7|};
++                return make();
++            }
++
++            public static Func<string> Lambda() => () => Guid.{|FP0102:CreateVersion7|}().ToString();
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0102_GuidCreateVersion7InNameOfLookalikeAndShell_NoReport() => VerifyAsync("""
++        namespace Domain
++        {
++            public static class Guid
++            {
++                public static System.Guid CreateVersion7() => System.Guid.Empty;
++            }
++
++            [Fprog.FunctionalCore]
++            public static class Uses
++            {
++                public static System.Guid Own() => Guid.CreateVersion7();
++
++                public static string Name() => nameof(System.Guid.CreateVersion7);
++
++                public static System.Guid Parsed(System.Guid id) => new System.Guid(id.ToByteArray());
++            }
++
++            public static class Shell
++            {
++                public static System.Guid Make() => System.Guid.CreateVersion7();
++            }
++        }
++        """);
++
+     [TestMethod]
+     public Task FP0102_TimeProviderSystem_Reports() => VerifyAsync("""
+         using System;
+diff --git a/ancplua-fprog/Rules/Fp0102HiddenInputAnalyzer.cs b/ancplua-fprog/Rules/Fp0102HiddenInputAnalyzer.cs
+index 82bac98..65a9ebc 100644
+--- a/ancplua-fprog/Rules/Fp0102HiddenInputAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0102HiddenInputAnalyzer.cs
+@@ -10,7 +10,9 @@ namespace ancplua_fprog.Rules;
+ 
+ /// <summary>
+ /// FP0102: a hidden input inside the functional core. Reports <c>DateTime.Now/UtcNow/Today</c>,
+-/// <c>DateTimeOffset.Now/UtcNow</c>, <c>Guid.NewGuid</c>, <c>TimeProvider.System</c>, any member of
++/// <c>DateTimeOffset.Now/UtcNow</c>, <c>Guid.NewGuid</c>, <c>Guid.CreateVersion7</c> (clock and random bits,
++/// so also the overload that takes a timestamp gives a new value for the same argument),
++/// <c>TimeProvider.System</c>, any member of
+ /// <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
+ /// static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
+ /// defers binding to run time. Reported at the member's name token (inside any parentheses), or at
+@@ -90,7 +92,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
+             return false;
+ 
+         if (IsSystemType(method.ContainingType, "Environment")
+-            || (IsSystemType(method.ContainingType, "Guid") && method.Name == "NewGuid"))
++            || (IsSystemType(method.ContainingType, "Guid") && method.Name is "NewGuid" or "CreateVersion7"))
+         {
+             return true;
+         }
+-- 
+2.43.0
+

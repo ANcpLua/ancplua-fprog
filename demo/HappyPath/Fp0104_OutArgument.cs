@@ -1,0 +1,17 @@
+namespace Demo.Fp0104_OutArgument;
+
+public sealed record Counter(int Value);
+
+// Correct: the result is a local, and the new state is returned.
+[Fprog.FunctionalCore]
+public static class Reader
+{
+    public static Counter Read(string text, Counter counter)
+        => int.TryParse(text, out var value) ? counter with { Value = value } : counter;
+
+    public static int ReadOrZero(string text)
+    {
+        int.TryParse(text, out var value);
+        return value;
+    }
+}

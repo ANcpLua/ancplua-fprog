@@ -1,0 +1,396 @@
+From e9909575a4b0586c216746cc4cd3b754af04052f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:34:19 +0100
+Subject: [PATCH 12/12] FP0801: a shell member reached through a member
+ declared outside core is reported
+
+Coverage of a receiver is now decided where the shell type enters the chain,
+not at its leftmost root: repo.Connection.Open() reports Open even though repo
+is a typed core parameter.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0801Tests.cs      |  66 ++++++-
+ .../Rules/Fp0801ImperativeShellAnalyzer.cs    |  23 ++-
+ ancplua-fprog/Rules/Fp0801ShellUses.cs        | 174 +++++++++++-------
+ 3 files changed, 186 insertions(+), 77 deletions(-)
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0801Tests.cs b/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
+index 499d01c..e8a5253 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
+@@ -1925,23 +1925,19 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_MemberOfShellTypeOnExplicitlyTypedCoreRoot_NoReport() => VerifyAsync("""
++    public Task FP0801_ShellValueWithoutShellMemberOrOnTypedCoreReceiver_NoReport() => VerifyAsync("""
+         public sealed class ShellBuffer : System.IO.MemoryStream
+         {
+         }
+ 
+-        public sealed record Contact(string Name, System.Net.Mail.MailAddress Address);
+-
+         public sealed record Reply(System.Net.HttpStatusCode Status, System.Version Protocol);
+ 
+         [Fprog.FunctionalCore]
+         public static class Pure
+         {
+-            public static bool Internal(Contact contact) => contact.Address.Host == "example.org";
+-
+             public static bool Ok(Reply reply) => (int)reply.Status == 200;
+ 
+-            public static string Kind(Reply reply) => reply.Status.ToString();
++            public static int Major(Reply reply) => reply.Protocol.Major;
+ 
+             public static long Size(ShellBuffer buffer)
+             {
+@@ -1957,6 +1953,64 @@ public sealed class Fp0801Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0801_ShellMemberReachedThroughMemberDeclaredOutsideCore_Reports() => VerifyAsync("""
++        public sealed record Contact(string Name, System.Net.Mail.MailAddress Address);
++
++        public sealed record Reply(System.Net.HttpStatusCode Status, System.Version Protocol);
++
++        public sealed class Repo
++        {
++            public System.Data.Common.DbConnection Connection { get; init; } = null!;
++        }
++
++        public sealed class Holder
++        {
++            public System.Lazy<System.IO.StreamReader> Later { get; } = new(() => System.IO.StreamReader.Null);
++
++            public System.IO.FileInfo[] Files { get; } = [];
++        }
++
++        [Fprog.FunctionalCore]
++        public sealed class Pure(Repo store)
++        {
++            public static bool Internal(Contact contact) => contact.Address.{|FP0801:Host|} == "example.org";
++
++            public static string Kind(Reply reply) => reply.Status.{|FP0801:ToString|}();
++
++            public static int Open(Repo repo)
++            {
++                repo.Connection.{|FP0801:Open|}();
++                return 1;
++            }
++
++            public static int Length(Repo repo) => repo.Connection.{|FP0801:ConnectionString|}.Length;
++
++            public static string? Maybe(Repo? repo) => repo?.Connection.{|FP0801:Database|};
++
++            public string Primary() => store.Connection.{|FP0801:Database|};
++
++            public static string Later(Holder holder) => holder.Later.Value.{|FP0801:ReadToEnd|}();
++
++            public static long Size(Holder holder) => holder.Files[0].{|FP0801:Length|};
++
++            public static int Major(Reply reply) => reply.Protocol.Major + reply.Status.{|FP0801:GetHashCode|}();
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_ShellMemberOnWrittenShellTypeReportsOnlyTheTypeToken_Reports() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Written
++        {
++            public static long Size(System.IO.{|FP0801:StreamReader|} reader) => reader.BaseStream.Length;
++
++            public static int Name(System.IO.{|FP0801:FileInfo|} file) => file.Directory!.Name.Length + file.Name.Length;
++
++            public static long Position(System.IO.{|FP0801:StreamReader|}? reader) => reader?.BaseStream.Position ?? 0;
++        }
++        """);
++
+     [TestMethod]
+     public Task FP0801_TopLevelStatementsVarFromCreation_Reports() => VerifyAsync("""
+         [assembly: Fprog.FunctionalCore]
+diff --git a/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs b/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
+index a01cc8f..067b1bb 100644
+--- a/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
+@@ -32,11 +32,19 @@ namespace ancplua_fprog.Rules;
+ /// forbidden or whose bound member is declared on a forbidden type: reported at the member's name, for example
+ /// <c>ReadLine</c> in <c>var reader = Shell.Open(path); reader.ReadLine()</c> or <c>ReadToEnd</c> in
+ /// <c>Shell.Open(path).ReadToEnd()</c> when <c>Shell</c> is not core. Only the first such member of a chain is
+-/// reported. A receiver is covered, and nothing is reported, when FP0801 reports a token in it, when it is
+-/// <c>this</c> or <c>base</c>, or when its value comes from a declaration in core with a written type (a
+-/// parameter, primary-constructor or extension-block parameter, field, property or method, whether or not that
+-/// type is forbidden), or from a <c>var</c>, <c>foreach</c>, pattern, <c>out var</c> or lambda variable whose
+-/// source is covered. When the analysis cannot tell, the receiver counts as covered.</item>
++/// reported. Coverage is decided where the shell type enters the chain, walking from the receiver to the left.
++/// The receiver is covered, and nothing is reported, when FP0801 reports a token in it, or when the shell type
++/// enters at <c>this</c> or <c>base</c> or at a declaration in core with a written type (a parameter,
++/// primary-constructor or extension-block parameter, local, field, property or method, whether or not that type
++/// is forbidden: <c>Size(ShellBuffer buffer) => buffer.Length</c> is not reported), or at a <c>var</c>,
++/// <c>foreach</c>, pattern, <c>out var</c> or lambda variable whose source is covered. It is uncovered when the
++/// shell type enters at a member declared outside core whose declared type names it, even when the chain starts
++/// at a typed core parameter: <c>Open</c> in <c>repo.Connection.Open()</c> is reported. That also reports pure
++/// members of shell types held by a non-core type, such as <c>Host</c> in <c>contact.Address.Host</c>
++/// (<c>MailAddress</c>) or <c>ToString</c> in <c>reply.Status.ToString()</c> (<c>HttpStatusCode</c>); that is
++/// deliberate, because the same code with the type written is reported at the type name. A member on a value
++/// whose static type is not forbidden and that is not declared on a forbidden type is never reported. When the
++/// analysis cannot tell, the receiver counts as covered.</item>
+ /// <item>A target-typed <c>new(...)</c> that creates a forbidden type as an argument for a parameter of a member
+ /// outside core: reported at the <c>new</c> keyword.</item>
+ /// </list>
+@@ -44,9 +52,8 @@ namespace ancplua_fprog.Rules;
+ /// Deliberately not reported (the type is written nowhere, but no name token belongs to it, or the analysis cannot
+ /// tell): indexers, operators, conversions, <c>foreach</c> enumeration and <c>using</c> disposal of a shell object;
+ /// calls through a delegate; members on <c>dynamic</c>; extension members; a shell object passed straight to
+-/// another member; a receiver reached from an explicitly typed core root through members declared outside core
+-/// (<c>repo.Connection.Open()</c>); a receiver that is a conditional, a tuple, an anonymous object or a query
+-/// range variable; and a value whose shell type comes through a type parameter (<c>Enumerable.First</c>).
++/// another member; a receiver that is a conditional, a cast, a tuple, an anonymous object or a query range
++/// variable; and a value whose shell type comes from a static generic method (<c>Enumerable.First(xs)</c>).
+ /// </para>
+ /// </summary>
+ [DiagnosticAnalyzer(LanguageNames.CSharp)]
+diff --git a/ancplua-fprog/Rules/Fp0801ShellUses.cs b/ancplua-fprog/Rules/Fp0801ShellUses.cs
+index a2740ff..f5d5c1c 100644
+--- a/ancplua-fprog/Rules/Fp0801ShellUses.cs
++++ b/ancplua-fprog/Rules/Fp0801ShellUses.cs
+@@ -16,12 +16,12 @@ namespace ancplua_fprog.Rules;
+ /// serves one analyzer callback; it holds no state between callbacks.
+ /// <para>
+ /// A receiver is covered (nothing is reported for the member used on it) when FP0801 already reports a token
+-/// in it, when it is <c>this</c> or <c>base</c>, or when the value comes from a declaration in core with a written
+-/// type. FP0801 reports that written type itself when it is forbidden, so a member used on such a value would be
+-/// a second diagnostic for the same cause. A receiver is uncovered only when its value comes from a member
+-/// declared outside core whose declared type names the shell type, or from an implicitly typed variable whose
+-/// source is uncovered. Whenever the analysis cannot tell, the receiver counts as covered: the rule must not
+-/// report correct code.
++/// in it, or when the shell type enters the chain at <c>this</c>, <c>base</c> or a declaration in core with a
++/// written type. FP0801 reports that written type itself when it is forbidden, so a member used on such a value
++/// would be a second diagnostic for the same cause. A receiver is uncovered when the shell type enters at a member
++/// declared outside core whose declared type names it (whatever stands to its left), or at an implicitly typed
++/// variable whose source is uncovered. Whenever the analysis cannot tell, the receiver counts as covered: the rule
++/// must not report correct code.
+ /// </para>
+ /// </summary>
+ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSymbol, CancellationToken cancellationToken)
+@@ -132,10 +132,12 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+ 
+     /// <summary>
+     /// True when <paramref name="expression"/> names the shell itself or its value comes from a declaration whose
+-    /// type is written in core (see the class summary).
++    /// type is written in core (see the class summary). With <paramref name="carried"/>, the shell type reaches the
++    /// value only through a type argument or an element type, so a link whose type does not mention a shell type
++    /// cannot tell and counts as covered.
+     /// </summary>
+-    private bool IsCovered(ExpressionSyntax expression, int depth)
+-        => depth > MaxDepth || ContainsReportedToken(expression) || IsRootCovered(expression, depth);
++    private bool IsCovered(ExpressionSyntax expression, int depth, bool carried = false)
++        => depth > MaxDepth || ContainsReportedToken(expression) || IsEntryCovered(expression, depth, carried);
+ 
+     /// <summary>
+     /// True when <paramref name="expression"/> contains a token that FP0801 reports, or an instance member of a
+@@ -169,12 +171,18 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+     }
+ 
+     /// <summary>
+-    /// Follows <paramref name="expression"/> to its root, the leftmost value of the access chain: through
+-    /// parentheses, <c>!</c>, <c>await</c>, calls, element accesses and member accesses. For a member reached on a
+-    /// type, on <c>this</c> or <c>base</c>, or unqualified, the root is that member. Any other root (a literal, an
+-    /// object creation, a cast, a lambda) cannot tell and counts as covered.
++    /// Finds where the shell type enters the chain that ends in <paramref name="expression"/>, walking from the
++    /// receiver to the left, and decides there. A link that is <c>this</c> or <c>base</c>, or a symbol declared in
++    /// core (a parameter or local with a written type, a member of a core type), is covered: the core wrote the type.
++    /// A member declared outside core whose declared type names the shell type is uncovered, even when the chain to
++    /// its left starts at a typed core parameter (<c>repo.Connection.Open()</c>). An implicitly typed variable
++    /// follows its source. A member whose declared type uses a type parameter (<c>Lazy&lt;T&gt;.Value</c>, a list
++    /// indexer, <c>Enumerable.First</c> on a receiver) only passes on a type that came from further left, so the walk
++    /// goes on to its receiver; an array element goes on to the array. Anything else (a literal, an object
++    /// creation, a cast, a conditional, a static generic method, a member of an anonymous type) cannot tell and
++    /// counts as covered.
+     /// </summary>
+-    private bool IsRootCovered(ExpressionSyntax expression, int depth)
++    private bool IsEntryCovered(ExpressionSyntax expression, int depth, bool carried)
+     {
+         var current = expression;
+         while (true)
+@@ -183,45 +191,40 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+             {
+                 case ParenthesizedExpressionSyntax parenthesized:
+                     current = parenthesized.Expression;
+-                    break;
++                    continue;
+                 case PostfixUnaryExpressionSyntax postfix when postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression):
+                     current = postfix.Operand;
+-                    break;
++                    continue;
++                case ConditionalAccessExpressionSyntax conditional:
++                    current = conditional.WhenNotNull;
++                    continue;
+                 case AwaitExpressionSyntax awaited:
+                     current = awaited.Expression;
+-                    break;
+-                case InvocationExpressionSyntax invocation:
+-                    current = invocation.Expression;
+-                    break;
+-                case ElementAccessExpressionSyntax elementAccess:
+-                    current = elementAccess.Expression;
+-                    break;
+-                case ConditionalAccessExpressionSyntax conditional:
+-                    current = conditional.Expression;
+-                    break;
+-                case MemberAccessExpressionSyntax access when access.IsKind(SyntaxKind.SimpleMemberAccessExpression):
+-                    if (IsThisOrBase(access.Expression) || IsTypeOrNamespace(access.Expression))
+-                        return IsSymbolCovered(model.GetSymbolInfo(access.Name, cancellationToken).Symbol, depth);
+-
+-                    current = access.Expression;
+-                    break;
+-                case MemberBindingExpressionSyntax binding:
+-                    if (ConditionalReceiver(binding) is not { } bindingReceiver)
+-                        return true;
+-
+-                    if (IsThisOrBase(bindingReceiver))
+-                        return IsSymbolCovered(model.GetSymbolInfo(binding.Name, cancellationToken).Symbol, depth);
++                    carried = true;
++                    continue;
++                case ThisExpressionSyntax or BaseExpressionSyntax:
++                    return true;
++            }
+ 
+-                    current = bindingReceiver;
+-                    break;
+-                case ElementBindingExpressionSyntax elementBinding:
+-                    if (ConditionalReceiver(elementBinding) is not { } elementReceiver)
+-                        return true;
++            if (carried && !MentionsShellType(model.GetTypeInfo(current, cancellationToken).Type))
++                return true;
+ 
+-                    current = elementReceiver;
+-                    break;
+-                case SimpleNameSyntax name:
+-                    return IsSymbolCovered(model.GetSymbolInfo(name, cancellationToken).Symbol, depth);
++            var (symbol, next) = Link(current);
++            switch (symbol)
++            {
++                case ILocalSymbol local:
++                    return IsLocalCovered(local, depth);
++                case IParameterSymbol parameter:
++                    return IsParameterCovered(parameter, depth);
++                case IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol
++                    when CoreScope.IsInCore(symbol) || symbol.ContainingType is { IsAnonymousType: true }:
++                    return true;
++                case IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol when !MentionsTypeParameter(DeclaredType(symbol)):
++                    return false;
++                case IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol or null when next is not null:
++                    current = next;
++                    carried = true;
++                    continue;
+                 default:
+                     return true;
+             }
+@@ -229,24 +232,68 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+     }
+ 
+     /// <summary>
+-    /// True when the value of <paramref name="symbol"/> has its type written in core. A member in core declares its
+-    /// type in writing. A member outside core is uncovered, unless its declared type uses a type parameter: then
+-    /// the shell type came from a type argument (<c>Lazy&lt;T&gt;.Value</c>, <c>Enumerable.First</c>) and cannot be
+-    /// told apart from one the core wrote.
++    /// The symbol that gives the value of one link of a chain, and the expression to its left that a type
++    /// argument of that value can come from (null when there is none: a static member, a member reached
++    /// unqualified, or a syntax that is not a link).
+     /// </summary>
+-    private bool IsSymbolCovered(ISymbol? symbol, int depth)
+-        => symbol switch
++    private (ISymbol? Symbol, ExpressionSyntax? Next) Link(ExpressionSyntax link)
++    {
++        switch (link)
+         {
+-            ILocalSymbol local => IsLocalCovered(local, depth),
+-            IParameterSymbol parameter => IsParameterCovered(parameter, depth),
+-            IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol when CoreScope.IsInCore(symbol) => true,
+-            IFieldSymbol field => MentionsTypeParameter(field.OriginalDefinition.Type),
+-            IPropertySymbol property => MentionsTypeParameter(property.OriginalDefinition.Type),
+-            IEventSymbol @event => MentionsTypeParameter(@event.OriginalDefinition.Type),
+-            IMethodSymbol method => MentionsTypeParameter((method.ReducedFrom ?? method).OriginalDefinition.ReturnType),
+-            _ => true
++            case SimpleNameSyntax name:
++                return (model.GetSymbolInfo(name, cancellationToken).Symbol, null);
++            case MemberAccessExpressionSyntax access when access.IsKind(SyntaxKind.SimpleMemberAccessExpression):
++                var member = model.GetSymbolInfo(access.Name, cancellationToken).Symbol;
++                return (member, member is { IsStatic: false } && !IsTypeOrNamespace(access.Expression) ? access.Expression : null);
++            case MemberBindingExpressionSyntax binding:
++                return (model.GetSymbolInfo(binding.Name, cancellationToken).Symbol, ConditionalReceiver(binding));
++            case InvocationExpressionSyntax invocation:
++                var method = model.GetSymbolInfo(invocation, cancellationToken).Symbol as IMethodSymbol;
++                if (method is { MethodKind: MethodKind.DelegateInvoke })
++                    return (method, invocation.Expression);
++
++                return (method, method is { IsStatic: false } or { MethodKind: MethodKind.ReducedExtension }
++                    ? Link(invocation.Expression).Next
++                    : null);
++            case ElementAccessExpressionSyntax elementAccess:
++                return (model.GetSymbolInfo(elementAccess, cancellationToken).Symbol, elementAccess.Expression);
++            case ElementBindingExpressionSyntax elementBinding:
++                return (model.GetSymbolInfo(elementBinding, cancellationToken).Symbol, ConditionalReceiver(elementBinding));
++            default:
++                return (null, null);
++        }
++    }
++
++    private static ITypeSymbol DeclaredType(ISymbol member)
++        => member switch
++        {
++            IFieldSymbol field => field.OriginalDefinition.Type,
++            IPropertySymbol property => property.OriginalDefinition.Type,
++            IEventSymbol @event => @event.OriginalDefinition.Type,
++            _ => ((IMethodSymbol)member).ReducedFrom?.OriginalDefinition.ReturnType
++                 ?? ((IMethodSymbol)member).OriginalDefinition.ReturnType
+         };
+ 
++    /// <summary>True when <paramref name="type"/> is, derives from or has as a type argument a forbidden type.</summary>
++    private static bool MentionsShellType(ITypeSymbol? type)
++    {
++        switch (type)
++        {
++            case IArrayTypeSymbol array:
++                return MentionsShellType(array.ElementType);
++            case INamedTypeSymbol named:
++                for (var current = named; current is not null; current = current.BaseType)
++                {
++                    if (Fp0801ImperativeShellAnalyzer.IsForbidden(current))
++                        return true;
++                }
++
++                return named.TypeArguments.Any(MentionsShellType);
++            default:
++                return false;
++        }
++    }
++
+     /// <summary>
+     /// A local with a written type is covered. A <c>var</c> local (also <c>using var</c>) is covered when its
+     /// initializer is, a <c>foreach (var ...)</c> variable when its collection is, and a pattern or deconstruction
+@@ -261,7 +308,7 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+                        || declarator.Initializer is not { } initializer
+                        || IsCovered(initializer.Value, depth + 1);
+             case ForEachStatementSyntax forEach:
+-                return !forEach.Type.IsVar || IsCovered(forEach.Expression, depth + 1);
++                return !forEach.Type.IsVar || IsCovered(forEach.Expression, depth + 1, carried: true);
+             case SingleVariableDesignationSyntax designation:
+                 return IsDesignationCovered(designation, depth);
+             default:
+@@ -300,7 +347,8 @@ internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSy
+         return node.Parent switch
+         {
+             AssignmentExpressionSyntax assignment when assignment.Left == node => IsCovered(assignment.Right, depth + 1),
+-            ForEachVariableStatementSyntax forEach when forEach.Variable == node => IsCovered(forEach.Expression, depth + 1),
++            ForEachVariableStatementSyntax forEach when forEach.Variable == node
++                => IsCovered(forEach.Expression, depth + 1, carried: true),
+             _ => true
+         };
+     }
+-- 
+2.43.0
+

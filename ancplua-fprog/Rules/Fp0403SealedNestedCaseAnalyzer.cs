@@ -6,9 +6,9 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0403: a case of a union (a type whose direct base type is a union) is not sealed, or its
-/// containing type is not that union. Applies to every union, inside and outside core. Reported once
-/// per case at the case's name, for a partial case at its first declaration in source order.
+///     FP0403: a case of a union (a type whose direct base type is a union) is not sealed, or its
+///     containing type is not that union. Applies to every union, inside and outside core. Reported once
+///     per case at the case's name, for a partial case at its first declaration in source order.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0403SealedNestedCaseAnalyzer : DiagnosticAnalyzer

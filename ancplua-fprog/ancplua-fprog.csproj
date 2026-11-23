@@ -18,16 +18,16 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0"/>
     </ItemGroup>
 
     <ItemGroup>
-        <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
-        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+        <AdditionalFiles Include="AnalyzerReleases.Shipped.md"/>
+        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md"/>
     </ItemGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="ancplua-fprog.Tests" />
+        <InternalsVisibleTo Include="ancplua-fprog.Tests"/>
     </ItemGroup>
 
 </Project>

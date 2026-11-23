@@ -1,0 +1,1242 @@
+From d45170da873bded983102a9a7e7bfa986c9c99fb Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:18:40 +0100
+Subject: [PATCH 11/12] FP0801: report shell uses that no written type name
+ covers
+
+Static members of a forbidden type imported with using static are reported at
+their name; instance members on a shell object whose type is written nowhere in
+core (uncovered receiver) at the member name; a target-typed new of a forbidden
+type for a parameter declared outside core at the new keyword.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0801Tests.cs      | 545 +++++++++++++++++-
+ .../Rules/Fp0801ImperativeShellAnalyzer.cs    |  64 +-
+ ancplua-fprog/Rules/Fp0801ShellUses.cs        | 464 +++++++++++++++
+ 3 files changed, 1048 insertions(+), 25 deletions(-)
+ create mode 100644 ancplua-fprog/Rules/Fp0801ShellUses.cs
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0801Tests.cs b/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
+index 4cbe1f3..499d01c 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0801Tests.cs
+@@ -256,7 +256,7 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_UsingStaticMethodAndEnumConstant_NoReport() => VerifyAsync("""
++    public Task FP0801_UsingStaticMethodAndEnumConstant_Reports() => VerifyAsync("""
+         using static System.Console;
+         using static System.IO.FileMode;
+ 
+@@ -265,8 +265,8 @@ public sealed class Fp0801Tests(TestContext testContext)
+         {
+             public static int Say(string text)
+             {
+-                WriteLine(text);
+-                return (int)Open;
++                {|FP0801:WriteLine|}(text);
++                return (int){|FP0801:Open|};
+             }
+         }
+         """);
+@@ -391,7 +391,7 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_VarWithForbiddenInferredTypeNoTypeToken_NoReport() => VerifyAsync("""
++    public Task FP0801_VarWithForbiddenInferredTypeFromShellReportsMember_Reports() => VerifyAsync("""
+         public static class Shell
+         {
+             public static System.IO.Stream Open() => System.IO.Stream.Null;
+@@ -403,7 +403,7 @@ public sealed class Fp0801Tests(TestContext testContext)
+             public static long Length()
+             {
+                 var stream = Shell.Open();
+-                return stream.Length;
++                return stream.{|FP0801:Length|};
+             }
+         }
+         """);
+@@ -827,24 +827,50 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_UsingStaticMethodGroupNameofAndDynamicCall_NoReport() => VerifyAsync("""
++    public Task FP0801_UsingStaticMethodGroupAndDynamicCall_Reports() => VerifyAsync("""
+         using static System.Console;
+ 
+         [Fprog.FunctionalCore]
+         public static class Imported
+         {
+-            public static System.Action<string> Group() => WriteLine;
+-
+-            public static string Name() => nameof(WriteLine);
++            public static System.Action<string> Group() => {|FP0801:WriteLine|};
+ 
+             public static int Dynamic(dynamic value)
+             {
+-                WriteLine(value);
++                {|FP0801:WriteLine|}(value);
+                 return 0;
+             }
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0801_UsingStaticMethodNameof_NoReport() => VerifyAsync("""
++        using static System.Console;
++
++        [Fprog.FunctionalCore]
++        public static class Imported
++        {
++            public static string Name() => nameof(WriteLine);
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UsingStaticDynamicCallWithCandidatesOutsideForbiddenType_NoReport() => VerifyAsync("""
++        using static System.Console;
++        using static Tools;
++
++        public static class Tools
++        {
++            public static int WriteLine(int value, int width) => value + width;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Imported
++        {
++            public static object Dynamic(dynamic value) => WriteLine(value, 2);
++        }
++        """);
++
+     [TestMethod]
+     public Task FP0801_NameofAndDynamicCallOfOwnStaticMembers_NoReport() => VerifyAsync("""
+         [Fprog.FunctionalCore]
+@@ -982,7 +1008,7 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_UsingStaticMemberHasNoTypeNameToken_NoReport() => VerifyAsync("""
++    public Task FP0801_UsingStaticMemberOfForbiddenTypeWithoutTypeToken_Reports() => VerifyAsync("""
+         using static System.Console;
+         using static System.Math;
+ 
+@@ -991,12 +1017,24 @@ public sealed class Fp0801Tests(TestContext testContext)
+         {
+             public static int Twice(int value)
+             {
+-                WriteLine(value);
+-                return Abs(value) * 2;
++                {|FP0801:WriteLine|}(value);
++                return value * 2;
+             }
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0801_UsingStaticMemberOfAllowedType_NoReport() => VerifyAsync("""
++        using static System.Console;
++        using static System.Math;
++
++        [Fprog.FunctionalCore]
++        public static class Report
++        {
++            public static int Twice(int value) => Abs(value) * 2;
++        }
++        """);
++
+     [TestMethod]
+     public Task FP0801_UsingStaticStillReportsWrittenTypeTokens_Reports() => VerifyAsync("""
+         using static System.Console;
+@@ -1018,24 +1056,36 @@ public sealed class Fp0801Tests(TestContext testContext)
+         """);
+ 
+     [TestMethod]
+-    public Task FP0801_UsingStaticPropertyFieldEventAndNameof_NoReport() => VerifyAsync("""
++    public Task FP0801_UsingStaticPropertyFieldAndEvent_Reports() => VerifyAsync("""
+         using static System.Console;
+         using static System.IO.Path;
+ 
+         [Fprog.FunctionalCore]
+         public static class Report
+         {
+-            public static object Writer() => Out;
++            public static object Writer() => {|FP0801:Out|};
+ 
+-            public static char Separator() => DirectorySeparatorChar;
++            public static char Separator() => {|FP0801:DirectorySeparatorChar|};
+ 
+             public static System.ConsoleCancelEventHandler? Handler(System.ConsoleCancelEventHandler handler)
+             {
+-                CancelKeyPress += handler;
++                {|FP0801:CancelKeyPress|} += handler;
+                 return null;
+             }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UsingStaticPropertyNameof_NoReport() => VerifyAsync("""
++        using static System.Console;
++        using static System.IO.Path;
+ 
++        [Fprog.FunctionalCore]
++        public static class Report
++        {
+             public static string Name() => nameof(Out);
++
++            public static string Separator() => nameof(DirectorySeparatorChar) + nameof(Out.Write);
+         }
+         """);
+ 
+@@ -1570,6 +1620,467 @@ public sealed class Fp0801Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0801_UsingStaticInEveryMemberPosition_Reports() => VerifyAsync("""
++        using static System.IO.File;
++        using static System.Console;
++        using static System.IO.FileMode;
++        using static System.Net.Mime.MediaTypeNames.Text;
++
++        public class Base(string text)
++        {
++            public string Text { get; } = text;
++        }
++
++        [Fprog.FunctionalCore]
++        public sealed class PrimaryBaseArgument(string path) : Base({|FP0801:ReadAllText|}(path))
++        {
++            public int Unrelated(System.IO.{|FP0801:Stream|} stream) => 1;
++        }
++
++        [Fprog.FunctionalCore]
++        public sealed class PrimaryBaseArgumentAlone(string path) : Base({|FP0801:ReadAllText|}(path));
++
++        [Fprog.FunctionalCore]
++        public sealed class Accessors
++        {
++            public string Value
++            {
++                get { System.{|FP0801:Console|}.Write("get"); return ""; }
++                init { {|FP0801:WriteLine|}(value); }
++            }
++
++            public string this[string path] => {|FP0801:ReadAllText|}(path);
++
++            public static readonly string Initialized = {|FP0801:ReadAllText|}("x");
++
++            public static string Mime => {|FP0801:Plain|};
++
++            public static string Lambda(string path)
++            {
++                System.Func<string, string> read = static p => {|FP0801:ReadAllText|}(p);
++                return read(path);
++            }
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Enums
++        {
++            public enum Sizes
++            {
++                Small = (int)System.IO.{|FP0801:FileMode|}.Open,
++                Large = (int){|FP0801:Truncate|},
++                Same = Large
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UsingStaticUseReportedWhateverElseTheMemberContains_Reports() => VerifyAsync("""
++        using static System.IO.File;
++
++        [Fprog.FunctionalCore]
++        public static class Guarded
++        {
++            public static string Before(string path)
++            {
++                System.{|FP0801:Console|}.WriteLine(path);
++                return {|FP0801:ReadAllText|}(path);
++            }
++
++            public static string After(string path) => {|FP0801:ReadAllText|}(path);
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_GlobalUsingStaticAndGenericMethod_Reports() => VerifyAsync("""
++        global using static System.IO.Path;
++        global using static System.Threading.Interlocked;
++
++        [Fprog.FunctionalCore]
++        public static class Names
++        {
++            public static string Ext(string name) => {|FP0801:GetExtension|}(name);
++
++            public static string Swap(ref string target) => {|FP0801:Exchange|}<string>(ref target, "x");
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UsingStaticOwnAndOuterStaticMembers_NoReport() => VerifyAsync("""
++        using static System.Math;
++
++        [Fprog.FunctionalCore]
++        public static class Outer
++        {
++            public const int Limit = 3;
++
++            public static int Twice(int value) => value * 2;
++
++            public static class Inner
++            {
++                public static int Use(int value) => Twice(Max(value, Limit));
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_InstanceMemberOnShellObjectNeverNamedInCore_Reports() => VerifyAsync("""
++        using System.Linq;
++
++        public static class Shell
++        {
++            public static System.IO.StreamReader Open(string path) => new(path);
++
++            public static System.Net.Http.HttpClient Client { get; } = new();
++
++            public static System.Collections.Generic.IEnumerable<System.IO.StreamReader> Readers => [];
++
++            public static System.Lazy<System.IO.StreamReader> Later { get; } = new(() => Open("a"));
++
++            public static System.Threading.Tasks.Task<System.IO.StreamReader> OpenAsync(string path)
++                => System.Threading.Tasks.Task.FromResult(Open(path));
++
++            public static bool TryOpen(out System.IO.StreamReader reader)
++            {
++                reader = Open("a");
++                return true;
++            }
++
++            public static (System.IO.StreamReader Reader, int Size) Pair() => (Open("a"), 1);
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Importer
++        {
++            public static string FirstLine(string path)
++            {
++                var reader = Shell.Open(path);
++                return reader.{|FP0801:ReadLine|}() ?? "";
++            }
++
++            public static string Everything(string path) => Shell.Open(path).{|FP0801:ReadToEnd|}();
++
++            public static string Download(string url) => Shell.Client.{|FP0801:GetStringAsync|}(url).Result;
++
++            public static string? Maybe(string path) => Shell.Open(path)?.{|FP0801:ReadLine|}();
++
++            public static long OnlyFirstMemberOfChain(string path) => Shell.Open(path).{|FP0801:BaseStream|}.Length;
++
++            public static System.Func<string> Group(string path) => Shell.Open(path).{|FP0801:ReadToEnd|};
++
++            public static string Lazy() => Shell.Later.Value.{|FP0801:ReadToEnd|}();
++
++            public static async System.Threading.Tasks.ValueTask<string> Awaited(string path)
++                => (await Shell.OpenAsync(path)).{|FP0801:ReadToEnd|}();
++
++            public static int Each()
++            {
++                var count = 0;
++                foreach (var reader in Shell.Readers)
++                    count += reader.{|FP0801:Peek|}();
++
++                return count;
++            }
++
++            public static string[] Lines() => [.. Shell.Readers.Select(reader => reader.{|FP0801:ReadToEnd|}())];
++
++            public static string Out() => Shell.TryOpen(out var reader) ? reader.{|FP0801:ReadToEnd|}() : "";
++
++            public static string Deconstructed()
++            {
++                var (reader, _) = Shell.Pair();
++                return reader.{|FP0801:ReadToEnd|}();
++            }
++
++            public static int Disposed(string path)
++            {
++                using var reader = Shell.Open(path);
++                var again = reader;
++                return again.{|FP0801:Peek|}();
++            }
++
++            public static string Matched(string path)
++                => Shell.Open(path) is var reader ? reader.{|FP0801:ReadToEnd|}() : "";
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_InstanceMemberDeclaredOnForbiddenBaseOfShellType_Reports() => VerifyAsync("""
++        public sealed class ShellBuffer : System.IO.MemoryStream
++        {
++        }
++
++        public static class Shell
++        {
++            public static ShellBuffer Buffer() => new();
++        }
++
++        public abstract class ShellBase
++        {
++            public System.IO.TextReader Reader { get; } = System.IO.TextReader.Null;
++        }
++
++        [Fprog.FunctionalCore]
++        public sealed class UsesShell : ShellBase
++        {
++            public static long Size()
++            {
++                var buffer = Shell.Buffer();
++                return buffer.{|FP0801:Length|};
++            }
++
++            public string Line() => Reader.{|FP0801:ReadToEnd|}();
++
++            public string ThisLine() => this.Reader.{|FP0801:ReadToEnd|}();
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_InstanceMemberOnReceiverThatNamesTheType_Reports() => VerifyAsync("""
++        using static System.Console;
++        using static System.IO.File;
++        using System.Collections.Generic;
++        using System.Linq;
++
++        public static class Shell
++        {
++            public static T Pick<T>(T value) => value;
++
++            public static System.IO.Stream Wrap(System.IO.Stream stream) => stream;
++        }
++
++        [Fprog.FunctionalCore]
++        public sealed class Covered(System.IO.{|FP0801:TextReader|} source)
++        {
++            private readonly System.IO.{|FP0801:TextReader|} _field = System.IO.{|FP0801:TextReader|}.Null;
++
++            public string Primary() => source.ReadToEnd();
++
++            public string Field() => _field.ReadToEnd();
++
++            public static string Parameter(System.IO.{|FP0801:StreamReader|} reader) => reader.ReadToEnd();
++
++            public static string Created(string path)
++            {
++                var reader = new System.IO.{|FP0801:StreamReader|}(path);
++                return reader.ReadToEnd();
++            }
++
++            public static string Opened(string path) => System.IO.{|FP0801:File|}.OpenText(path).ReadToEnd();
++
++            public static string Imported(string path) => {|FP0801:OpenText|}(path).ReadToEnd();
++
++            public static int Print(string text)
++            {
++                System.{|FP0801:Console|}.Out.Write(text);
++                {|FP0801:Out|}.Write(text);
++                return 0;
++            }
++
++            public static long Cast(object value) => ((System.IO.{|FP0801:Stream|})value).Length;
++
++            public static long Wrapped(object value) => Shell.Wrap((System.IO.{|FP0801:Stream|})value).Length;
++
++            public static string Generic(System.IO.{|FP0801:StreamReader|} reader) => Shell.Pick(reader).ReadToEnd();
++
++            public static string First(List<System.IO.{|FP0801:StreamReader|}> readers)
++                => Enumerable.First(readers).ReadToEnd() + readers[0].ReadToEnd();
++
++            public static string Later(System.Lazy<System.IO.{|FP0801:StreamReader|}> later) => later.Value.ReadToEnd();
++
++            public static string[] Each(IEnumerable<System.IO.{|FP0801:StreamReader|}> readers)
++            {
++                foreach (var reader in readers)
++                    _ = reader.Peek();
++
++                return [.. readers.Select(reader => reader.ReadToEnd())];
++            }
++
++            public static string Typed(object value) => value is System.IO.{|FP0801:StreamReader|} reader ? reader.ReadToEnd() : "";
++
++            public static string Delegate(System.Func<System.IO.{|FP0801:StreamReader|}> open) => open().ReadToEnd();
++        }
++
++        [Fprog.FunctionalCore]
++        public abstract class Derived : System.IO.{|FP0801:TextWriter|}
++        {
++            public int Twice(string text)
++            {
++                Write(text);
++                this.Write(text);
++                base.Write(text);
++                return 2;
++            }
++        }
++
++        [Fprog.FunctionalCore]
++        public static class StreamExtensions
++        {
++            extension(System.IO.{|FP0801:Stream|} stream)
++            {
++                public bool IsEmpty => stream.Length == 0;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_MemberOfShellTypeOnExplicitlyTypedCoreRoot_NoReport() => VerifyAsync("""
++        public sealed class ShellBuffer : System.IO.MemoryStream
++        {
++        }
++
++        public sealed record Contact(string Name, System.Net.Mail.MailAddress Address);
++
++        public sealed record Reply(System.Net.HttpStatusCode Status, System.Version Protocol);
++
++        [Fprog.FunctionalCore]
++        public static class Pure
++        {
++            public static bool Internal(Contact contact) => contact.Address.Host == "example.org";
++
++            public static bool Ok(Reply reply) => (int)reply.Status == 200;
++
++            public static string Kind(Reply reply) => reply.Status.ToString();
++
++            public static long Size(ShellBuffer buffer)
++            {
++                var same = buffer;
++                return same.Length + buffer.Position;
++            }
++
++            public static int Words(string text)
++            {
++                var parts = text.Split(' ');
++                return parts.Length;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_TopLevelStatementsVarFromCreation_Reports() => VerifyAsync("""
++        [assembly: Fprog.FunctionalCore]
++
++        {|CS8805:var reader = new System.IO.{|FP0801:StreamReader|}("a.txt");|}
++        var first = reader.ReadLine();
++        var rest = reader.ReadToEnd();
++        return first is null || rest.Length == 0 ? 1 : 0;
++        """);
++
++    [TestMethod]
++    public Task FP0801_TargetTypedNewForShellParameter_Reports() => VerifyAsync("""
++        public static class ShellApi
++        {
++            public static string Read(System.IO.StreamReader reader) => reader.ReadToEnd();
++        }
++
++        public sealed class ShellJob(System.IO.FileInfo file)
++        {
++            public System.IO.FileInfo File { get; } = file;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Core
++        {
++            public static string Read(string path) => ShellApi.Read({|FP0801:new|}(path));
++
++            public static object Job(string path) => new ShellJob({|FP0801:new|}(path));
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_TargetTypedNewWhereCoreWritesTheType_Reports() => VerifyAsync("""
++        using System.Collections.Generic;
++
++        public static class Shell
++        {
++            public static T Pick<T>(T value) => value;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Core
++        {
++            public static string Read(System.IO.{|FP0801:StreamReader|} reader) => "";
++
++            public static string Use(string path) => Read(new(path));
++
++            public static int Add(List<System.IO.{|FP0801:StreamReader|}> readers, string path)
++            {
++                readers.Add(new(path));
++                return readers.Count;
++            }
++
++            public static object Picked(string path) => Shell.Pick<System.IO.{|FP0801:StreamReader|}>(new(path));
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_TargetTypedNewOfAllowedTypeForShellParameter_NoReport() => VerifyAsync("""
++        public static class ShellApi
++        {
++            public static int Count(System.Collections.Generic.List<int> values) => values.Count;
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Core
++        {
++            public static int Count() => ShellApi.Count(new());
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UncoveredUsesInUnionBodyNestedInCore_Reports() => VerifyAsync("""
++        using static System.Console;
++
++        public static class Shell
++        {
++            public static System.IO.StreamReader Open(string path) => new(path);
++
++            public static string Read(System.IO.StreamReader reader) => reader.ReadToEnd();
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Pets
++        {
++            public record Cat;
++
++            public record Dog;
++
++            public union Pet(Cat, Dog)
++            {
++                public static int Say(string text)
++                {
++                    {|FP0801:WriteLine|}(text);
++                    return Shell.Open(text).{|FP0801:Peek|}();
++                }
++
++                public static string Read(string path) => Shell.Read({|FP0801:new|}(path));
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0801_UncoveredUsesOutsideCore_NoReport() => VerifyAsync("""
++        using static System.Console;
++
++        public static class Shell
++        {
++            public static System.IO.StreamReader Open(string path) => new(path);
++
++            public static string Read(System.IO.StreamReader reader) => reader.ReadToEnd();
++        }
++
++        public static class NotCore
++        {
++            public static int Say(string text)
++            {
++                WriteLine(text);
++                var reader = Shell.Open(text);
++                return reader.Peek() + Shell.Read(new(text)).Length;
++            }
++        }
++        """);
++
+     private Task VerifyAsync(string source)
+         => FpAnalyzerTestHost.VerifyRuleAsync("FP0801", source, testContext.CancellationToken);
+ }
+diff --git a/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs b/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
+index 59c8626..a01cc8f 100644
+--- a/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0801ImperativeShellAnalyzer.cs
+@@ -13,9 +13,41 @@ namespace ancplua_fprog.Rules;
+ /// of <c>System.Console</c>, <c>System.Diagnostics.Process</c>, or one of the threading types
+ /// <c>Thread</c>, <c>Monitor</c>, <c>Lock</c>, <c>Mutex</c>, <c>Semaphore</c>, <c>SemaphoreSlim</c>,
+ /// <c>Interlocked</c> and <c>Timer</c> in <c>System.Threading</c> (their nested types, such as
+-/// <c>Lock.Scope</c>, are not listed), and at the <c>lock</c> keyword. Only names that bind to a type are
+-/// reported: a member reached without a type name token (<c>using static</c>, inherited statics) is not.
+-/// <c>using</c> directives and <c>var</c> are not reported.
++/// <c>Lock.Scope</c>, are not listed), and at the <c>lock</c> keyword. <c>using</c> directives and <c>var</c>
++/// are not reported.
++/// <para>
++/// Code that uses the shell without writing such a type name is reported too, at a name token
++/// (<see cref="Fp0801ShellUses"/>):
++/// </para>
++/// <list type="bullet">
++/// <item>A static member of a forbidden type (method, also as a method group, property, field, constant, enum
++/// member, event) written as a simple name that binds through <c>using static</c> or <c>global using static</c>:
++/// reported at that name, whatever else the member contains. This includes pure members such as
++/// <c>GetExtension</c> from <c>System.IO.Path</c> or the constant <c>Open</c> from <c>System.IO.FileMode</c>;
++/// that is deliberate, because the same code with the type written (<c>Path.GetExtension</c>,
++/// <c>FileMode.Open</c>) is reported at the type name. Not reported: the operand of <c>nameof</c>; a static
++/// member that an enclosing type inherits from a forbidden base type and uses unqualified (the base list names the
++/// type and is reported); a call bound at run time unless every candidate is a member of a forbidden type.</item>
++/// <item>An instance member (method, property, field, event) on an uncovered receiver whose static type is
++/// forbidden or whose bound member is declared on a forbidden type: reported at the member's name, for example
++/// <c>ReadLine</c> in <c>var reader = Shell.Open(path); reader.ReadLine()</c> or <c>ReadToEnd</c> in
++/// <c>Shell.Open(path).ReadToEnd()</c> when <c>Shell</c> is not core. Only the first such member of a chain is
++/// reported. A receiver is covered, and nothing is reported, when FP0801 reports a token in it, when it is
++/// <c>this</c> or <c>base</c>, or when its value comes from a declaration in core with a written type (a
++/// parameter, primary-constructor or extension-block parameter, field, property or method, whether or not that
++/// type is forbidden), or from a <c>var</c>, <c>foreach</c>, pattern, <c>out var</c> or lambda variable whose
++/// source is covered. When the analysis cannot tell, the receiver counts as covered.</item>
++/// <item>A target-typed <c>new(...)</c> that creates a forbidden type as an argument for a parameter of a member
++/// outside core: reported at the <c>new</c> keyword.</item>
++/// </list>
++/// <para>
++/// Deliberately not reported (the type is written nowhere, but no name token belongs to it, or the analysis cannot
++/// tell): indexers, operators, conversions, <c>foreach</c> enumeration and <c>using</c> disposal of a shell object;
++/// calls through a delegate; members on <c>dynamic</c>; extension members; a shell object passed straight to
++/// another member; a receiver reached from an explicitly typed core root through members declared outside core
++/// (<c>repo.Connection.Open()</c>); a receiver that is a conditional, a tuple, an anonymous object or a query
++/// range variable; and a value whose shell type comes through a type parameter (<c>Enumerable.First</c>).
++/// </para>
+ /// </summary>
+ [DiagnosticAnalyzer(LanguageNames.CSharp)]
+ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
+@@ -35,6 +67,7 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
+         context.EnableConcurrentExecution();
+         context.RegisterSyntaxNodeAction(AnalyzeName, SyntaxKind.IdentifierName, SyntaxKind.GenericName);
+         context.RegisterSyntaxNodeAction(AnalyzeLock, SyntaxKind.LockStatement);
++        context.RegisterSyntaxNodeAction(AnalyzeTargetTypedCreation, SyntaxKind.ImplicitObjectCreationExpression);
+     }
+ 
+     private static void AnalyzeLock(SyntaxNodeAnalysisContext context)
+@@ -57,12 +90,27 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
+             return;
+         }
+ 
+-        if (context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is { } symbol
+-            && ReferencedType(symbol, name) is { } type
+-            && IsForbidden(type))
++        var info = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken);
++        if (info.Symbol is { } symbol && ReferencedType(symbol, name) is { } type && IsForbidden(type))
+         {
+             Report(context, name.Identifier.GetLocation(), type.Name);
++            return;
+         }
++
++        var uses = new Fp0801ShellUses(context.SemanticModel, context.ContainingSymbol, context.CancellationToken);
++        if ((uses.ImportedStaticUse(name, info) ?? uses.UncoveredInstanceUse(name, info)) is { } shell)
++            Report(context, name.Identifier.GetLocation(), shell.Name);
++    }
++
++    private static void AnalyzeTargetTypedCreation(SyntaxNodeAnalysisContext context)
++    {
++        if (!CoreScope.IsInCore(context.ContainingSymbol))
++            return;
++
++        var creation = (ImplicitObjectCreationExpressionSyntax)context.Node;
++        var uses = new Fp0801ShellUses(context.SemanticModel, context.ContainingSymbol, context.CancellationToken);
++        if (uses.UncoveredTargetTypedCreation(creation) is { } type)
++            Report(context, creation.NewKeyword.GetLocation(), type.Name);
+     }
+ 
+     private static void Report(SyntaxNodeAnalysisContext context, Location location, string subject)
+@@ -86,7 +134,7 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
+                context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken), type);
+ 
+     /// <summary>The type that <paramref name="name"/> names (for an attribute name, the attribute type).</summary>
+-    private static INamedTypeSymbol? ReferencedType(ISymbol symbol, SimpleNameSyntax name)
++    internal static INamedTypeSymbol? ReferencedType(ISymbol symbol, SimpleNameSyntax name)
+         => symbol switch
+         {
+             INamedTypeSymbol named => named,
+@@ -108,7 +156,7 @@ public sealed class Fp0801ImperativeShellAnalyzer : DiagnosticAnalyzer
+         return current.Parent is AttributeSyntax attribute && attribute.Name == current;
+     }
+ 
+-    private static bool IsForbidden(INamedTypeSymbol type)
++    internal static bool IsForbidden(INamedTypeSymbol type)
+     {
+         // For a nested type this is the namespace of its outermost containing type.
+         var ns = type.ContainingNamespace;
+diff --git a/ancplua-fprog/Rules/Fp0801ShellUses.cs b/ancplua-fprog/Rules/Fp0801ShellUses.cs
+new file mode 100644
+index 0000000..a2740ff
+--- /dev/null
++++ b/ancplua-fprog/Rules/Fp0801ShellUses.cs
+@@ -0,0 +1,464 @@
++using System.Collections.Immutable;
++using System.Linq;
++using System.Threading;
++using ancplua_fprog.Shared;
++using Microsoft.CodeAnalysis;
++using Microsoft.CodeAnalysis.CSharp;
++using Microsoft.CodeAnalysis.CSharp.Syntax;
++using Microsoft.CodeAnalysis.Operations;
++
++namespace ancplua_fprog.Rules;
++
++/// <summary>
++/// FP0801 for code that uses the imperative shell without writing the name of a forbidden type: a static member
++/// imported with <c>using static</c>, an instance member on a shell object whose type is written nowhere in core
++/// (an uncovered receiver), and a target-typed <c>new(...)</c> for a parameter declared outside core. One instance
++/// serves one analyzer callback; it holds no state between callbacks.
++/// <para>
++/// A receiver is covered (nothing is reported for the member used on it) when FP0801 already reports a token
++/// in it, when it is <c>this</c> or <c>base</c>, or when the value comes from a declaration in core with a written
++/// type. FP0801 reports that written type itself when it is forbidden, so a member used on such a value would be
++/// a second diagnostic for the same cause. A receiver is uncovered only when its value comes from a member
++/// declared outside core whose declared type names the shell type, or from an implicitly typed variable whose
++/// source is uncovered. Whenever the analysis cannot tell, the receiver counts as covered: the rule must not
++/// report correct code.
++/// </para>
++/// </summary>
++internal sealed class Fp0801ShellUses(SemanticModel model, ISymbol? containingSymbol, CancellationToken cancellationToken)
++{
++    /// <summary>
++    /// How many implicitly typed variables the covered check follows back to their source. A longer chain of
++    /// <c>var</c> copies counts as covered; it keeps the check to one expression and a few declarations.
++    /// </summary>
++    private const int MaxDepth = 6;
++
++    /// <summary>
++    /// The forbidden type whose static member <paramref name="name"/> uses through a <c>using static</c> directive,
++    /// or null. The operand of <c>nameof</c> is not a use. A static member found through the enclosing types or
++    /// their base types is not imported: the base list that brings it in names the type, and FP0801 reports
++    /// that name. A call bound at run time (a <c>dynamic</c> argument) counts only when every candidate is such
++    /// a member.
++    /// </summary>
++    public INamedTypeSymbol? ImportedStaticUse(SimpleNameSyntax name, SymbolInfo info)
++    {
++        if (!IsUnqualified(name))
++            return null;
++
++        INamedTypeSymbol? type = null;
++        foreach (var member in BoundMembers(info))
++        {
++            if (!member.IsStatic
++                || member is not (IMethodSymbol { MethodKind: MethodKind.Ordinary } or IPropertySymbol or IFieldSymbol
++                    or IEventSymbol)
++                || member.ContainingType is not { } containing
++                || !Fp0801ImperativeShellAnalyzer.IsForbidden(containing)
++                || IsReachableFromEnclosingTypes(containing))
++            {
++                return null;
++            }
++
++            type ??= containing;
++        }
++
++        return type is not null && !IsInNameof(name) ? type : null;
++    }
++
++    /// <summary>
++    /// The forbidden type behind the instance member <paramref name="name"/> when it is used on an uncovered
++    /// receiver, or null. The receiver's static type is forbidden, or the member (or a member it overrides) is
++    /// declared on a forbidden type.
++    /// </summary>
++    public INamedTypeSymbol? UncoveredInstanceUse(SimpleNameSyntax name, SymbolInfo info)
++        => ReceiverOf(name) is { } receiver
++           && ForbiddenInstanceMemberType(receiver, info) is { } type
++           && !IsInNameof(name)
++           && !IsCovered(receiver, 0)
++            ? type
++            : null;
++
++    /// <summary>
++    /// The forbidden type that the target-typed <paramref name="creation"/> creates when it is an argument for a
++    /// parameter of a member outside core, or null. A member in core wrote the parameter's type there, where
++    /// FP0801 reports it. When the parameter's declared type uses a type parameter (<c>List&lt;T&gt;.Add</c>,
++    /// <c>Func&lt;T&gt;</c>), the type came from a type argument that the core wrote or inferred: not reported.
++    /// </summary>
++    public INamedTypeSymbol? UncoveredTargetTypedCreation(ImplicitObjectCreationExpressionSyntax creation)
++    {
++        if (creation.Parent is not ArgumentSyntax argument
++            || model.GetTypeInfo(creation, cancellationToken).Type is not INamedTypeSymbol type
++            || !Fp0801ImperativeShellAnalyzer.IsForbidden(type)
++            || model.GetOperation(argument, cancellationToken) is not IArgumentOperation { Parameter: { } parameter }
++            || CoreScope.IsInCore(parameter.ContainingSymbol)
++            || MentionsTypeParameter(parameter.OriginalDefinition.Type))
++        {
++            return null;
++        }
++
++        return type;
++    }
++
++    /// <summary>
++    /// The forbidden type when <paramref name="info"/> is an instance member that belongs to the shell on
++    /// <paramref name="receiver"/>, regardless of coverage. Extension members are not instance members of the
++    /// receiver's type and are left out.
++    /// </summary>
++    private INamedTypeSymbol? ForbiddenInstanceMemberType(ExpressionSyntax receiver, SymbolInfo info)
++    {
++        var member = BoundMembers(info).FirstOrDefault();
++        if (member is null
++            || member.IsStatic
++            || member is not (IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol)
++            || member is IMethodSymbol { MethodKind: MethodKind.ReducedExtension or MethodKind.LocalFunction }
++            || member is IMethodSymbol { IsExtensionMethod: true }
++            || member.ContainingType is null or { IsExtension: true })
++        {
++            return null;
++        }
++
++        if (model.GetTypeInfo(receiver, cancellationToken).Type is INamedTypeSymbol receiverType
++            && Fp0801ImperativeShellAnalyzer.IsForbidden(receiverType))
++        {
++            return receiverType;
++        }
++
++        for (var current = member; current is not null; current = Overridden(current))
++        {
++            if (current.ContainingType is { } declaring && Fp0801ImperativeShellAnalyzer.IsForbidden(declaring))
++                return declaring;
++        }
++
++        return null;
++    }
++
++    /// <summary>
++    /// True when <paramref name="expression"/> names the shell itself or its value comes from a declaration whose
++    /// type is written in core (see the class summary).
++    /// </summary>
++    private bool IsCovered(ExpressionSyntax expression, int depth)
++        => depth > MaxDepth || ContainsReportedToken(expression) || IsRootCovered(expression, depth);
++
++    /// <summary>
++    /// True when <paramref name="expression"/> contains a token that FP0801 reports, or an instance member of a
++    /// forbidden type. Such a member is either reported itself (so the receiver around it is named) or its own
++    /// receiver is covered, and then this expression, which has the same root, is covered as well.
++    /// </summary>
++    private bool ContainsReportedToken(ExpressionSyntax expression)
++    {
++        foreach (var node in expression.DescendantNodesAndSelf())
++        {
++            switch (node)
++            {
++                case SimpleNameSyntax name when !name.IsVar:
++                    var info = model.GetSymbolInfo(name, cancellationToken);
++                    if ((info.Symbol is { } symbol
++                         && Fp0801ImperativeShellAnalyzer.ReferencedType(symbol, name) is { } type
++                         && Fp0801ImperativeShellAnalyzer.IsForbidden(type))
++                        || ImportedStaticUse(name, info) is not null
++                        || (ReceiverOf(name) is { } receiver && ForbiddenInstanceMemberType(receiver, info) is not null))
++                    {
++                        return true;
++                    }
++
++                    break;
++                case ImplicitObjectCreationExpressionSyntax creation when UncoveredTargetTypedCreation(creation) is not null:
++                    return true;
++            }
++        }
++
++        return false;
++    }
++
++    /// <summary>
++    /// Follows <paramref name="expression"/> to its root, the leftmost value of the access chain: through
++    /// parentheses, <c>!</c>, <c>await</c>, calls, element accesses and member accesses. For a member reached on a
++    /// type, on <c>this</c> or <c>base</c>, or unqualified, the root is that member. Any other root (a literal, an
++    /// object creation, a cast, a lambda) cannot tell and counts as covered.
++    /// </summary>
++    private bool IsRootCovered(ExpressionSyntax expression, int depth)
++    {
++        var current = expression;
++        while (true)
++        {
++            switch (current)
++            {
++                case ParenthesizedExpressionSyntax parenthesized:
++                    current = parenthesized.Expression;
++                    break;
++                case PostfixUnaryExpressionSyntax postfix when postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression):
++                    current = postfix.Operand;
++                    break;
++                case AwaitExpressionSyntax awaited:
++                    current = awaited.Expression;
++                    break;
++                case InvocationExpressionSyntax invocation:
++                    current = invocation.Expression;
++                    break;
++                case ElementAccessExpressionSyntax elementAccess:
++                    current = elementAccess.Expression;
++                    break;
++                case ConditionalAccessExpressionSyntax conditional:
++                    current = conditional.Expression;
++                    break;
++                case MemberAccessExpressionSyntax access when access.IsKind(SyntaxKind.SimpleMemberAccessExpression):
++                    if (IsThisOrBase(access.Expression) || IsTypeOrNamespace(access.Expression))
++                        return IsSymbolCovered(model.GetSymbolInfo(access.Name, cancellationToken).Symbol, depth);
++
++                    current = access.Expression;
++                    break;
++                case MemberBindingExpressionSyntax binding:
++                    if (ConditionalReceiver(binding) is not { } bindingReceiver)
++                        return true;
++
++                    if (IsThisOrBase(bindingReceiver))
++                        return IsSymbolCovered(model.GetSymbolInfo(binding.Name, cancellationToken).Symbol, depth);
++
++                    current = bindingReceiver;
++                    break;
++                case ElementBindingExpressionSyntax elementBinding:
++                    if (ConditionalReceiver(elementBinding) is not { } elementReceiver)
++                        return true;
++
++                    current = elementReceiver;
++                    break;
++                case SimpleNameSyntax name:
++                    return IsSymbolCovered(model.GetSymbolInfo(name, cancellationToken).Symbol, depth);
++                default:
++                    return true;
++            }
++        }
++    }
++
++    /// <summary>
++    /// True when the value of <paramref name="symbol"/> has its type written in core. A member in core declares its
++    /// type in writing. A member outside core is uncovered, unless its declared type uses a type parameter: then
++    /// the shell type came from a type argument (<c>Lazy&lt;T&gt;.Value</c>, <c>Enumerable.First</c>) and cannot be
++    /// told apart from one the core wrote.
++    /// </summary>
++    private bool IsSymbolCovered(ISymbol? symbol, int depth)
++        => symbol switch
++        {
++            ILocalSymbol local => IsLocalCovered(local, depth),
++            IParameterSymbol parameter => IsParameterCovered(parameter, depth),
++            IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol when CoreScope.IsInCore(symbol) => true,
++            IFieldSymbol field => MentionsTypeParameter(field.OriginalDefinition.Type),
++            IPropertySymbol property => MentionsTypeParameter(property.OriginalDefinition.Type),
++            IEventSymbol @event => MentionsTypeParameter(@event.OriginalDefinition.Type),
++            IMethodSymbol method => MentionsTypeParameter((method.ReducedFrom ?? method).OriginalDefinition.ReturnType),
++            _ => true
++        };
++
++    /// <summary>
++    /// A local with a written type is covered. A <c>var</c> local (also <c>using var</c>) is covered when its
++    /// initializer is, a <c>foreach (var ...)</c> variable when its collection is, and a pattern or deconstruction
++    /// variable when the value it comes from is.
++    /// </summary>
++    private bool IsLocalCovered(ILocalSymbol local, int depth)
++    {
++        switch (DeclaringSyntax(local))
++        {
++            case VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } declarator:
++                return !declaration.Type.IsVar
++                       || declarator.Initializer is not { } initializer
++                       || IsCovered(initializer.Value, depth + 1);
++            case ForEachStatementSyntax forEach:
++                return !forEach.Type.IsVar || IsCovered(forEach.Expression, depth + 1);
++            case SingleVariableDesignationSyntax designation:
++                return IsDesignationCovered(designation, depth);
++            default:
++                return true;
++        }
++    }
++
++    private bool IsDesignationCovered(SingleVariableDesignationSyntax designation, int depth)
++    {
++        SyntaxNode node = designation;
++        while (node.Parent is ParenthesizedVariableDesignationSyntax parenthesized)
++            node = parenthesized;
++
++        return node.Parent switch
++        {
++            DeclarationExpressionSyntax declaration => !declaration.Type.IsVar || IsDeclarationExpressionCovered(declaration, depth),
++            VarPatternSyntax pattern => IsPatternCovered(pattern, depth),
++            RecursivePatternSyntax pattern => pattern.Type is not null || IsPatternCovered(pattern, depth),
++            _ => true
++        };
++    }
++
++    /// <summary>
++    /// <c>out var x</c> follows the call it belongs to; <c>var (a, b) = e</c>, <c>(var a, var b) = e</c> and
++    /// <c>foreach (var (a, b) in e)</c> follow <c>e</c>.
++    /// </summary>
++    private bool IsDeclarationExpressionCovered(DeclarationExpressionSyntax declaration, int depth)
++    {
++        if (declaration.Parent is ArgumentSyntax { Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax invocation } } argument)
++            return IsCallCovered(invocation, argument, depth);
++
++        SyntaxNode node = declaration;
++        while (node.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax tuple })
++            node = tuple;
++
++        return node.Parent switch
++        {
++            AssignmentExpressionSyntax assignment when assignment.Left == node => IsCovered(assignment.Right, depth + 1),
++            ForEachVariableStatementSyntax forEach when forEach.Variable == node => IsCovered(forEach.Expression, depth + 1),
++            _ => true
++        };
++    }
++
++    /// <summary>A designation directly in a top-level pattern follows the value that the pattern tests.</summary>
++    private bool IsPatternCovered(PatternSyntax pattern, int depth)
++    {
++        SyntaxNode node = pattern;
++        while (node.Parent is ParenthesizedPatternSyntax or BinaryPatternSyntax)
++            node = node.Parent;
++
++        return node.Parent switch
++        {
++            IsPatternExpressionSyntax isPattern => IsCovered(isPattern.Expression, depth + 1),
++            CasePatternSwitchLabelSyntax { Parent.Parent: SwitchStatementSyntax switchStatement }
++                => IsCovered(switchStatement.Expression, depth + 1),
++            SwitchExpressionArmSyntax { Parent: SwitchExpressionSyntax switchExpression }
++                => IsCovered(switchExpression.GoverningExpression, depth + 1),
++            _ => true
++        };
++    }
++
++    /// <summary>
++    /// A parameter with a written type is covered (also a primary-constructor or extension-block parameter, and the
++    /// implicit <c>value</c> of an accessor, whose type the property writes). A lambda parameter without a written
++    /// type follows the call that the lambda is an argument of.
++    /// </summary>
++    private bool IsParameterCovered(IParameterSymbol parameter, int depth)
++    {
++        if (DeclaringSyntax(parameter) is not ParameterSyntax { Type: null } syntax)
++            return true;
++
++        var lambda = syntax.Parent as LambdaExpressionSyntax ?? syntax.Parent?.Parent as LambdaExpressionSyntax;
++        return lambda?.Parent is not ArgumentSyntax { Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax invocation } } argument
++               || IsCallCovered(invocation, argument, depth);
++    }
++
++    /// <summary>
++    /// A variable that a call gives a value (<c>out var</c>, a lambda parameter) is covered when the call's receiver
++    /// is covered (for a call on a type or an unqualified call: the method) or another argument is covered.
++    /// </summary>
++    private bool IsCallCovered(InvocationExpressionSyntax invocation, ArgumentSyntax argument, int depth)
++    {
++        var receiver = invocation.Expression is MemberAccessExpressionSyntax access
++                       && access.IsKind(SyntaxKind.SimpleMemberAccessExpression)
++                       && !IsThisOrBase(access.Expression)
++                       && !IsTypeOrNamespace(access.Expression)
++            ? access.Expression
++            : invocation.Expression;
++
++        return IsCovered(receiver, depth + 1)
++               || invocation.ArgumentList.Arguments.Any(other => other != argument && IsCovered(other.Expression, depth + 1));
++    }
++
++    private SyntaxNode? DeclaringSyntax(ISymbol symbol)
++    {
++        var reference = symbol.DeclaringSyntaxReferences.FirstOrDefault();
++
++        // Locals and parameters that a body uses are declared in the same tree; anything else cannot tell.
++        return reference is not null && reference.SyntaxTree == model.SyntaxTree ? reference.GetSyntax(cancellationToken) : null;
++    }
++
++    private bool IsTypeOrNamespace(ExpressionSyntax expression)
++        => model.GetSymbolInfo(expression, cancellationToken).Symbol is INamespaceOrTypeSymbol;
++
++    /// <summary>True when a type that encloses the use, or one of its base types, is <paramref name="type"/>.</summary>
++    private bool IsReachableFromEnclosingTypes(INamedTypeSymbol type)
++    {
++        var target = type.OriginalDefinition;
++        for (var enclosing = containingSymbol as INamedTypeSymbol ?? containingSymbol?.ContainingType;
++             enclosing is not null;
++             enclosing = enclosing.ContainingType)
++        {
++            for (var current = enclosing; current is not null; current = current.BaseType)
++            {
++                if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, target))
++                    return true;
++            }
++        }
++
++        return false;
++    }
++
++    /// <summary>True when <paramref name="node"/> is inside the operand of the <c>nameof</c> operator.</summary>
++    private bool IsInNameof(SyntaxNode node)
++    {
++        foreach (var invocation in node.Ancestors().OfType<InvocationExpressionSyntax>())
++        {
++            if (invocation.Expression is IdentifierNameSyntax { Identifier.ValueText: "nameof" } nameof
++                && invocation.ArgumentList.Span.Contains(node.Span)
++                && model.GetSymbolInfo(nameof, cancellationToken).Symbol is null)
++            {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    /// <summary>The bound member, or every candidate of a call bound at run time.</summary>
++    private static ImmutableArray<ISymbol> BoundMembers(SymbolInfo info)
++        => info.Symbol is { } symbol ? [symbol]
++            : info.CandidateReason == CandidateReason.LateBound ? info.CandidateSymbols
++            : [];
++
++    /// <summary>The receiver of <paramref name="name"/> when it is the member of <c>e.Name</c> or <c>e?.Name</c>.</summary>
++    private static ExpressionSyntax? ReceiverOf(SimpleNameSyntax name)
++        => name.Parent switch
++        {
++            MemberAccessExpressionSyntax access when access.Name == name && access.IsKind(SyntaxKind.SimpleMemberAccessExpression)
++                => access.Expression,
++            MemberBindingExpressionSyntax binding => ConditionalReceiver(binding),
++            _ => null
++        };
++
++    /// <summary>The expression before the <c>?</c> that <paramref name="binding"/> (<c>.Name</c> or <c>[i]</c>) continues.</summary>
++    private static ExpressionSyntax? ConditionalReceiver(ExpressionSyntax binding)
++    {
++        foreach (var conditional in binding.Ancestors().OfType<ConditionalAccessExpressionSyntax>())
++        {
++            if (conditional.WhenNotNull.Span.Contains(binding.Span))
++                return conditional.Expression;
++        }
++
++        return null;
++    }
++
++    /// <summary>True when <paramref name="name"/> is written alone, not after a dot, <c>?.</c> or <c>::</c>.</summary>
++    private static bool IsUnqualified(SimpleNameSyntax name)
++        => name.Parent switch
++        {
++            MemberAccessExpressionSyntax access => access.Name != name,
++            QualifiedNameSyntax qualified => qualified.Right != name,
++            AliasQualifiedNameSyntax aliasQualified => aliasQualified.Name != name,
++            MemberBindingExpressionSyntax or NameColonSyntax or NameEqualsSyntax => false,
++            _ => true
++        };
++
++    private static bool IsThisOrBase(ExpressionSyntax expression)
++        => expression is ThisExpressionSyntax or BaseExpressionSyntax;
++
++    private static ISymbol? Overridden(ISymbol member)
++        => member switch
++        {
++            IMethodSymbol method => method.OverriddenMethod,
++            IPropertySymbol property => property.OverriddenProperty,
++            IEventSymbol @event => @event.OverriddenEvent,
++            _ => null
++        };
++
++    private static bool MentionsTypeParameter(ITypeSymbol type)
++        => type switch
++        {
++            ITypeParameterSymbol => true,
++            IArrayTypeSymbol array => MentionsTypeParameter(array.ElementType),
++            IPointerTypeSymbol pointer => MentionsTypeParameter(pointer.PointedAtType),
++            INamedTypeSymbol named => named.TypeArguments.Any(MentionsTypeParameter)
++                                      || (named.ContainingType is { } outer && MentionsTypeParameter(outer)),
++            _ => false
++        };
++}
+-- 
+2.43.0
+

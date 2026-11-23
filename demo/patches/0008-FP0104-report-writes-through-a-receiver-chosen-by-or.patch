@@ -1,0 +1,228 @@
+From df2af90a5f5a9ad5f98e1d0a7566538210f1b6dd Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 21:09:49 +0100
+Subject: [PATCH 08/12] FP0104: report writes through a receiver chosen by ?:,
+ ?? or a switch expression
+
+When the receiver walk meets a conditional (also by ref), a coalesce or a switch expression it follows
+every branch, and reports the write when any branch is reached from a parameter under the existing
+rules. Fresh-object branches, boxed struct branches and assigning a ref choice of parameters itself
+stay unreported.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011nXBkinjHz24B8aadiHZjn
+---
+ ancplua-fprog.Tests/Rules/Fp0104Tests.cs      | 100 ++++++++++++++++++
+ .../Rules/Fp0104ParameterWriteAnalyzer.cs     |  53 ++++++++--
+ 2 files changed, 145 insertions(+), 8 deletions(-)
+
+diff --git a/ancplua-fprog.Tests/Rules/Fp0104Tests.cs b/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
+index d0d769e..1ef5752 100644
+--- a/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
++++ b/ancplua-fprog.Tests/Rules/Fp0104Tests.cs
+@@ -1172,6 +1172,106 @@ public sealed class Fp0104Tests(TestContext testContext)
+         }
+         """);
+ 
++    [TestMethod]
++    public Task FP0104_ReceiverChosenByConditionalCoalesceOrSwitch_Reports() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Booking
++        {
++            public static int Credit(bool toFirst, Box first, Box second, int amount)
++            {
++                {|FP0104:(toFirst ? first : second).Count|} += amount;
++                return first.Count + second.Count;
++            }
++
++            public static int Fallback(Box? preferred, Box fallback, int amount)
++            {
++                {|FP0104:(preferred ?? fallback).Count|} += amount;
++                return fallback.Count;
++            }
++
++            public static int ByIndex(int index, Box first, Box second, int amount)
++            {
++                {|FP0104:(index switch { 0 => first, _ => second }).Count|} = amount;
++                return amount;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_ReceiverChosenWhenOnlyOneBranchIsParameter_Reports() => VerifyAsync("""
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int Mixed(bool f, bool g, int index, Box box, Box other, Box third, int[] values)
++            {
++                {|FP0104:(f ? new Box() : box).Count|} = 1;
++                {|FP0104:(box.Inner ?? new Box()).Count|} = 2;
++                {|FP0104:(f ? (g ? box : new Box()) : new Box()).X|}++;
++                {|FP0104:(index switch { 0 => new Box(), 1 => box.Inner!, _ => throw new System.ArgumentException() }).Y|} = 3;
++                {|FP0104:(f ? values : new int[1])[0]|} = 4;
++                {|FP0104:(f ? box : other)?.Name|} = "x";
++                {|FP0104:(f ? ref box : ref other).Count|} = 5;
++                {|FP0104:(f ? box.Items[0] : third.Inner!).Count|} -= 6;
++                ({|FP0104:(f ? box : other).X|}, {|FP0104:(f ? other : box).Y|}) = (7, 8);
++                return int.TryParse("9", out {|FP0104:(f ? box : other).Count|}) ? box.Count : 0;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_ReceiverChosenAmongFreshObjectsOrCopies_NoReport() => VerifyAsync("""
++        public struct Counter : IHasCount
++        {
++            public int Count { get; set; }
++        }
++
++        [Fprog.FunctionalCore]
++        public static class Ops
++        {
++            public static int BothFresh(bool f, int index, Box? maybe)
++            {
++                (f ? new Box() : new Box()).Count = 1;
++                (index switch { 0 => new Box(), _ => new Box { X = 1 } }).X = 2;
++                var local = new Box();
++                (f ? local : new Box()).Y = 3;
++                (maybe?.Get() is null ? local : new Box()).Count = 4;
++                return local.Count;
++            }
++
++            public static int BoxedBranches(bool f, Counter a, Counter b)
++            {
++                (f ? (IHasCount)a : (IHasCount)b).Count = 1;
++                (f ? a : (IHasCount)b).Count = 2;
++                return a.Count;
++            }
++
++            public static int StructBranchesByValue(bool f, Point a, Point b)
++            {
++                (f ? ref a : ref b).X = 1;
++                return a.X;
++            }
++
++            public static int RebindParameter(bool f, Box a, Box b)
++            {
++                (f ? ref a : ref b) = new Box();
++                return a.Count + b.Count;
++            }
++        }
++        """);
++
++    [TestMethod]
++    public Task FP0104_ReceiverChosenByConditionalOutsideCore_NoReport() => VerifyAsync("""
++        public static class Shell
++        {
++            public static int Credit(bool f, Box first, Box second, Box? maybe)
++            {
++                (f ? first : second).Count = 1;
++                (maybe ?? first).X++;
++                return first.Count;
++            }
++        }
++        """);
++
+     private Task VerifyAsync(string source)
+         => FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);
+ }
+diff --git a/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs b/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
+index 75dd95d..0980d46 100644
+--- a/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
++++ b/ancplua-fprog/Rules/Fp0104ParameterWriteAnalyzer.cs
+@@ -15,7 +15,12 @@ namespace ancplua_fprog.Rules;
+ /// parameter, whose target is a field, property, event or element reached from a parameter whose type may be a reference (class, interface, array, delegate,
+ /// <c>dynamic</c>, type parameter not known to be a value type) or from a <c>ref</c>/<c>out</c>
+ /// parameter. The chain from the parameter to the target may pass through fields, properties, indexers,
+-/// array elements, casts, null-conditional access and method calls. Writes through a struct parameter
++/// array elements, casts, null-conditional access and method calls. When the chain meets a choice between
++/// objects (<c>?:</c>, also by <c>ref</c>, <c>??</c> or a switch expression), every branch is followed, and
++/// the write is reported when any branch is reached from such a parameter; a branch that is a fresh object
++/// or a boxed copy of a struct does not count. A ref choice that is itself the target is not followed:
++/// <c>(f ? ref a : ref b) = x</c> assigns the parameter variables and is correct, and
++/// <c>(f ? ref a.X : ref b.X) = 1</c> is a known gap. Writes through a struct parameter
+ /// passed by value, <c>in</c> or <c>ref readonly</c> (<c>Span&lt;T&gt;</c> and structs holding references
+ /// included) are not reported. Writes into a boxed copy are not reported unless the chain above the box
+ /// reads a reference or passes through a member that returns by reference. Whether an argument counts
+@@ -94,17 +99,49 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+             return;
+         }
+ 
+-        var shared = !rebinds && ReturnsByRef(target);
+         var start = target.Syntax.SpanStart;
+-        var receiver = Receiver(target);
++        if (Reaches(Receiver(target), shared: !rebinds && ReturnsByRef(target), ref start))
++            Report(context, target, start);
++    }
++
++    /// <summary>
++    /// True when the receiver chain starting at <paramref name="receiver"/> leads back to a parameter whose
++    /// object or storage the caller sees. <paramref name="shared"/> is true when the chain between the
++    /// target and <paramref name="receiver"/> already read a reference or a member that returns by
++    /// reference, so a box further down no longer isolates the write. <paramref name="start"/> moves to
++    /// the start of a null-conditional access that the chain passes through.
++    /// </summary>
++    private static bool Reaches(IOperation? receiver, bool shared, ref int start)
++    {
+         while (receiver is not null)
+         {
++            switch (receiver)
++            {
++                // `(f ? a : b).X = 1`, `(a ?? b).X = 1` and `(i switch { ... }).X = 1` write into whichever
++                // object is chosen, so each branch is followed on its own. The choice itself is no step of the
++                // chain: its type says nothing about whether a branch is a boxed copy.
++                case IConditionalOperation conditional:
++                    return Reaches(conditional.WhenTrue, shared, ref start)
++                           || Reaches(conditional.WhenFalse, shared, ref start);
++                case ICoalesceOperation coalesce:
++                    return Reaches(coalesce.Value, shared, ref start)
++                           || Reaches(coalesce.WhenNull, shared, ref start);
++                case ISwitchExpressionOperation switchExpression:
++                    foreach (var arm in switchExpression.Arms)
++                    {
++                        if (Reaches(arm.Value, shared, ref start))
++                            return true;
++                    }
++
++                    return false;
++            }
++
+             if (receiver is IConversionOperation boxing && IsBoxing(boxing))
+             {
+                 // The box is a fresh copy: a write into it reaches the caller only through a reference
+                 // read further up the chain.
+                 if (!shared)
+-                    return;
++                    return false;
+ 
+                 receiver = boxing.Operand;
+                 continue;
+@@ -115,13 +152,11 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+             {
+                 case IParameterReferenceOperation { Parameter: var parameter }:
+                     // A struct parameter (Span<T> included) is not a reference-type parameter unless ref/out.
+-                    if (MayBeReference(parameter.Type) || parameter.RefKind is RefKind.Ref or RefKind.Out)
+-                        Report(context, target, start);
+-                    return;
++                    return MayBeReference(parameter.Type) || parameter.RefKind is RefKind.Ref or RefKind.Out;
+                 case IConditionalAccessInstanceOperation instance:
+                     var access = EnclosingAccess(instance);
+                     if (access is null)
+-                        return;
++                        return false;
+                     start = access.Syntax.SpanStart;
+                     receiver = access.Operation;
+                     break;
+@@ -133,6 +168,8 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
+                     break;
+             }
+         }
++
++        return false;
+     }
+ 
+     /// <summary>
+-- 
+2.43.0
+

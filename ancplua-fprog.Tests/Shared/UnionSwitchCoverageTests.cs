@@ -21,73 +21,73 @@ public sealed class UnionSwitchCoverageTests
     private const string Tagged = "Trees.Tree.Tagged";
 
     private const string ShapeSource = """
-        namespace Shapes
-        {
-            [Fprog.Union]
-            public abstract record Shape
-            {
-                private Shape() { }
+                                       namespace Shapes
+                                       {
+                                           [Fprog.Union]
+                                           public abstract record Shape
+                                           {
+                                               private Shape() { }
 
-                public sealed record Circle(double Radius) : Shape;
+                                               public sealed record Circle(double Radius) : Shape;
 
-                public sealed record Square(double Side) : Shape;
-            }
-        }
-        """;
+                                               public sealed record Square(double Side) : Shape;
+                                           }
+                                       }
+                                       """;
 
     private const string TreeSource = """
-        namespace Trees
-        {
-            [Fprog.Union]
-            public abstract record Tree
-            {
-                private Tree() { }
+                                      namespace Trees
+                                      {
+                                          [Fprog.Union]
+                                          public abstract record Tree
+                                          {
+                                              private Tree() { }
 
-                public sealed record Leaf(string Name) : Tree;
+                                              public sealed record Leaf(string Name) : Tree;
 
-                public sealed record MaybeLeaf(string? Name) : Tree;
+                                              public sealed record MaybeLeaf(string? Name) : Tree;
 
-                public sealed record Node(Tree Left, Tree Right) : Tree;
+                                              public sealed record Node(Tree Left, Tree Right) : Tree;
 
-                public sealed record Counted(int? Count, int Total) : Tree;
+                                              public sealed record Counted(int? Count, int Total) : Tree;
 
-                public sealed record Spelled(System.Nullable<int> Count) : Tree;
+                                              public sealed record Spelled(System.Nullable<int> Count) : Tree;
 
-                public sealed record Pair((int Id, string Label) Both) : Tree;
+                                              public sealed record Pair((int Id, string Label) Both) : Tree;
 
-                public sealed record Tagged((string? Tag, int Weight) Mark) : Tree;
-            }
-        }
-        """;
+                                              public sealed record Tagged((string? Tag, int Weight) Mark) : Tree;
+                                          }
+                                      }
+                                      """;
 
     private const string ResultSource = """
-        namespace Results
-        {
-            [Fprog.Union]
-            public abstract record Result<T>
-            {
-                private Result() { }
+                                        namespace Results
+                                        {
+                                            [Fprog.Union]
+                                            public abstract record Result<T>
+                                            {
+                                                private Result() { }
 
-                public sealed record Ok(T Value) : Result<T>;
+                                                public sealed record Ok(T Value) : Result<T>;
 
-                public sealed record Error(string Message) : Result<T>;
+                                                public sealed record Error(string Message) : Result<T>;
 
-                public int Tag() => this switch { Ok => 1, Error => 2 };
-            }
-        }
-        """;
+                                                public int Tag() => this switch { Ok => 1, Error => 2 };
+                                            }
+                                        }
+                                        """;
 
     private const string OpenResultSource = """
-        namespace Open
-        {
-            [Fprog.Union]
-            public abstract record Result<T>;
+                                            namespace Open
+                                            {
+                                                [Fprog.Union]
+                                                public abstract record Result<T>;
 
-            public sealed record Pending<T> : Result<T>;
+                                                public sealed record Pending<T> : Result<T>;
 
-            public sealed record IntOk(int Value) : Result<int>;
-        }
-        """;
+                                                public sealed record IntOk(int Value) : Result<int>;
+                                            }
+                                            """;
 
     [TestMethod]
     public void TypePatternForEveryCase_HandlesEveryCase()
@@ -242,34 +242,34 @@ public sealed class UnionSwitchCoverageTests
     public void TwoPartialArmsThatAreExhaustiveTogether_NameTheCaseButAreNotItsOwnArm()
     {
         var compilation = TestCompilation.Create("""
-            namespace Nested
-            {
-                [Fprog.Union]
-                public abstract record Inner
-                {
-                    private Inner() { }
+                                                 namespace Nested
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Inner
+                                                     {
+                                                         private Inner() { }
 
-                    public sealed record A : Inner;
+                                                         public sealed record A : Inner;
 
-                    public sealed record B : Inner;
-                }
+                                                         public sealed record B : Inner;
+                                                     }
 
-                [Fprog.Union]
-                public abstract record Outer
-                {
-                    private Outer() { }
+                                                     [Fprog.Union]
+                                                     public abstract record Outer
+                                                     {
+                                                         private Outer() { }
 
-                    public sealed record Ok(Inner Value) : Outer;
+                                                         public sealed record Ok(Inner Value) : Outer;
 
-                    public sealed record Error(string Message) : Outer;
-                }
+                                                         public sealed record Error(string Message) : Outer;
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Run(Outer outer) => outer switch { Outer.Ok(Inner.A) => 1, Outer.Ok(Inner.B) => 2, Outer.Error => 3 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Outer outer) => outer switch { Outer.Ok(Inner.A) => 1, Outer.Ok(Inner.B) => 2, Outer.Error => 3 };
+                                                     }
+                                                 }
+                                                 """);
         var coverage = Coverage(compilation, "Run");
 
         Assert.IsEmpty(coverage.CasesNotNamed);
@@ -384,29 +384,29 @@ public sealed class UnionSwitchCoverageTests
     public void NegatedTypeTestForACaseOfANestedUnion_CoversNothing()
     {
         var compilation = TestCompilation.Create("""
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    private Shape() { }
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Shape
+                                                     {
+                                                         private Shape() { }
 
-                    [Fprog.Union]
-                    public abstract record Round : Shape
-                    {
-                        public sealed record Circle : Round;
-                    }
+                                                         [Fprog.Union]
+                                                         public abstract record Round : Shape
+                                                         {
+                                                             public sealed record Circle : Round;
+                                                         }
 
-                    public sealed record Square : Shape;
-                }
+                                                         public sealed record Square : Shape;
+                                                     }
 
-                public static class Switches
-                {
-                    // A Round can be a Circle, and Circle is not a case of Shape.
-                    public static int Run(Shape shape) => shape switch { not Shape.Round.Circle => 1 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         // A Round can be a Circle, and Circle is not a case of Shape.
+                                                         public static int Run(Shape shape) => shape switch { not Shape.Round.Circle => 1 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Shapes.Shape.Round", Square];
 
         AssertCoverage(Coverage(compilation, "Run"), cases, cases, cases);
@@ -434,20 +434,20 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ShapeSource + """
 
-            namespace Uses
-            {
-                using Shapes;
+                                                               namespace Uses
+                                                               {
+                                                                   using Shapes;
 
-                public static class Switches
-                {
-                    public static int NotNull(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
+                                                                   public static class Switches
+                                                                   {
+                                                                       public static int NotNull(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
 
-                    public static int Maybe(Shape? shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
+                                                                       public static int Maybe(Shape? shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
 
-                    public static int TestedForNull(Shape shape) => shape switch { null => 0, Shape.Circle => 1, Shape.Square => 2 };
-                }
-            }
-            """);
+                                                                       public static int TestedForNull(Shape shape) => shape switch { null => 0, Shape.Circle => 1, Shape.Square => 2 };
+                                                                   }
+                                                               }
+                                                               """);
 
         Assert.IsTrue(Coverage(compilation, "NotNull").HandlesEveryCase);
         Assert.IsTrue(Coverage(compilation, "Maybe").HandlesEveryCase);
@@ -462,16 +462,16 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ResultSource + """
 
-            namespace Uses
-            {
-                using Results;
+                                                                namespace Uses
+                                                                {
+                                                                    using Results;
 
-                public static class Switches
-                {
-                    public static int Run(Result<int> result) => result switch { Result<int>.Ok => 1, Result<int>.Error => 2 };
-                }
-            }
-            """);
+                                                                    public static class Switches
+                                                                    {
+                                                                        public static int Run(Result<int> result) => result switch { Result<int>.Ok => 1, Result<int>.Error => 2 };
+                                                                    }
+                                                                }
+                                                                """);
         var coverage = Coverage(compilation, "Run");
 
         Assert.AreEqual(compilation.GetNamedType("Results.Result`1"), coverage.Union, SymbolEqualityComparer.Default);
@@ -500,7 +500,8 @@ public sealed class UnionSwitchCoverageTests
     {
         var coverage = ResultCoverage("Result<int>.Ok => 1, Result<TValue>.Error => 2");
 
-        AssertCoverage(coverage, ["Results.Result<T>.Ok", "Results.Result<T>.Error"], ["Results.Result<T>.Ok"], ["Results.Result<T>.Ok"]);
+        AssertCoverage(coverage, ["Results.Result<T>.Ok", "Results.Result<T>.Error"], ["Results.Result<T>.Ok"],
+            ["Results.Result<T>.Ok"]);
         Assert.IsFalse(coverage.HandlesEveryCase);
     }
 
@@ -516,36 +517,36 @@ public sealed class UnionSwitchCoverageTests
     public void CaseWithATypeParameterTheValueDoesNotDetermine_HasItsArmButNeverHandlesEveryCase()
     {
         var compilation = TestCompilation.Create("""
-            namespace Exprs
-            {
-                [Fprog.Union]
-                public abstract record Expr<T>
-                {
-                    private Expr() { }
+                                                 namespace Exprs
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Expr<T>
+                                                     {
+                                                         private Expr() { }
 
-                    public sealed record IntLit(int Value) : Expr<int>;
+                                                         public sealed record IntLit(int Value) : Expr<int>;
 
-                    public sealed record Const(T Value) : Expr<T>;
-                }
+                                                         public sealed record Const(T Value) : Expr<T>;
+                                                     }
 
-                [Fprog.Union]
-                public abstract record Result<T>;
+                                                     [Fprog.Union]
+                                                     public abstract record Result<T>;
 
-                public sealed record Ok<T>(T Value) : Result<T>;
+                                                     public sealed record Ok<T>(T Value) : Result<T>;
 
-                public sealed record Tagged<TTag> : Result<int>;
+                                                     public sealed record Tagged<TTag> : Result<int>;
 
-                public static class Switches
-                {
-                    // An Expr<string>.IntLit is an Expr<int> too, and no arm can name every such type.
-                    public static int Nested(Expr<int> expr) => expr switch { Expr<int>.IntLit => 1, Expr<int>.Const => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         // An Expr<string>.IntLit is an Expr<int> too, and no arm can name every such type.
+                                                         public static int Nested(Expr<int> expr) => expr switch { Expr<int>.IntLit => 1, Expr<int>.Const => 2 };
 
-                    public static int Phantom(Result<int> result) => result switch { Ok<int> => 1, Tagged<string> => 2 };
+                                                         public static int Phantom(Result<int> result) => result switch { Ok<int> => 1, Tagged<string> => 2 };
 
-                    public static int Determined(Result<string> result) => result switch { Ok<string> => 1 };
-                }
-            }
-            """);
+                                                         public static int Determined(Result<string> result) => result switch { Ok<string> => 1 };
+                                                     }
+                                                 }
+                                                 """);
         var nested = Coverage(compilation, "Nested");
         var phantom = Coverage(compilation, "Phantom");
         var determined = Coverage(compilation, "Determined");
@@ -629,7 +630,8 @@ public sealed class UnionSwitchCoverageTests
     public void TupleElementThatIsNotNullableForTheValue_KeepsItsDeclaredType()
     {
         // The arm lacks the ? of the first element; the second element is a string for the value too.
-        var coverage = ResultCoverageOf("(string? First, string Second)", "Result<(string, string)>.Ok((_, string second)) => 1, _ => 0");
+        var coverage = ResultCoverageOf("(string? First, string Second)",
+            "Result<(string, string)>.Ok((_, string second)) => 1, _ => 0");
 
         AssertOwnArm(coverage, "Results.Result<T>.Ok");
     }
@@ -639,19 +641,19 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ResultSource + """
 
-            namespace Uses
-            {
-                using Results;
+                                                                namespace Uses
+                                                                {
+                                                                    using Results;
 
-                public static class Switches
-                {
-                    public static int Plain<TValue>(Result<TValue> result) => result switch { Result<TValue>.Ok(TValue value) => 1, _ => 0 };
+                                                                    public static class Switches
+                                                                    {
+                                                                        public static int Plain<TValue>(Result<TValue> result) => result switch { Result<TValue>.Ok(TValue value) => 1, _ => 0 };
 
-                    public static int Annotated<TValue>(Result<TValue?> result) where TValue : class
-                        => result switch { Result<TValue>.Ok(TValue value) => 1, _ => 0 };
-                }
-            }
-            """);
+                                                                        public static int Annotated<TValue>(Result<TValue?> result) where TValue : class
+                                                                            => result switch { Result<TValue>.Ok(TValue value) => 1, _ => 0 };
+                                                                    }
+                                                                }
+                                                                """);
 
         AssertOwnArm(Coverage(compilation, "Plain"), "Results.Result<T>.Ok");
         AssertNoOwnArm(Coverage(compilation, "Annotated"), "Results.Result<T>.Ok");
@@ -662,17 +664,17 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ResultSource + """
 
-            namespace Uses
-            {
-                using Results;
+                                                                namespace Uses
+                                                                {
+                                                                    using Results;
 
-                public static class Switches
-                {
-                    public static int Run(Result<(int Id, string Name)> result)
-                        => result switch { Result<(int, string)>.Ok => 1, Result<(int Number, string Text)>.Error => 2 };
-                }
-            }
-            """);
+                                                                    public static class Switches
+                                                                    {
+                                                                        public static int Run(Result<(int Id, string Name)> result)
+                                                                            => result switch { Result<(int, string)>.Ok => 1, Result<(int Number, string Text)>.Error => 2 };
+                                                                    }
+                                                                }
+                                                                """);
 
         AssertCoverage(Coverage(compilation, "Run"), ["Results.Result<T>.Ok", "Results.Result<T>.Error"], [], []);
     }
@@ -682,29 +684,30 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(OpenResultSource + """
 
-            namespace Uses
-            {
-                using Open;
+                                                                    namespace Uses
+                                                                    {
+                                                                        using Open;
 
-                public static class Switches
-                {
-                    public static int OfInt(Result<int> result) => result switch { Pending<int> => 1, IntOk => 2 };
+                                                                        public static class Switches
+                                                                        {
+                                                                            public static int OfInt(Result<int> result) => result switch { Pending<int> => 1, IntOk => 2 };
 
-                    public static int OfString(Result<string> result) => result switch { Pending<string> => 1 };
+                                                                            public static int OfString(Result<string> result) => result switch { Pending<string> => 1 };
 
-                    public static int Generic<TValue>(Result<TValue> result) => result switch { Pending<TValue> => 1, IntOk => 2 };
+                                                                            public static int Generic<TValue>(Result<TValue> result) => result switch { Pending<TValue> => 1, IntOk => 2 };
 
-                    public static int GenericWithInt<TValue>(Result<TValue> result) => result switch { Pending<int> => 1, IntOk => 2 };
+                                                                            public static int GenericWithInt<TValue>(Result<TValue> result) => result switch { Pending<int> => 1, IntOk => 2 };
 
-                    public static int GenericWithBase<TValue>(Result<TValue> result) => result switch { Result<int> => 1, Pending<TValue> => 2 };
-                }
-            }
-            """);
+                                                                            public static int GenericWithBase<TValue>(Result<TValue> result) => result switch { Result<int> => 1, Pending<TValue> => 2 };
+                                                                        }
+                                                                    }
+                                                                    """);
 
         AssertCoverage(Coverage(compilation, "OfInt"), ["Open.Pending<T>", "Open.IntOk"], [], []);
         AssertCoverage(Coverage(compilation, "OfString"), ["Open.Pending<T>"], [], []);
         AssertCoverage(Coverage(compilation, "Generic"), ["Open.Pending<T>", "Open.IntOk"], [], []);
-        AssertCoverage(Coverage(compilation, "GenericWithInt"), ["Open.Pending<T>", "Open.IntOk"], ["Open.Pending<T>"], ["Open.Pending<T>"]);
+        AssertCoverage(Coverage(compilation, "GenericWithInt"), ["Open.Pending<T>", "Open.IntOk"], ["Open.Pending<T>"],
+            ["Open.Pending<T>"]);
         AssertCoverage(Coverage(compilation, "GenericWithBase"), ["Open.Pending<T>", "Open.IntOk"], ["Open.IntOk"], []);
     }
 
@@ -713,20 +716,20 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ShapeSource + """
 
-            namespace Uses
-            {
-                using Shapes;
+                                                               namespace Uses
+                                                               {
+                                                                   using Shapes;
 
-                public static class Switches
-                {
-                    public static int Named<TShape>(TShape shape) where TShape : Shape
-                        => shape switch { Shape.Circle => 1, Shape.Square => 2 };
+                                                                   public static class Switches
+                                                                   {
+                                                                       public static int Named<TShape>(TShape shape) where TShape : Shape
+                                                                           => shape switch { Shape.Circle => 1, Shape.Square => 2 };
 
-                    public static int CatchAll<TShape>(TShape shape) where TShape : Shape
-                        => shape switch { Shape.Circle => 1, TShape other => 2 };
-                }
-            }
-            """);
+                                                                       public static int CatchAll<TShape>(TShape shape) where TShape : Shape
+                                                                           => shape switch { Shape.Circle => 1, TShape other => 2 };
+                                                                   }
+                                                               }
+                                                               """);
         var named = Coverage(compilation, "Named");
 
         Assert.AreEqual(compilation.GetNamedType("Shapes.Shape"), named.Union, SymbolEqualityComparer.Default);
@@ -738,34 +741,35 @@ public sealed class UnionSwitchCoverageTests
     public void InterfaceOfSomeCases_CoversThoseCasesOnly()
     {
         var compilation = TestCompilation.Create("""
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    private Shape() { }
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Shape
+                                                     {
+                                                         private Shape() { }
 
-                    public interface IRound { }
+                                                         public interface IRound { }
 
-                    public sealed record Circle(double Radius) : Shape, IRound;
+                                                         public sealed record Circle(double Radius) : Shape, IRound;
 
-                    public sealed record Ellipse(double Width, double Height) : Shape, IRound;
+                                                         public sealed record Ellipse(double Width, double Height) : Shape, IRound;
 
-                    public sealed record Square(double Side) : Shape;
-                }
+                                                         public sealed record Square(double Side) : Shape;
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Round(Shape shape) => shape switch { Shape.IRound => 1, Shape.Square => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         public static int Round(Shape shape) => shape switch { Shape.IRound => 1, Shape.Square => 2 };
 
-                    public static int Equatable(Shape shape) => shape switch { System.IEquatable<Shape.Circle> => 1, Shape.Square => 2 };
-                }
-            }
-            """);
+                                                         public static int Equatable(Shape shape) => shape switch { System.IEquatable<Shape.Circle> => 1, Shape.Square => 2 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = [Circle, "Shapes.Shape.Ellipse", Square];
 
         AssertCoverage(Coverage(compilation, "Round"), cases, [Circle, "Shapes.Shape.Ellipse"], []);
-        AssertCoverage(Coverage(compilation, "Equatable"), cases, [Circle, "Shapes.Shape.Ellipse"], ["Shapes.Shape.Ellipse"]);
+        AssertCoverage(Coverage(compilation, "Equatable"), cases, [Circle, "Shapes.Shape.Ellipse"],
+            ["Shapes.Shape.Ellipse"]);
     }
 
     [TestMethod]
@@ -780,26 +784,26 @@ public sealed class UnionSwitchCoverageTests
     public void InterfaceArm_DoesNotCoverACaseWhoseTypeParameterTheValueLeavesOpen()
     {
         var compilation = TestCompilation.Create("""
-            namespace Tags
-            {
-                public interface ITag<TTag> { }
+                                                 namespace Tags
+                                                 {
+                                                     public interface ITag<TTag> { }
 
-                public interface IPlain { }
+                                                     public interface IPlain { }
 
-                [Fprog.Union]
-                public abstract record Open<T>;
+                                                     [Fprog.Union]
+                                                     public abstract record Open<T>;
 
-                public sealed record Tagged<TTag> : Open<int>, ITag<TTag>, IPlain;
+                                                     public sealed record Tagged<TTag> : Open<int>, ITag<TTag>, IPlain;
 
-                public static class Switches
-                {
-                    // A Tagged<int> is an Open<int> too, and it is no ITag<string>.
-                    public static int Tag(Open<int> open) => open switch { ITag<string> => 1 };
+                                                     public static class Switches
+                                                     {
+                                                         // A Tagged<int> is an Open<int> too, and it is no ITag<string>.
+                                                         public static int Tag(Open<int> open) => open switch { ITag<string> => 1 };
 
-                    public static int Plain(Open<int> open) => open switch { IPlain => 1 };
-                }
-            }
-            """);
+                                                         public static int Plain(Open<int> open) => open switch { IPlain => 1 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Tags.Tagged<TTag>"];
 
         AssertCoverage(Coverage(compilation, "Tag"), cases, cases, cases);
@@ -810,27 +814,27 @@ public sealed class UnionSwitchCoverageTests
     public void BaseTypeArm_CoversAnOpenCaseOnlyThroughABaseTypeWithoutItsTypeParameters()
     {
         var compilation = TestCompilation.Create("""
-            namespace Lists
-            {
-                using System.Collections.Generic;
+                                                 namespace Lists
+                                                 {
+                                                     using System.Collections.Generic;
 
-                [Fprog.Union]
-                public abstract record Result<T>;
+                                                     [Fprog.Union]
+                                                     public abstract record Result<T>;
 
-                public sealed record ListOk<TItem>(List<TItem> Items) : Result<List<TItem>>;
+                                                     public sealed record ListOk<TItem>(List<TItem> Items) : Result<List<TItem>>;
 
-                public sealed record Tagged<TTag> : Result<int>;
+                                                     public sealed record Tagged<TTag> : Result<int>;
 
-                public static class Switches
-                {
-                    // A ListOk<string> is no Result<List<int>>.
-                    public static int OfLists<TValue>(Result<TValue> result) => result switch { Result<List<int>> => 1 };
+                                                     public static class Switches
+                                                     {
+                                                         // A ListOk<string> is no Result<List<int>>.
+                                                         public static int OfLists<TValue>(Result<TValue> result) => result switch { Result<List<int>> => 1 };
 
-                    // Every Tagged<TTag> is a Result<int>.
-                    public static int OfInt<TValue>(Result<TValue> result) => result switch { Result<int> => 1 };
-                }
-            }
-            """);
+                                                         // Every Tagged<TTag> is a Result<int>.
+                                                         public static int OfInt<TValue>(Result<TValue> result) => result switch { Result<int> => 1 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Lists.ListOk<TItem>", "Lists.Tagged<TTag>"];
 
         AssertCoverage(Coverage(compilation, "OfLists"), cases, cases, cases);
@@ -843,37 +847,37 @@ public sealed class UnionSwitchCoverageTests
     public void InterfaceImplementedTwice_SubpatternIsJudgedAgainstTheConstructionTheArmNames(string interfaces)
     {
         var compilation = TestCompilation.Create($$"""
-            namespace Shapes
-            {
-                public interface IHas<T>
-                {
-                    T Value { get; }
-                }
+                                                   namespace Shapes
+                                                   {
+                                                       public interface IHas<T>
+                                                       {
+                                                           T Value { get; }
+                                                       }
 
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    private Shape() { }
+                                                       [Fprog.Union]
+                                                       public abstract record Shape
+                                                       {
+                                                           private Shape() { }
 
-                    public sealed record Circle(string? Label) : Shape, {{interfaces}}
-                    {
-                        object IHas<object>.Value => "x";
+                                                           public sealed record Circle(string? Label) : Shape, {{interfaces}}
+                                                           {
+                                                               object IHas<object>.Value => "x";
 
-                        string? IHas<string?>.Value => Label;
-                    }
+                                                               string? IHas<string?>.Value => Label;
+                                                           }
 
-                    public sealed record Square(double Side) : Shape;
-                }
+                                                           public sealed record Square(double Side) : Shape;
+                                                       }
 
-                public static class Switches
-                {
-                    // A Circle(null) has a null IHas<string?>.Value and reaches no arm.
-                    public static int Nullable(Shape s) => s switch { Shape.Circle and IHas<string?> { Value: object o } => 1, Shape.Square => 2 };
+                                                       public static class Switches
+                                                       {
+                                                           // A Circle(null) has a null IHas<string?>.Value and reaches no arm.
+                                                           public static int Nullable(Shape s) => s switch { Shape.Circle and IHas<string?> { Value: object o } => 1, Shape.Square => 2 };
 
-                    public static int NotNull(Shape s) => s switch { Shape.Circle and IHas<object> { Value: object o } => 1, Shape.Square => 2 };
-                }
-            }
-            """);
+                                                           public static int NotNull(Shape s) => s switch { Shape.Circle and IHas<object> { Value: object o } => 1, Shape.Square => 2 };
+                                                       }
+                                                   }
+                                                   """);
         var nullable = Coverage(compilation, "Nullable");
 
         AssertCoverage(nullable, [Circle, Square], [Circle], [Circle]);
@@ -886,101 +890,104 @@ public sealed class UnionSwitchCoverageTests
     public void PrivateNestedCase_IsACaseOnlyWhereItCanBeNamed()
     {
         var compilation = TestCompilation.Create("""
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    private Shape() { }
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Shape
+                                                     {
+                                                         private Shape() { }
 
-                    public sealed record Circle : Shape;
+                                                         public sealed record Circle : Shape;
 
-                    private sealed record Hidden : Shape;
+                                                         private sealed record Hidden : Shape;
 
-                    public static int Inside(Shape shape) => shape switch { Circle => 1 };
+                                                         public static int Inside(Shape shape) => shape switch { Circle => 1 };
 
-                    public static int InsideBoth(Shape shape) => shape switch { Circle => 1, Hidden => 2 };
-                }
+                                                         public static int InsideBoth(Shape shape) => shape switch { Circle => 1, Hidden => 2 };
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Outside(Shape shape) => shape switch { Shape.Circle => 1 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Outside(Shape shape) => shape switch { Shape.Circle => 1 };
+                                                     }
+                                                 }
+                                                 """);
         var outside = Coverage(compilation, "Outside");
 
         // No arm is demanded for Hidden outside of Shape, but a Hidden reaches no arm there.
         AssertCoverage(outside, [Circle], [], []);
         Assert.IsEmpty(outside.CasesNotNamed);
         Assert.IsFalse(outside.HandlesEveryCase);
-        AssertCoverage(Coverage(compilation, "Inside"), [Circle, "Shapes.Shape.Hidden"], ["Shapes.Shape.Hidden"], ["Shapes.Shape.Hidden"]);
+        AssertCoverage(Coverage(compilation, "Inside"), [Circle, "Shapes.Shape.Hidden"], ["Shapes.Shape.Hidden"],
+            ["Shapes.Shape.Hidden"]);
         Assert.IsTrue(Coverage(compilation, "InsideBoth").HandlesEveryCase);
-        AssertNames([Circle, "Shapes.Shape.Hidden"], new UnionModel(compilation).GetCases(compilation.GetNamedType("Shapes.Shape")));
+        AssertNames([Circle, "Shapes.Shape.Hidden"],
+            new UnionModel(compilation).GetCases(compilation.GetNamedType("Shapes.Shape")));
     }
 
     [TestMethod]
     public void UnionFromAReferencedAssembly_InternalCaseIsNotACaseOfTheSwitch()
     {
         var library = TestCompilation.Create("""
-            namespace Lib
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    private Shape() { }
+                                             namespace Lib
+                                             {
+                                                 [Fprog.Union]
+                                                 public abstract record Shape
+                                                 {
+                                                     private Shape() { }
 
-                    public sealed record Circle : Shape;
+                                                     public sealed record Circle : Shape;
 
-                    internal sealed record Hidden : Shape;
-                }
-            }
-            """, "Library");
+                                                     internal sealed record Hidden : Shape;
+                                                 }
+                                             }
+                                             """, "Library");
         var compilation = TestCompilation.Create("""
-            namespace App
-            {
-                public static class Switches
-                {
-                    public static int Run(Lib.Shape shape) => shape switch { Lib.Shape.Circle => 1 };
-                }
-            }
-            """, "App", TestCompilation.ToImageReference(library));
+                                                 namespace App
+                                                 {
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Lib.Shape shape) => shape switch { Lib.Shape.Circle => 1 };
+                                                     }
+                                                 }
+                                                 """, "App", TestCompilation.ToImageReference(library));
         var coverage = Coverage(compilation, "Run");
 
         AssertCoverage(coverage, ["Lib.Shape.Circle"], [], []);
         Assert.IsEmpty(coverage.CasesNotNamed);
         Assert.IsFalse(coverage.HandlesEveryCase);
-        AssertNames(["Lib.Shape.Circle", "Lib.Shape.Hidden"], new UnionModel(compilation).GetCases(compilation.GetNamedType("Lib.Shape")));
+        AssertNames(["Lib.Shape.Circle", "Lib.Shape.Hidden"],
+            new UnionModel(compilation).GetCases(compilation.GetNamedType("Lib.Shape")));
     }
 
     [TestMethod]
     public void CaseDeclaredInAThirdAssembly_IsACase()
     {
         var unionLibrary = TestCompilation.Create("""
-            namespace Lib
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    protected Shape() { }
+                                                  namespace Lib
+                                                  {
+                                                      [Fprog.Union]
+                                                      public abstract record Shape
+                                                      {
+                                                          protected Shape() { }
 
-                    public sealed record Circle : Shape;
-                }
-            }
-            """, "UnionLibrary");
+                                                          public sealed record Circle : Shape;
+                                                      }
+                                                  }
+                                                  """, "UnionLibrary");
         var unionReference = TestCompilation.ToImageReference(unionLibrary);
         var caseLibrary = TestCompilation.Create("""
-            namespace Cases
-            {
-                public sealed record Star : Lib.Shape;
-            }
-            """, "CaseLibrary", unionReference);
+                                                 namespace Cases
+                                                 {
+                                                     public sealed record Star : Lib.Shape;
+                                                 }
+                                                 """, "CaseLibrary", unionReference);
         var unrelatedLibrary = TestCompilation.Create("""
-            namespace Unrelated
-            {
-                public sealed record Dot;
-            }
-            """, "UnrelatedLibrary");
+                                                      namespace Unrelated
+                                                      {
+                                                          public sealed record Dot;
+                                                      }
+                                                      """, "UnrelatedLibrary");
         var compilation = TestCompilation.Create(
             """
             namespace App
@@ -1013,34 +1020,35 @@ public sealed class UnionSwitchCoverageTests
     [TestMethod]
     [DataRow("namespace Lib", "Lib.Shape", "Lib.Shape")]
     [DataRow("public static class Lib", "Lib+Shape", "Lib")] // Only a top-level type can be forwarded.
-    public void CaseCompiledAgainstAnAssemblyThatNowForwardsTheUnion_IsACase(string container, string unionMetadataName, string forwardedType)
+    public void CaseCompiledAgainstAnAssemblyThatNowForwardsTheUnion_IsACase(string container, string unionMetadataName,
+        string forwardedType)
     {
         var unionSource = $$"""
-            {{container}}
-            {
-                [Fprog.Union]
-                public abstract record Shape
-                {
-                    protected Shape() { }
+                            {{container}}
+                            {
+                                [Fprog.Union]
+                                public abstract record Shape
+                                {
+                                    protected Shape() { }
 
-                    public sealed record Circle : Shape;
-                }
-            }
-            """;
+                                    public sealed record Circle : Shape;
+                                }
+                            }
+                            """;
         var oldLibrary = TestCompilation.Create(unionSource, "OldLibrary");
         var caseLibrary = TestCompilation.Create("""
-            namespace Cases
-            {
-                public sealed record Star : Lib.Shape;
-            }
-            """, "CaseLibrary", TestCompilation.ToImageReference(oldLibrary));
+                                                 namespace Cases
+                                                 {
+                                                     public sealed record Star : Lib.Shape;
+                                                 }
+                                                 """, "CaseLibrary", TestCompilation.ToImageReference(oldLibrary));
         var unionReference = TestCompilation.ToImageReference(TestCompilation.Create(unionSource, "UnionLibrary"));
 
         // The union moved to UnionLibrary; version 2 of OldLibrary only forwards it there.
         var forwarder = TestCompilation.Create($$"""
-            [assembly: System.Reflection.AssemblyVersion("2.0.0.0")]
-            [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof({{forwardedType}}))]
-            """, "OldLibrary", unionReference);
+                                                 [assembly: System.Reflection.AssemblyVersion("2.0.0.0")]
+                                                 [assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof({{forwardedType}}))]
+                                                 """, "OldLibrary", unionReference);
         var compilation = TestCompilation.Create(
             """
             namespace App
@@ -1061,7 +1069,8 @@ public sealed class UnionSwitchCoverageTests
         string[] cases = ["Lib.Shape.Circle", "Cases.Star"];
         var run = Coverage(compilation, "Run");
 
-        Assert.AreEqual(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Cases.Star")), SymbolEqualityComparer.Default);
+        Assert.AreEqual(shape, UnionModel.GetUnionOfCase(compilation.GetNamedType("Cases.Star")),
+            SymbolEqualityComparer.Default);
         AssertNames(cases, new UnionModel(compilation).GetCases(shape));
         AssertCoverage(run, cases, ["Cases.Star"], ["Cases.Star"]);
         AssertNames(["Cases.Star"], run.CasesNotNamed);
@@ -1121,22 +1130,22 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.Create(ShapeSource + """
 
-            namespace Uses
-            {
-                using Shapes;
+                                                               namespace Uses
+                                                               {
+                                                                   using Shapes;
 
-                public static class Switches
-                {
-                    public static int OverObject(object value) => value switch { Shape.Circle => 1, _ => 0 };
+                                                                   public static class Switches
+                                                                   {
+                                                                       public static int OverObject(object value) => value switch { Shape.Circle => 1, _ => 0 };
 
-                    public static int OverACase(Shape.Circle circle) => circle switch { { Radius: > 0 } => 1, _ => 0 };
+                                                                       public static int OverACase(Shape.Circle circle) => circle switch { { Radius: > 0 } => 1, _ => 0 };
 
-                    public static int OverATuple((Shape, Shape) pair) => pair switch { (Shape.Circle, _) => 1, _ => 0 };
+                                                                       public static int OverATuple((Shape, Shape) pair) => pair switch { (Shape.Circle, _) => 1, _ => 0 };
 
-                    public static int OverAnyParameter<TValue>(TValue value) => value switch { Shape.Circle => 1, _ => 0 };
-                }
-            }
-            """);
+                                                                       public static int OverAnyParameter<TValue>(TValue value) => value switch { Shape.Circle => 1, _ => 0 };
+                                                                   }
+                                                               }
+                                                               """);
         var model = new UnionModel(compilation);
 
         foreach (var method in new[] { "OverObject", "OverACase", "OverATuple", "OverAnyParameter" })
@@ -1151,17 +1160,17 @@ public sealed class UnionSwitchCoverageTests
     public void UnionWithoutCases_DoesNotHandleEveryCase()
     {
         var compilation = TestCompilation.Create("""
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public abstract record Shape;
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Shape;
 
-                public static class Switches
-                {
-                    public static int Run(Shape shape) => shape switch { _ => 1 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Shape shape) => shape switch { _ => 1 };
+                                                     }
+                                                 }
+                                                 """);
         var coverage = Coverage(compilation, "Run");
 
         AssertCoverage(coverage, [], [], []);
@@ -1181,23 +1190,23 @@ public sealed class UnionSwitchCoverageTests
     public void PositionalSubpatternWithAType_InCodeWithoutNullableContext_HandlesTheCase()
     {
         var compilation = TestCompilation.Create("""
-            #nullable disable
-            namespace Trees
-            {
-                [Fprog.Union]
-                public abstract record Tree
-                {
-                    private Tree() { }
+                                                 #nullable disable
+                                                 namespace Trees
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Tree
+                                                     {
+                                                         private Tree() { }
 
-                    public sealed record Leaf(string Name) : Tree;
-                }
+                                                         public sealed record Leaf(string Name) : Tree;
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Run(Tree tree) => tree switch { Tree.Leaf(string name) => 1 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Tree tree) => tree switch { Tree.Leaf(string name) => 1 };
+                                                     }
+                                                 }
+                                                 """);
 
         var coverage = Coverage(compilation, "Run");
 
@@ -1210,22 +1219,22 @@ public sealed class UnionSwitchCoverageTests
     public void PlainestUnionWithTopLevelCases_HandlesEveryCase()
     {
         var compilation = TestCompilation.Create("""
-            #nullable disable
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public abstract record Shape;
+                                                 #nullable disable
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract record Shape;
 
-                public sealed record Circle(double Radius) : Shape;
+                                                     public sealed record Circle(double Radius) : Shape;
 
-                public sealed record Named(string Name) : Shape;
+                                                     public sealed record Named(string Name) : Shape;
 
-                public static class Switches
-                {
-                    public static int Run(Shape shape) => shape switch { Circle(var radius) => 1, Named(string name) => 2 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Shape shape) => shape switch { Circle(var radius) => 1, Named(string name) => 2 };
+                                                     }
+                                                 }
+                                                 """);
         var coverage = Coverage(compilation, "Run");
 
         AssertCoverage(coverage, ["Shapes.Circle", "Shapes.Named"], [], []);
@@ -1236,23 +1245,23 @@ public sealed class UnionSwitchCoverageTests
     public void UnionThatIsNotAbstract_StillHandlesEveryCase()
     {
         var compilation = TestCompilation.Create("""
-            namespace Shapes
-            {
-                [Fprog.Union]
-                public record Shape
-                {
-                    public sealed record Circle : Shape;
+                                                 namespace Shapes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public record Shape
+                                                     {
+                                                         public sealed record Circle : Shape;
 
-                    public sealed record Square : Shape;
-                }
+                                                         public sealed record Square : Shape;
+                                                     }
 
-                public static class Switches
-                {
-                    // A new Shape() reaches no arm, but the union itself is not a case; FP0401 reports the union.
-                    public static int Run(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         // A new Shape() reaches no arm, but the union itself is not a case; FP0401 reports the union.
+                                                         public static int Run(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square => 2 };
+                                                     }
+                                                 }
+                                                 """);
         var coverage = Coverage(compilation, "Run");
 
         AssertCoverage(coverage, [Circle, Square], [], []);
@@ -1349,52 +1358,52 @@ public sealed class UnionSwitchCoverageTests
     public void ExtensionDeconstruct_SubpatternsAreJudgedAgainstItsOutParameters()
     {
         var compilation = TestCompilation.Create("""
-            namespace Notes
-            {
-                [Fprog.Union]
-                public abstract class Note
-                {
-                    private Note() { }
+                                                 namespace Notes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract class Note
+                                                     {
+                                                         private Note() { }
 
-                    public sealed class Plain : Note
-                    {
-                        public string Text { get; init; } = "";
+                                                         public sealed class Plain : Note
+                                                         {
+                                                             public string Text { get; init; } = "";
 
-                        public string? Author { get; init; }
-                    }
+                                                             public string? Author { get; init; }
+                                                         }
 
-                    public sealed class Titled : Note
-                    {
-                        public string Title { get; init; } = "";
-                    }
-                }
+                                                         public sealed class Titled : Note
+                                                         {
+                                                             public string Title { get; init; } = "";
+                                                         }
+                                                     }
 
-                public static class NoteExtensions
-                {
-                    public static void Deconstruct(this Note.Plain plain, out string text, out string? author)
-                    {
-                        text = plain.Text;
-                        author = plain.Author;
-                    }
+                                                     public static class NoteExtensions
+                                                     {
+                                                         public static void Deconstruct(this Note.Plain plain, out string text, out string? author)
+                                                         {
+                                                             text = plain.Text;
+                                                             author = plain.Author;
+                                                         }
 
-                    extension(Note.Titled titled)
-                    {
-                        public void Deconstruct(out string title, out int length)
-                        {
-                            title = titled.Title;
-                            length = titled.Title.Length;
-                        }
-                    }
-                }
+                                                         extension(Note.Titled titled)
+                                                         {
+                                                             public void Deconstruct(out string title, out int length)
+                                                             {
+                                                                 title = titled.Title;
+                                                                 length = titled.Title.Length;
+                                                             }
+                                                         }
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Typed(Note note) => note switch { Note.Plain(string text, var author) => 1, Note.Titled(string title, int length) => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         public static int Typed(Note note) => note switch { Note.Plain(string text, var author) => 1, Note.Titled(string title, int length) => 2 };
 
-                    public static int TypedAuthor(Note note) => note switch { Note.Plain(var text, string author) => 1, Note.Titled(_, > 0) => 2 };
-                }
-            }
-            """);
+                                                         public static int TypedAuthor(Note note) => note switch { Note.Plain(var text, string author) => 1, Note.Titled(_, > 0) => 2 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Notes.Note.Plain", "Notes.Note.Titled"];
 
         AssertCoverage(Coverage(compilation, "Typed"), cases, [], []);
@@ -1405,98 +1414,102 @@ public sealed class UnionSwitchCoverageTests
     public void GenericExtensionMember_ReferenceTypedInputCountsAsNullable()
     {
         var compilation = TestCompilation.Create("""
-            namespace Boxes
-            {
-                [Fprog.Union]
-                public abstract class Box<T>
-                {
-                    private Box() { }
+                                                 namespace Boxes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract class Box<T>
+                                                     {
+                                                         private Box() { }
 
-                    public sealed class Full(T item, T? spare) : Box<T>
-                    {
-                        public T Item { get; } = item;
+                                                         public sealed class Full(T item, T? spare) : Box<T>
+                                                         {
+                                                             public T Item { get; } = item;
 
-                        public T? Spare { get; } = spare;
-                    }
+                                                             public T? Spare { get; } = spare;
+                                                         }
 
-                    public sealed class Empty : Box<T>;
-                }
+                                                         public sealed class Empty : Box<T>;
+                                                     }
 
-                public static class BoxExtensions
-                {
-                    public static void Deconstruct<T>(this Box<T>.Full full, out T item, out T? spare)
-                    {
-                        item = full.Item;
-                        spare = full.Spare;
-                    }
+                                                     public static class BoxExtensions
+                                                     {
+                                                         public static void Deconstruct<T>(this Box<T>.Full full, out T item, out T? spare)
+                                                         {
+                                                             item = full.Item;
+                                                             spare = full.Spare;
+                                                         }
 
-                    public static void Deconstruct<T>(this Box<T>.Full full, out T item, out T? spare, out int size)
-                    {
-                        item = full.Item;
-                        spare = full.Spare;
-                        size = 1;
-                    }
+                                                         public static void Deconstruct<T>(this Box<T>.Full full, out T item, out T? spare, out int size)
+                                                         {
+                                                             item = full.Item;
+                                                             spare = full.Spare;
+                                                             size = 1;
+                                                         }
 
-                    public static void Deconstruct(this Box<string>.Full full, out string item) => item = full.Item;
+                                                         public static void Deconstruct(this Box<string>.Full full, out string item) => item = full.Item;
 
-                    extension<T>(Box<T>.Full full)
-                    {
-                        public T Thing => full.Item;
+                                                         extension<T>(Box<T>.Full full)
+                                                         {
+                                                             public T Thing => full.Item;
 
-                        public int Size => 1;
+                                                             public int Size => 1;
 
-                        public (T First, T Second) Twice => (full.Item, full.Item);
+                                                             public (T First, T Second) Twice => (full.Item, full.Item);
 
-                        public T[] Many => [full.Item];
-                    }
-                }
+                                                             public T[] Many => [full.Item];
+                                                         }
+                                                     }
 
-                public static class Switches
-                {
-                    // Roslyn constructs Deconstruct<string> for this arm: the ? of the value is not in the member.
-                    public static int Typed(Box<string?> box) => box switch { Box<string?>.Full(string item, _) => 1, Box<string?>.Empty => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         // Roslyn constructs Deconstruct<string> for this arm: the ? of the value is not in the member.
+                                                         public static int Typed(Box<string?> box) => box switch { Box<string?>.Full(string item, _) => 1, Box<string?>.Empty => 2 };
 
-                    // So a reference type that stands for a type parameter of the member counts as nullable everywhere.
-                    public static int TypedWithoutAnnotation(Box<string> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
+                                                         // So a reference type that stands for a type parameter of the member counts as nullable everywhere.
+                                                         public static int TypedWithoutAnnotation(Box<string> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
 
-                    public static int LostAnnotation(Box<string?> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
+                                                         public static int LostAnnotation(Box<string?> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
 
-                    public static int Var(Box<string?> box) => box switch { Box<string?>.Full(var item, _) => 1, Box<string?>.Empty => 2 };
+                                                         public static int Var(Box<string?> box) => box switch { Box<string?>.Full(var item, _) => 1, Box<string?>.Empty => 2 };
 
-                    // A value type holds no null, and int does not stand for a type parameter.
-                    public static int ValueType(Box<string?> box) => box switch { Box<string?>.Full(_, _, int size) => 1, Box<string?>.Empty => 2 };
+                                                         // A value type holds no null, and int does not stand for a type parameter.
+                                                         public static int ValueType(Box<string?> box) => box switch { Box<string?>.Full(_, _, int size) => 1, Box<string?>.Empty => 2 };
 
-                    public static int LostAnnotationValueType(Box<string?> box) => box switch { Box<string>.Full(_, _, int size) => 1, Box<string>.Empty => 2 };
+                                                         public static int LostAnnotationValueType(Box<string?> box) => box switch { Box<string>.Full(_, _, int size) => 1, Box<string>.Empty => 2 };
 
-                    public static int PropertyTyped(Box<string?> box) => box switch { Box<string?>.Full { Thing: string thing } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyTyped(Box<string?> box) => box switch { Box<string?>.Full { Thing: string thing } => 1, Box<string?>.Empty => 2 };
 
-                    public static int PropertyVar(Box<string?> box) => box switch { Box<string?>.Full { Thing: var thing } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyVar(Box<string?> box) => box switch { Box<string?>.Full { Thing: var thing } => 1, Box<string?>.Empty => 2 };
 
-                    public static int PropertyValueType(Box<string?> box) => box switch { Box<string?>.Full { Size: int size } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyValueType(Box<string?> box) => box switch { Box<string?>.Full { Size: int size } => 1, Box<string?>.Empty => 2 };
 
-                    // A member that is not generic is taken at its word, unless the arm itself lost a ? of the value.
-                    public static int Closed(Box<string> box) => box switch { Box<string>.Full(string item) => 1, Box<string>.Empty => 2 };
+                                                         // A member that is not generic is taken at its word, unless the arm itself lost a ? of the value.
+                                                         public static int Closed(Box<string> box) => box switch { Box<string>.Full(string item) => 1, Box<string>.Empty => 2 };
 
-                    public static int ClosedLostAnnotation(Box<string?> box) => box switch { Box<string>.Full(string item) => 1, Box<string>.Empty => 2 };
+                                                         public static int ClosedLostAnnotation(Box<string?> box) => box switch { Box<string>.Full(string item) => 1, Box<string>.Empty => 2 };
 
-                    // A type built from the type parameter is no more certain than the type parameter.
-                    public static int PropertyTupleTyped(Box<string?> box) => box switch { Box<string?>.Full { Twice: (string first, _) } => 1, Box<string?>.Empty => 2 };
+                                                         // A type built from the type parameter is no more certain than the type parameter.
+                                                         public static int PropertyTupleTyped(Box<string?> box) => box switch { Box<string?>.Full { Twice: (string first, _) } => 1, Box<string?>.Empty => 2 };
 
-                    public static int PropertyArrayTyped(Box<string?> box) => box switch { Box<string?>.Full { Many: string[] many } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyArrayTyped(Box<string?> box) => box switch { Box<string?>.Full { Many: string[] many } => 1, Box<string?>.Empty => 2 };
 
-                    // What is read from such an input is no more certain than the input.
-                    public static int NestedTyped(Box<(string? Name, int Count)> box)
-                        => box switch { Box<(string? Name, int Count)>.Full((string name, _), _) => 1, Box<(string? Name, int Count)>.Empty => 2 };
+                                                         // What is read from such an input is no more certain than the input.
+                                                         public static int NestedTyped(Box<(string? Name, int Count)> box)
+                                                             => box switch { Box<(string? Name, int Count)>.Full((string name, _), _) => 1, Box<(string? Name, int Count)>.Empty => 2 };
 
-                    public static int NestedValueType(Box<(string? Name, int Count)> box)
-                        => box switch { Box<(string? Name, int Count)>.Full((_, int count), _) => 1, Box<(string? Name, int Count)>.Empty => 2 };
-                }
-            }
-            """);
+                                                         public static int NestedValueType(Box<(string? Name, int Count)> box)
+                                                             => box switch { Box<(string? Name, int Count)>.Full((_, int count), _) => 1, Box<(string? Name, int Count)>.Empty => 2 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Boxes.Box<T>.Full", "Boxes.Box<T>.Empty"];
         string[] full = ["Boxes.Box<T>.Full"];
 
-        foreach (var method in new[] { "Typed", "TypedWithoutAnnotation", "LostAnnotation", "ClosedLostAnnotation", "PropertyTyped", "PropertyTupleTyped", "PropertyArrayTyped", "NestedTyped" })
+        foreach (var method in new[]
+                 {
+                     "Typed", "TypedWithoutAnnotation", "LostAnnotation", "ClosedLostAnnotation", "PropertyTyped",
+                     "PropertyTupleTyped", "PropertyArrayTyped", "NestedTyped"
+                 })
         {
             var coverage = Coverage(compilation, method);
 
@@ -1505,7 +1518,11 @@ public sealed class UnionSwitchCoverageTests
             Assert.IsFalse(coverage.HandlesEveryCase, method);
         }
 
-        foreach (var method in new[] { "Var", "ValueType", "LostAnnotationValueType", "Closed", "PropertyVar", "PropertyValueType", "NestedValueType" })
+        foreach (var method in new[]
+                 {
+                     "Var", "ValueType", "LostAnnotationValueType", "Closed", "PropertyVar", "PropertyValueType",
+                     "NestedValueType"
+                 })
             Assert.IsTrue(Coverage(compilation, method).HandlesEveryCase, method);
     }
 
@@ -1513,55 +1530,55 @@ public sealed class UnionSwitchCoverageTests
     public void ExtensionMemberWhoseReceiverLacksAnAnnotationOfTheValue_ReferenceTypedInputCountsAsNullable()
     {
         var compilation = TestCompilation.Create("""
-            namespace Boxes
-            {
-                [Fprog.Union]
-                public abstract class Box<T>
-                {
-                    private Box() { }
+                                                 namespace Boxes
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract class Box<T>
+                                                     {
+                                                         private Box() { }
 
-                    public sealed class Full(T item) : Box<T>
-                    {
-                        public T Item { get; } = item;
-                    }
+                                                         public sealed class Full(T item) : Box<T>
+                                                         {
+                                                             public T Item { get; } = item;
+                                                         }
 
-                    public sealed class Empty : Box<T>;
-                }
+                                                         public sealed class Empty : Box<T>;
+                                                     }
 
-                public static class BoxExtensions
-                {
-                    public static void Deconstruct(this Box<string>.Full full, out string item, out int size)
-                    {
-                        item = full.Item;
-                        size = 1;
-                    }
+                                                     public static class BoxExtensions
+                                                     {
+                                                         public static void Deconstruct(this Box<string>.Full full, out string item, out int size)
+                                                         {
+                                                             item = full.Item;
+                                                             size = 1;
+                                                         }
 
-                    extension(Box<string>.Full full)
-                    {
-                        public string Thing => full.Item;
+                                                         extension(Box<string>.Full full)
+                                                         {
+                                                             public string Thing => full.Item;
 
-                        public int Size => 1;
-                    }
-                }
+                                                             public int Size => 1;
+                                                         }
+                                                     }
 
-                public static class Switches
-                {
-                    // The receiver Box<string>.Full lacks the ? of the value: a Box<string?>.Full(null) gives a null item.
-                    public static int Typed(Box<string?> box) => box switch { Box<string?>.Full(string item, _) => 1, Box<string?>.Empty => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         // The receiver Box<string>.Full lacks the ? of the value: a Box<string?>.Full(null) gives a null item.
+                                                         public static int Typed(Box<string?> box) => box switch { Box<string?>.Full(string item, _) => 1, Box<string?>.Empty => 2 };
 
-                    public static int PropertyTyped(Box<string?> box) => box switch { Box<string?>.Full { Thing: string thing } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyTyped(Box<string?> box) => box switch { Box<string?>.Full { Thing: string thing } => 1, Box<string?>.Empty => 2 };
 
-                    // A value type holds no null, and a receiver lacks nothing of a value without ?.
-                    public static int ValueType(Box<string?> box) => box switch { Box<string?>.Full(_, int size) => 1, Box<string?>.Empty => 2 };
+                                                         // A value type holds no null, and a receiver lacks nothing of a value without ?.
+                                                         public static int ValueType(Box<string?> box) => box switch { Box<string?>.Full(_, int size) => 1, Box<string?>.Empty => 2 };
 
-                    public static int PropertyValueType(Box<string?> box) => box switch { Box<string?>.Full { Size: int size } => 1, Box<string?>.Empty => 2 };
+                                                         public static int PropertyValueType(Box<string?> box) => box switch { Box<string?>.Full { Size: int size } => 1, Box<string?>.Empty => 2 };
 
-                    public static int Closed(Box<string> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
+                                                         public static int Closed(Box<string> box) => box switch { Box<string>.Full(string item, _) => 1, Box<string>.Empty => 2 };
 
-                    public static int PropertyClosed(Box<string> box) => box switch { Box<string>.Full { Thing: string thing } => 1, Box<string>.Empty => 2 };
-                }
-            }
-            """);
+                                                         public static int PropertyClosed(Box<string> box) => box switch { Box<string>.Full { Thing: string thing } => 1, Box<string>.Empty => 2 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Boxes.Box<T>.Full", "Boxes.Box<T>.Empty"];
         string[] full = ["Boxes.Box<T>.Full"];
 
@@ -1582,26 +1599,26 @@ public sealed class UnionSwitchCoverageTests
     public void PositionalPatternThroughITuple_IsALengthTestAndHandlesNothing()
     {
         var compilation = TestCompilation.Create("""
-            namespace Rows
-            {
-                [Fprog.Union]
-                public abstract class Row : System.Runtime.CompilerServices.ITuple
-                {
-                    private Row() { }
+                                                 namespace Rows
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract class Row : System.Runtime.CompilerServices.ITuple
+                                                     {
+                                                         private Row() { }
 
-                    public int Length => 2;
+                                                         public int Length => 2;
 
-                    public object? this[int index] => null;
+                                                         public object? this[int index] => null;
 
-                    public sealed class Wide : Row { }
-                }
+                                                         public sealed class Wide : Row { }
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Run(Row row) => row switch { (var first, var second) => 1 };
-                }
-            }
-            """);
+                                                     public static class Switches
+                                                     {
+                                                         public static int Run(Row row) => row switch { (var first, var second) => 1 };
+                                                     }
+                                                 }
+                                                 """);
 
         AssertCoverage(Coverage(compilation, "Run"), ["Rows.Row.Wide"], ["Rows.Row.Wide"], ["Rows.Row.Wide"]);
     }
@@ -1610,32 +1627,32 @@ public sealed class UnionSwitchCoverageTests
     public void PositionalPatternThroughDeconstructOfTheUnion_IsACatchAll()
     {
         var compilation = TestCompilation.Create("""
-            namespace Rows
-            {
-                [Fprog.Union]
-                public abstract class Row
-                {
-                    private Row() { }
+                                                 namespace Rows
+                                                 {
+                                                     [Fprog.Union]
+                                                     public abstract class Row
+                                                     {
+                                                         private Row() { }
 
-                    public void Deconstruct(out int width, out string? label)
-                    {
-                        width = 0;
-                        label = null;
-                    }
+                                                         public void Deconstruct(out int width, out string? label)
+                                                         {
+                                                             width = 0;
+                                                             label = null;
+                                                         }
 
-                    public sealed class Wide : Row { }
+                                                         public sealed class Wide : Row { }
 
-                    public sealed class Narrow : Row { }
-                }
+                                                         public sealed class Narrow : Row { }
+                                                     }
 
-                public static class Switches
-                {
-                    public static int Vars(Row row) => row switch { Row.Wide => 1, var (width, label) => 2 };
+                                                     public static class Switches
+                                                     {
+                                                         public static int Vars(Row row) => row switch { Row.Wide => 1, var (width, label) => 2 };
 
-                    public static int Typed(Row row) => row switch { Row.Wide => 1, (int width, string label) => 2 };
-                }
-            }
-            """);
+                                                         public static int Typed(Row row) => row switch { Row.Wide => 1, (int width, string label) => 2 };
+                                                     }
+                                                 }
+                                                 """);
         string[] cases = ["Rows.Row.Wide", "Rows.Row.Narrow"];
 
         AssertCoverage(Coverage(compilation, "Vars"), cases, ["Rows.Row.Narrow"], []);
@@ -1647,20 +1664,21 @@ public sealed class UnionSwitchCoverageTests
     {
         var compilation = TestCompilation.CreateWithError(ShapeSource + """
 
-            namespace Uses
-            {
-                using Shapes;
+                                                                        namespace Uses
+                                                                        {
+                                                                            using Shapes;
 
-                public static class Switches
-                {
-                    public static int WithoutDeconstruct(Shape shape) => shape switch { var (first, second) => 1 };
+                                                                            public static class Switches
+                                                                            {
+                                                                                public static int WithoutDeconstruct(Shape shape) => shape switch { var (first, second) => 1 };
 
-                    public static int WrongCount(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square(var first, var second) => 2 };
-                }
-            }
-            """, "CS8129");
+                                                                                public static int WrongCount(Shape shape) => shape switch { Shape.Circle => 1, Shape.Square(var first, var second) => 2 };
+                                                                            }
+                                                                        }
+                                                                        """, "CS8129");
 
-        AssertCoverage(Coverage(compilation, "WithoutDeconstruct"), [Circle, Square], [Circle, Square], [Circle, Square]);
+        AssertCoverage(Coverage(compilation, "WithoutDeconstruct"), [Circle, Square], [Circle, Square],
+            [Circle, Square]);
         AssertCoverage(Coverage(compilation, "WrongCount"), [Circle, Square], [Square], [Square]);
     }
 
@@ -1674,82 +1692,98 @@ public sealed class UnionSwitchCoverageTests
     }
 
     private static string ShapeSwitch(string arms)
-        => ShapeSource + $$"""
+    {
+        return ShapeSource + $$"""
 
-            namespace Uses
-            {
-                using Shapes;
+                               namespace Uses
+                               {
+                                   using Shapes;
 
-                public static class Switches
-                {
-                    public static int Run(Shape shape) => shape switch { {{arms}} };
-                }
-            }
-            """;
+                                   public static class Switches
+                                   {
+                                       public static int Run(Shape shape) => shape switch { {{arms}} };
+                                   }
+                               }
+                               """;
+    }
 
     /// <summary>The coverage of <c>shape switch { arms }</c> for a parameter <c>Shape shape</c>.</summary>
     private static UnionSwitchCoverage ShapeCoverage(string arms)
-        => Coverage(TestCompilation.Create(ShapeSwitch(arms)), "Run");
+    {
+        return Coverage(TestCompilation.Create(ShapeSwitch(arms)), "Run");
+    }
 
     /// <summary>The coverage of <c>tree switch { arms }</c> for a parameter <c>Tree tree</c>.</summary>
     private static UnionSwitchCoverage TreeCoverage(string arms)
-        => Coverage(
+    {
+        return Coverage(
             TestCompilation.Create(TreeSource + $$"""
 
-                namespace Uses
-                {
-                    using Trees;
+                                                  namespace Uses
+                                                  {
+                                                      using Trees;
 
-                    public static class Switches
-                    {
-                        public static int Run(Tree tree) => tree switch { {{arms}} };
-                    }
-                }
-                """),
+                                                      public static class Switches
+                                                      {
+                                                          public static int Run(Tree tree) => tree switch { {{arms}} };
+                                                      }
+                                                  }
+                                                  """),
             "Run");
+    }
 
     /// <summary>The coverage of <c>result switch { arms }</c> for a parameter <c>Result&lt;typeArgument&gt; result</c>.</summary>
     private static UnionSwitchCoverage ResultCoverageOf(string typeArgument, string arms)
-        => Coverage(
+    {
+        return Coverage(
             TestCompilation.Create(ResultSource + $$"""
 
-                namespace Uses
-                {
-                    using Results;
+                                                    namespace Uses
+                                                    {
+                                                        using Results;
 
-                    public static class Switches
-                    {
-                        public static int Run(Result<{{typeArgument}}> result) => result switch { {{arms}} };
-                    }
-                }
-                """),
+                                                        public static class Switches
+                                                        {
+                                                            public static int Run(Result<{{typeArgument}}> result) => result switch { {{arms}} };
+                                                        }
+                                                    }
+                                                    """),
             "Run");
+    }
 
-    /// <summary>The coverage of <c>result switch { arms }</c> for a parameter <c>Result&lt;TValue&gt; result</c> of a generic method.</summary>
+    /// <summary>
+    ///     The coverage of <c>result switch { arms }</c> for a parameter <c>Result&lt;TValue&gt; result</c> of a generic
+    ///     method.
+    /// </summary>
     private static UnionSwitchCoverage ResultCoverage(string arms)
-        => Coverage(
+    {
+        return Coverage(
             TestCompilation.Create(ResultSource + $$"""
 
-                namespace Uses
-                {
-                    using Results;
+                                                    namespace Uses
+                                                    {
+                                                        using Results;
 
-                    public static class Switches
-                    {
-                        public static int Run<TValue>(Result<TValue> result) => result switch { {{arms}} };
-                    }
-                }
-                """),
+                                                        public static class Switches
+                                                        {
+                                                            public static int Run<TValue>(Result<TValue> result) => result switch { {{arms}} };
+                                                        }
+                                                    }
+                                                    """),
             "Run");
+    }
 
     private static UnionSwitchCoverage Coverage(Compilation compilation, string methodName)
     {
-        Assert.IsTrue(new UnionModel(compilation).TryGetCoverage(compilation.GetSwitchExpression(methodName), out var coverage));
+        Assert.IsTrue(new UnionModel(compilation).TryGetCoverage(compilation.GetSwitchExpression(methodName),
+            out var coverage));
         return coverage;
     }
 
     private static NullableAnnotation ValueAnnotation(Compilation compilation, string methodName)
-        => compilation.GetSwitchExpression(methodName).Value.Type?.NullableAnnotation ?? NullableAnnotation.None;
+    {
+        return compilation.GetSwitchExpression(methodName).Value.Type?.NullableAnnotation ?? NullableAnnotation.None;
+    }
 
     private static void AssertOwnArm(UnionSwitchCoverage coverage, string caseName)
     {
@@ -1758,9 +1792,12 @@ public sealed class UnionSwitchCoverageTests
     }
 
     private static void AssertNoOwnArm(UnionSwitchCoverage coverage, string caseName)
-        => Assert.Contains(caseName, Names(coverage.CasesWithoutOwnArm));
+    {
+        Assert.Contains(caseName, Names(coverage.CasesWithoutOwnArm));
+    }
 
-    private static void AssertCoverage(UnionSwitchCoverage coverage, string[] cases, string[] casesWithoutOwnArm, string[] unhandledCases)
+    private static void AssertCoverage(UnionSwitchCoverage coverage, string[] cases, string[] casesWithoutOwnArm,
+        string[] unhandledCases)
     {
         AssertNames(cases, coverage.Cases);
         AssertNames(casesWithoutOwnArm, coverage.CasesWithoutOwnArm);
@@ -1773,8 +1810,12 @@ public sealed class UnionSwitchCoverageTests
     }
 
     private static void AssertNames(string[] expected, ImmutableArray<INamedTypeSymbol> actual)
-        => Assert.AreSequenceEqual(expected, Names(actual));
+    {
+        Assert.AreSequenceEqual(expected, Names(actual));
+    }
 
     private static string[] Names(ImmutableArray<INamedTypeSymbol> types)
-        => types.Select(type => type.ToDisplayString()).ToArray();
+    {
+        return types.Select(type => type.ToDisplayString()).ToArray();
+    }
 }

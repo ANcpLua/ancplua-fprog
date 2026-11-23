@@ -1,0 +1,8 @@
+<Project>
+
+    <!-- The compiler does not create the folder of its SARIF log. -->
+    <Target Name="CreateDemoArtifactsFolder" BeforeTargets="CoreCompile">
+        <MakeDir Directories="$(MSBuildThisFileDirectory)artifacts" />
+    </Target>
+
+</Project>

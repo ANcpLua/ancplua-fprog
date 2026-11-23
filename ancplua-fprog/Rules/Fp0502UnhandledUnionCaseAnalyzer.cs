@@ -9,12 +9,12 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0502: a <c>switch</c> expression over a union value has a case that no arm without a <c>when</c>
-/// clause names with a type test for the case's own type (<see cref="UnionSwitchCoverage.CasesNotNamed"/>).
-/// A case reached only through a catch-all, a base type or an arm with a <c>when</c> clause counts as
-/// not handled, and so does a case that the code at the switch cannot name (a private nested case seen
-/// from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
-/// statements are not checked.
+///     FP0502: a <c>switch</c> expression over a union value has a case that no arm without a <c>when</c>
+///     clause names with a type test for the case's own type (<see cref="UnionSwitchCoverage.CasesNotNamed" />).
+///     A case reached only through a catch-all, a base type or an arm with a <c>when</c> clause counts as
+///     not handled, and so does a case that the code at the switch cannot name (a private nested case seen
+///     from outside the union). Reported at the <c>switch</c> keyword. Applies inside and outside core; <c>switch</c>
+///     statements are not checked.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0502UnhandledUnionCaseAnalyzer : DiagnosticAnalyzer

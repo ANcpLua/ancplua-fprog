@@ -8,9 +8,9 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0202: a property or indexer inside the functional core declares a <c>set</c> accessor, with or
-/// without a body and with any accessibility. <c>init</c> accessors are allowed. Reported at the
-/// <c>set</c> keyword; setters the compiler synthesizes have no keyword in source and are not reported.
+///     FP0202: a property or indexer inside the functional core declares a <c>set</c> accessor, with or
+///     without a body and with any accessibility. <c>init</c> accessors are allowed. Reported at the
+///     <c>set</c> keyword; setters the compiler synthesizes have no keyword in source and are not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0202SetAccessorAnalyzer : DiagnosticAnalyzer

@@ -6,13 +6,13 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0203: a record or readonly struct in the functional core has a field or property whose type is an
-/// array (including <c>System.Array</c>), <c>System.Text.StringBuilder</c>, or a type from
-/// <c>System.Collections</c> or one of its namespaces other than <c>Immutable</c> and <c>Frozen</c>
-/// (interfaces included). Only the member's own type is judged, after unwrapping <c>Nullable&lt;T&gt;</c>, so
-/// <c>KeyValuePair&lt;K, V&gt;?</c> counts while <c>ImmutableArray&lt;List&lt;int&gt;&gt;</c> and
-/// <c>Func&lt;IEnumerable&lt;int&gt;&gt;</c> do not. Reported at the member name: the declarator name for
-/// fields, the parameter name for positional record properties, and the <c>this</c> keyword for indexers.
+///     FP0203: a record or readonly struct in the functional core has a field or property whose type is an
+///     array (including <c>System.Array</c>), <c>System.Text.StringBuilder</c>, or a type from
+///     <c>System.Collections</c> or one of its namespaces other than <c>Immutable</c> and <c>Frozen</c>
+///     (interfaces included). Only the member's own type is judged, after unwrapping <c>Nullable&lt;T&gt;</c>, so
+///     <c>KeyValuePair&lt;K, V&gt;?</c> counts while <c>ImmutableArray&lt;List&lt;int&gt;&gt;</c> and
+///     <c>Func&lt;IEnumerable&lt;int&gt;&gt;</c> do not. Reported at the member name: the declarator name for
+///     fields, the parameter name for positional record properties, and the <c>this</c> keyword for indexers.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
@@ -48,9 +48,7 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
             || !CoreScope.IsDeclaredInSource(symbol)
             || !CoreScope.IsInCore(symbol)
             || !ContainsForbiddenType(type))
-        {
             return;
-        }
 
         var location = symbol.Locations.IsEmpty ? null : symbol.Locations[0];
         if (location is { IsInSource: true })
@@ -58,10 +56,13 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsRecordOrReadOnlyStruct(INamedTypeSymbol? type)
-        => type is { IsRecord: true } or { TypeKind: TypeKind.Struct, IsReadOnly: true };
+    {
+        return type is { IsRecord: true } or { TypeKind: TypeKind.Struct, IsReadOnly: true };
+    }
 
     private static bool ContainsForbiddenType(ITypeSymbol type)
-        => type switch
+    {
+        return type switch
         {
             IArrayTypeSymbol => true,
             INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
@@ -69,6 +70,7 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
             INamedTypeSymbol named => IsForbiddenNamedType(named),
             _ => false
         };
+    }
 
     private static bool IsForbiddenNamedType(INamedTypeSymbol type)
     {
@@ -92,6 +94,8 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
     }
 
     private static bool IsSystemChild(INamespaceSymbol? ns, string name)
-        => ns is { ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
-           && ns.Name == name;
+    {
+        return ns is { ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
+               && ns.Name == name;
+    }
 }

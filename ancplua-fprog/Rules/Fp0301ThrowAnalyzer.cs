@@ -1,15 +1,25 @@
+using System;
 using System.Collections.Immutable;
 using ancplua_fprog.Shared;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0301: a <c>throw</c> statement or <c>throw</c> expression inside the functional core, including
-/// a rethrow (<c>throw;</c>). Reported at the <c>throw</c> keyword.
+///     FP0301: a <c>throw</c> statement or <c>throw</c> expression inside the functional core, including
+///     a rethrow (<c>throw;</c>), reported at the <c>throw</c> keyword; and a call of a throw helper, reported at
+///     the method name token. A throw helper is a static method whose name starts with <c>Throw</c> on a type
+///     that derives from <c>System.Exception</c>, such as <c>ArgumentNullException.ThrowIfNull</c> or
+///     <c>ObjectDisposedException.ThrowIf</c>: it throws without the keyword, and .NET's code fixes for
+///     CA1510 to CA1513 rewrite <c>if (...) throw</c> into exactly these calls. In the .NET 11 framework every
+///     such public method is a <c>ThrowIf*</c> guard. Deliberately not reported: instance helpers such as
+///     <c>CancellationToken.ThrowIfCancellationRequested()</c>, <c>ExceptionDispatchInfo.Throw</c> (not an
+///     exception type), <c>Debug.Fail</c>, helpers on user types that are not exceptions, and method groups of
+///     a throw helper (a reference, not a throw).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
@@ -28,6 +38,53 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSyntaxNodeAction(Analyze, SyntaxKind.ThrowStatement, SyntaxKind.ThrowExpression);
+        context.RegisterOperationAction(AnalyzeInvocation, OperationKind.Invocation);
+    }
+
+    private static void AnalyzeInvocation(OperationAnalysisContext context)
+    {
+        var invocation = (IInvocationOperation)context.Operation;
+        if (!IsThrowHelper(invocation.TargetMethod)
+            || invocation.Syntax is not InvocationExpressionSyntax syntax
+            || !CoreScope.IsInCore(context.ContainingSymbol))
+            return;
+
+        var name = NameToken(syntax.Expression);
+        if (name.IsKind(SyntaxKind.IdentifierToken))
+            context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation()));
+    }
+
+    private static bool IsThrowHelper(IMethodSymbol method)
+    {
+        return method.IsStatic
+               && method.Name.StartsWith("Throw", StringComparison.Ordinal)
+               && IsExceptionType(method.ContainingType);
+    }
+
+    private static bool IsExceptionType(INamedTypeSymbol? type)
+    {
+        for (var current = type; current is not null; current = current.BaseType)
+            if (current is
+                {
+                    Name: "Exception", ContainingType: null,
+                    ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true }
+                })
+                return true;
+
+        return false;
+    }
+
+    /// <summary>The method name token of the invoked expression, also when it is parenthesized.</summary>
+    private static SyntaxToken NameToken(ExpressionSyntax expression)
+    {
+        return expression switch
+        {
+            ParenthesizedExpressionSyntax parenthesized => NameToken(parenthesized.Expression),
+            MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier,
+            MemberBindingExpressionSyntax memberBinding => memberBinding.Name.Identifier,
+            SimpleNameSyntax simpleName => simpleName.Identifier,
+            _ => default
+        };
     }
 
     private static void Analyze(SyntaxNodeAnalysisContext context)

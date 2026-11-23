@@ -8,10 +8,10 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0101: a method or local function inside the functional core returns <c>void</c>. Reported at the
-/// method or local function name, at every declaration of a partial method, and at the operator token of
-/// a user-defined operator declared with a <c>void</c> return type (compound assignment, increment).
-/// Constructors, destructors, accessors and lambdas have no declared return type and are not reported.
+///     FP0101: a method or local function inside the functional core returns <c>void</c>. Reported at the
+///     method or local function name, at every declaration of a partial method, and at the operator token of
+///     a user-defined operator declared with a <c>void</c> return type (compound assignment, increment).
+///     Constructors, destructors, accessors and lambdas have no declared return type and are not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0101VoidMethodAnalyzer : DiagnosticAnalyzer
@@ -62,9 +62,7 @@ public sealed class Fp0101VoidMethodAnalyzer : DiagnosticAnalyzer
             {
                 ReturnsVoid: true
             } symbol)
-        {
             return;
-        }
 
         if (CoreScope.IsDeclaredInSource(symbol) && CoreScope.IsInCore(symbol))
             context.ReportDiagnostic(Diagnostic.Create(Rule, name.GetLocation(), symbol.Name));

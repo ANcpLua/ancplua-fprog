@@ -87,17 +87,24 @@ public sealed class FixtureLifecycleTests
     [AssemblyCleanup]
     public static void AllScopes_ReleaseTheirResources()
     {
-        Assert.AreEqual(ClassProbe.Created, ClassProbe.Disposed, "Class-owned fixtures must be disposed after their class.");
+        Assert.AreEqual(ClassProbe.Created, ClassProbe.Disposed,
+            "Class-owned fixtures must be disposed after their class.");
         Assert.AreEqual(ClassProbe.Assigned.Count, ClassProbe.Created, "Each class must create exactly one fixture.");
-        Assert.AreEqual(ClassProbe.Assigned.Count, ClassProbe.Assigned.Values.Distinct().Count(), "Different classes must not share a fixture.");
-        Assert.AreEqual(TestProbe.Created, TestProbe.Disposed, "Invocation-owned fixtures must be disposed after each invocation.");
-        Assert.IsEmpty(InputFixture.CreatedPaths.Where(File.Exists), "The example's shared file must be deleted after its class.");
+        Assert.AreEqual(ClassProbe.Assigned.Count, ClassProbe.Assigned.Values.Distinct().Count(),
+            "Different classes must not share a fixture.");
+        Assert.AreEqual(TestProbe.Created, TestProbe.Disposed,
+            "Invocation-owned fixtures must be disposed after each invocation.");
+        Assert.IsEmpty(InputFixture.CreatedPaths.Where(File.Exists),
+            "The example's shared file must be deleted after its class.");
         Assert.IsLessThanOrEqualTo(1, InputFixture.CreatedPaths.Count, "Both example tests must share one file.");
     }
 
     private sealed class UninitializedHost : FixtureTests<TestProbe>
     {
-        internal TestProbe ReadFixture() => Fixture;
+        internal TestProbe ReadFixture()
+        {
+            return Fixture;
+        }
     }
 }
 

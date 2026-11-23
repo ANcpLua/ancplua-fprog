@@ -9,13 +9,15 @@ using Microsoft.CodeAnalysis.Operations;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0102: a hidden input inside the functional core. Reports <c>DateTime.Now/UtcNow/Today</c>,
-/// <c>DateTimeOffset.Now/UtcNow</c>, <c>Guid.NewGuid</c>, <c>TimeProvider.System</c>, any member of
-/// <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
-/// static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
-/// defers binding to run time. Reported at the member's name token (inside any parentheses), or at
-/// <c>Random</c> in the object creation. A target-typed <c>new(...)</c> has no <c>Random</c> token
-/// and is not reported.
+///     FP0102: a hidden input inside the functional core. Reports <c>DateTime.Now/UtcNow/Today</c>,
+///     <c>DateTimeOffset.Now/UtcNow</c>, <c>Guid.NewGuid</c>, <c>Guid.CreateVersion7</c> (clock and random bits,
+///     so also the overload that takes a timestamp gives a new value for the same argument),
+///     <c>TimeProvider.System</c>, any member of
+///     <c>System.Environment</c> or <c>System.Random</c>, <c>new Random(...)</c>, and every reference to a
+///     static field that is neither <c>readonly</c> nor <c>const</c>, also when a <c>dynamic</c> argument
+///     defers binding to run time. Reported at the member's name token (inside any parentheses), or at
+///     <c>Random</c> in the object creation. A target-typed <c>new(...)</c> has no <c>Random</c> token
+///     and is not reported.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
@@ -53,25 +55,26 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
             || !IsHiddenInput(operation, context.CancellationToken)
             || IsInsideNameOf(operation)
             || !CoreScope.IsInCore(context.ContainingSymbol))
-        {
             return;
-        }
 
         var location = ReportLocation(operation.Syntax);
         context.ReportDiagnostic(Diagnostic.Create(Rule, location, operation.Syntax.ToString()));
     }
 
-    private static bool IsHiddenInput(IOperation operation, CancellationToken cancellationToken) => operation switch
+    private static bool IsHiddenInput(IOperation operation, CancellationToken cancellationToken)
     {
-        IPropertyReferenceOperation reference => IsHiddenProperty(reference.Property),
-        IInvocationOperation invocation => IsHiddenMethod(invocation.TargetMethod),
-        IMethodReferenceOperation reference => IsHiddenMethod(reference.Method),
-        IFieldReferenceOperation reference => IsMutableStaticField(reference.Field),
-        IObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
-        IDynamicMemberReferenceOperation reference => HasHiddenCandidate(reference, cancellationToken),
-        IDynamicObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
-        _ => false
-    };
+        return operation switch
+        {
+            IPropertyReferenceOperation reference => IsHiddenProperty(reference.Property),
+            IInvocationOperation invocation => IsHiddenMethod(invocation.TargetMethod),
+            IMethodReferenceOperation reference => IsHiddenMethod(reference.Method),
+            IFieldReferenceOperation reference => IsMutableStaticField(reference.Field),
+            IObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
+            IDynamicMemberReferenceOperation reference => HasHiddenCandidate(reference, cancellationToken),
+            IDynamicObjectCreationOperation creation => IsSystemType(creation.Type, "Random"),
+            _ => false
+        };
+    }
 
     private static bool IsHiddenProperty(IPropertySymbol property)
     {
@@ -90,24 +93,20 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
             return false;
 
         if (IsSystemType(method.ContainingType, "Environment")
-            || (IsSystemType(method.ContainingType, "Guid") && method.Name == "NewGuid"))
-        {
+            || (IsSystemType(method.ContainingType, "Guid") && method.Name is "NewGuid" or "CreateVersion7"))
             return true;
-        }
 
-        for (IMethodSymbol? current = method; current is not null; current = current.OverriddenMethod)
-        {
+        for (var current = method; current is not null; current = current.OverriddenMethod)
             if (IsSystemType(current.ContainingType, "Random"))
                 return true;
-        }
 
         return false;
     }
 
     /// <summary>
-    /// A call bound at run time because an argument is <c>dynamic</c>, such as <c>random.Next(d)</c> or
-    /// <c>Environment.GetEnvironmentVariable(d)</c>. The compiler still knows the candidate methods; a
-    /// <c>dynamic</c> receiver has none and is not reported.
+    ///     A call bound at run time because an argument is <c>dynamic</c>, such as <c>random.Next(d)</c> or
+    ///     <c>Environment.GetEnvironmentVariable(d)</c>. The compiler still knows the candidate methods; a
+    ///     <c>dynamic</c> receiver has none and is not reported.
     /// </summary>
     private static bool HasHiddenCandidate(IOperation reference, CancellationToken cancellationToken)
     {
@@ -119,46 +118,49 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
             return IsHiddenMethod(method);
 
         foreach (var candidate in info.CandidateSymbols)
-        {
             if (candidate is IMethodSymbol candidateMethod && IsHiddenMethod(candidateMethod))
                 return true;
-        }
 
         return false;
     }
 
     private static bool IsMutableStaticField(IFieldSymbol field)
-        => field is { IsStatic: true, IsConst: false, IsReadOnly: false, IsImplicitlyDeclared: false };
+    {
+        return field is { IsStatic: true, IsConst: false, IsReadOnly: false, IsImplicitlyDeclared: false };
+    }
 
     private static bool IsSystemType(ITypeSymbol? type, string name)
-        => type is INamedTypeSymbol
-           {
-               ContainingType: null,
-               ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true }
-           } named
-           && named.Name == name;
+    {
+        return type is INamedTypeSymbol
+               {
+                   ContainingType: null,
+                   ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true }
+               } named
+               && named.Name == name;
+    }
 
     private static bool IsInsideNameOf(IOperation operation)
     {
         for (var parent = operation.Parent; parent is not null; parent = parent.Parent)
-        {
             if (parent is INameOfOperation)
                 return true;
-        }
 
         return false;
     }
 
-    private static Location ReportLocation(SyntaxNode syntax) => syntax switch
+    private static Location ReportLocation(SyntaxNode syntax)
     {
-        InvocationExpressionSyntax invocation => ReportLocation(invocation.Expression),
-        ParenthesizedExpressionSyntax parenthesized => ReportLocation(parenthesized.Expression),
-        MemberAccessExpressionSyntax memberAccess => ReportLocation(memberAccess.Name),
-        MemberBindingExpressionSyntax memberBinding => ReportLocation(memberBinding.Name),
-        ObjectCreationExpressionSyntax creation => ReportLocation(creation.Type),
-        QualifiedNameSyntax qualified => ReportLocation(qualified.Right),
-        AliasQualifiedNameSyntax aliasQualified => ReportLocation(aliasQualified.Name),
-        SimpleNameSyntax name => name.Identifier.GetLocation(),
-        _ => syntax.GetLocation()
-    };
+        return syntax switch
+        {
+            InvocationExpressionSyntax invocation => ReportLocation(invocation.Expression),
+            ParenthesizedExpressionSyntax parenthesized => ReportLocation(parenthesized.Expression),
+            MemberAccessExpressionSyntax memberAccess => ReportLocation(memberAccess.Name),
+            MemberBindingExpressionSyntax memberBinding => ReportLocation(memberBinding.Name),
+            ObjectCreationExpressionSyntax creation => ReportLocation(creation.Type),
+            QualifiedNameSyntax qualified => ReportLocation(qualified.Right),
+            AliasQualifiedNameSyntax aliasQualified => ReportLocation(aliasQualified.Name),
+            SimpleNameSyntax name => name.Identifier.GetLocation(),
+            _ => syntax.GetLocation()
+        };
+    }
 }

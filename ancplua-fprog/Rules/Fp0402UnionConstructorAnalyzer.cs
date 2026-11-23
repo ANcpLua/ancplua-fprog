@@ -6,10 +6,10 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace ancplua_fprog.Rules;
 
 /// <summary>
-/// FP0402: a union has an instance constructor declared in source that is not <c>private</c>
-/// (reported at the constructor name, at both declarations of a partial constructor; a primary
-/// constructor at the union's name), or has no declared instance constructor, so the implicit one
-/// is not private (reported once at the union's name).
+///     FP0402: a union has an instance constructor declared in source that is not <c>private</c>
+///     (reported at the constructor name, at both declarations of a partial constructor; a primary
+///     constructor at the union's name), or has no declared instance constructor, so the implicit one
+///     is not private (reported once at the union's name).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class Fp0402UnionConstructorAnalyzer : DiagnosticAnalyzer
