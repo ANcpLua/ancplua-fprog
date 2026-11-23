@@ -1,5 +1,6 @@
 namespace Demo.Fp0104_ConditionalReceiver;
 
+[Fprog.FunctionalCore]
 public sealed record Account(decimal Balance);
 
 // Correct: the chosen account is copied with the new balance; the caller's objects stay as they were.

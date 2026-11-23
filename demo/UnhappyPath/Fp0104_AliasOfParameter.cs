@@ -2,16 +2,18 @@ using System.Collections.Generic;
 
 namespace Demo.Fp0104_AliasOfParameter;
 
+[Fprog.FunctionalCore]
 public sealed class Line
 {
-    public int Quantity;
+    public int Quantity; // expect: FP0201
 }
 
+[Fprog.FunctionalCore]
 public sealed class Order
 {
-    public int Total;
-    public Line? First;
-    public List<Line> Lines = new();
+    public int Total; // expect: FP0201
+    public Line? First; // expect: FP0201
+    public readonly List<Line> Lines = new();
 }
 
 // Bug: each write goes to the caller's objects, only through another name.

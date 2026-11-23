@@ -1,7 +1,5 @@
 using System;
-using System.Diagnostics;
 using System.Globalization;
-using System.Security.Cryptography;
 
 namespace Demo.KnownGaps.Fp0102_ClockAndRandomnessNotInTheList;
 
@@ -9,9 +7,6 @@ namespace Demo.KnownGaps.Fp0102_ClockAndRandomnessNotInTheList;
 [Fprog.FunctionalCore]
 public static class Hidden
 {
-    public static bool IsLate(DateTimeOffset due, TimeProvider clock) => clock.GetUtcNow() > due;   // injected clock
-    public static long Stamp() => Stopwatch.GetTimestamp();                                         // clock
-    public static int Dice() => RandomNumberGenerator.GetInt32(6);                                  // randomness
     public static TimeSpan Offset() => TimeZoneInfo.Local.BaseUtcOffset;                            // machine setting
     public static DateTime Local(DateTime utc) => utc.ToLocalTime();                                // machine setting
     public static string Money(decimal amount) => amount.ToString("C");                             // current culture

@@ -4,17 +4,8 @@ using System.Linq;
 
 namespace Demo.Fp0104_AliasOfParameter;
 
-public sealed class Line
-{
-    public int Quantity;
-}
-
-public readonly record struct Point(int X, int Y);
-
-public struct Cursor
-{
-    public int Position;
-}
+[Fprog.FunctionalCore]
+public sealed record Line(int Quantity);
 
 // Correct: every object that is written was created inside the function, so no caller can see the writes.
 [Fprog.FunctionalCore]
@@ -28,22 +19,22 @@ public static class Normalizer
         return [.. copy];
     }
 
-    public static int FreshObject(Line template)
+    public static int FreshObject(List<int> template)
     {
-        var line = new Line { Quantity = template.Quantity };   // a new object
-        line.Quantity++;
-        return line.Quantity;
+        var line = new List<int>(template);
+        line.Add(1);
+        return line.Count;
     }
 
-    public static int Reassigned(Line template)
+    public static int Reassigned(List<int> template)
     {
         var line = template;
-        line = new Line();                    // from here on it is another object
-        line.Quantity = 5;
-        return line.Quantity;
+        line = new List<int>();
+        line.Add(5);
+        return line.Count;
     }
 
-    public static int StructCopy(Cursor cursor)
+    public static int StructCopy((int Position, int Column) cursor)
     {
         var moved = cursor;                   // a struct is copied
         moved.Position++;

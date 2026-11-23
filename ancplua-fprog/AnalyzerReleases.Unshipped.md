@@ -24,5 +24,6 @@
  FP0503  | Functional | Warning  | Match union cases in a switch
  FP0601  | Functional | Warning  | Do not inspect the runtime type of an unconstrained type parameter 
  FP0701  | Functional | Warning  | Do not capture a variable that is reassigned                       
- FP0801  | Functional | Warning  | Do not reach the imperative shell from the functional core         
- FP0802  | Functional | Warning  | Do not return a task from the functional core                      
+ FP0801  | Functional | Warning  | Keep Shell types and locks outside the functional core
+ FP0802  | Functional | Warning  | Keep asynchronous work outside the functional core
+ FP0803  | Functional | Warning  | Keep implementations of core types in the functional core

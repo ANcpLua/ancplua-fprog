@@ -1,5 +1,6 @@
 namespace Demo.Fp0104_OutArgument;
 
+[Fprog.FunctionalCore]
 public sealed record Counter(int Value);
 
 // Correct: the result is a local, and the new state is returned.

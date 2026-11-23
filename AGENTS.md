@@ -247,14 +247,15 @@ A Shell value (for FP0802: an Async value) is reported once, where it enters cor
      member): the member name;
    - a target-typed `new(…)` that creates such a type: the `new` keyword;
    - an indexer of such a type: the whole element access;
-   - an operator or user-defined conversion of such a type: the operator token, or the operand for an implicit
-     conversion;
+   - an operator or user-defined conversion of such a type: the operator token, the opening parenthesis of an
+     explicit cast, or the operand for an implicit conversion;
    - an expression of such a type used as the operand of `foreach`, `using` or `await`, as an argument, as the
      target of a delegate call, or as a returned value: that expression.
 
 An expression is **anchored** when it, or a receiver inside it, is already reported by this rule, or when it reads a
-parameter, local, field or property whose declaration carries a reported type name. An anchored expression adds
-nothing. Attribute lists, `using` directives, `nameof` operands and documentation comments lie outside the rule.
+parameter, local, field or property whose type syntax carries a reported name. The target type of a target-typed
+`new` also anchors it when that type is written and reported in core. An anchored expression adds nothing.
+Attribute lists, `using` directives, `nameof` operands and documentation comments lie outside the rule.
 
 FP0601 reports `dynamic`, so a call bound at run time is already marked at its source.
 

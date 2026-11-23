@@ -54,6 +54,16 @@ internal static class FpAnalyzerTestHost
         CancellationToken cancellationToken,
         params DiagnosticResult[] expected)
     {
+        return VerifyRuleAsync(ruleId, source, null, cancellationToken, expected);
+    }
+
+    public static Task VerifyRuleAsync(
+        string ruleId,
+        string source,
+        string? analyzerConfig,
+        CancellationToken cancellationToken,
+        params DiagnosticResult[] expected)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
         var analyzers = AllAnalyzers.Value;
         var reported = analyzers.SelectMany(SupportedIds).ToImmutableHashSet(StringComparer.Ordinal);
@@ -62,6 +72,13 @@ internal static class FpAnalyzerTestHost
 
         var test = CreateTest(new RuleTest(analyzers), source, expected);
         test.DisabledDiagnostics.AddRange(reported.Where(id => id != ruleId));
+        if (analyzerConfig is not null)
+        {
+            var global = analyzerConfig.Split('\n')
+                .Any(line => line.TrimStart().StartsWith("is_global", StringComparison.Ordinal));
+            test.TestState.AnalyzerConfigFiles.Add((global ? "/.globalconfig" : "/.editorconfig", analyzerConfig));
+        }
+
         return test.RunAsync(cancellationToken);
     }
 

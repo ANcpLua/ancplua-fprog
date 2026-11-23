@@ -1,5 +1,6 @@
 namespace Demo.Fp0301_ThrowHelper;
 
+[Fprog.FunctionalCore]
 public closed record Checked
 {
     public sealed record Valid(int Value) : Checked;

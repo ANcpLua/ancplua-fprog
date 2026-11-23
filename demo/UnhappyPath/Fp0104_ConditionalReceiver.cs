@@ -1,8 +1,9 @@
 namespace Demo.Fp0104_ConditionalReceiver;
 
+[Fprog.FunctionalCore]
 public sealed class Account
 {
-    public decimal Balance;
+    public decimal Balance; // expect: FP0201
 }
 
 // Bug: one of the two accounts that the caller passed in is changed in place.

@@ -76,24 +76,13 @@ Patches 3, 4, 8, 9 and 10 changed no existing test. 114 tests were added.
   the field itself (FP0201, FP0102); reads; immutable collections. A memo such as `Memo.GetOrAdd(...)` on a static
   `ConcurrentDictionary` IS reported: decide whether you want that. Still open: a field reached through a local alias,
   properties with `set`, extension methods, event subscriptions.
-- **11 and 12:** a receiver that already contains a reported type name adds nothing (`Console.Out.Write`,
-  `var r = new StreamReader(p); r.ReadLine()`), and neither does a parameter, local or field of a core type with a
-  written type. Pure members are reported too (`GetExtension` via `using static System.IO.Path`,
-  `contact.Address.Host` on a `MailAddress` of a non-core type), because the same code with the type written is
-  reported today. Still open: indexers, operators, `foreach` and `using` of a shell object, calls through a delegate,
-  `dynamic`, a shell object passed straight on, values whose shell type comes through a type parameter.
-
 ## Not changed: real bugs that still pass (`KnownGaps/`)
 
 Each needs a decision about the catalog, or cannot be decided by a rule of this kind.
 
 | File | What passes | Why it was left |
 | --- | --- | --- |
-| `Fp0801_CoreCallsShell.cs` | core calls a non-core method that does I/O; core dispatches into an override of a non-core subclass | The largest hole. A rule "core uses only core" would report the referee's own clean example, where core reads members of a non-core union. Needs a design: an allow-list, or core-only call targets for methods. |
-| `Fp0801_ConcurrencyInCore.cs` | `Task.Run(...).Result`, PLINQ (`AsParallel` changed the output order in up to 50 of 50 runs), `ReaderWriterLockSlim`, `AsyncLocal`, `ThreadPool` | The row lists eight threading types by name; visible tests encode the others as allowed. |
-| `Fp0102_ClockAndRandomnessNotInTheList.cs` | an injected `TimeProvider` (`clock.GetUtcNow()`), `Stopwatch`, `RandomNumberGenerator`, `TimeZoneInfo.Local`, `ToString("C")`, `string.GetHashCode()` (three process runs, three values) | The row is a closed list. Two visible tests encode the injected `TimeProvider` as correct, so this may be intended. |
-| `Fp0102_StaticMutableProperty.cs` | a mutable static auto-property of a non-core type | The row says "static field". |
-| `Fp0802_BlockingOnTask.cs` | `pending.Result`, `GetAwaiter().GetResult()`, `async IAsyncEnumerable` | The row looks at the return type of methods; tests encode async streams as allowed. |
+| `Fp0102_ClockAndRandomnessNotInTheList.cs` | `TimeZoneInfo.Local`, `ToString("C")`, `string.GetHashCode()` (three process runs, three values) | FP0102 and FP0106 have yet to cover these hidden inputs and implicit culture uses. |
 | `Fp0303_NullThroughALocal.cs` | `string? result = null; ...; return result;` | Needs data flow; a constant holding null is encoded as not reported. |
 | `Fp0302_OtherPartialMembers.cs` | `ParseExact`, `Convert.ToInt32`, `Max()`/`Average()` on an empty sequence, `xs[0]`, division, a hard cast | Outside the row's list; `ParseExact` and `BigInteger.Parse` are encoded as not reported. |
 | `Fp0203_ImmutableBuilderMember.cs` | a record holding `ImmutableArray<T>.Builder` (a `with` copy shares it) | The row allows the whole namespace, and the test is named "Decided". |

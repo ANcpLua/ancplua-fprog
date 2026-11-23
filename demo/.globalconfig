@@ -1,0 +1,3 @@
+is_global = true
+
+fprog_pure_apis = Demo.Trusted
