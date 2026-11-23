@@ -24,6 +24,9 @@ internal static class EntryRule
         private readonly CancellationToken _cancellationToken = context.CancellationToken;
         private readonly AnalyzerConfigOptionsProvider _options = context.Options.AnalyzerConfigOptionsProvider;
         private readonly Dictionary<MemberDeclarationSyntax, bool> _coreDeclarations = new();
+        private readonly Dictionary<SyntaxNode, LocalAliases> _aliasesByBody = new();
+        private readonly Dictionary<ILocalSymbol, bool> _localAnchors = new(SymbolEqualityComparer.Default);
+        private readonly HashSet<ILocalSymbol> _checkingAnchors = new(SymbolEqualityComparer.Default);
 
         public void Analyze()
         {
@@ -219,6 +222,10 @@ internal static class EntryRule
                 return false;
             if (!CoreScope.IsInCore(symbol))
                 return false;
+
+            // A boundary value in a using declaration enters at its initializer.
+            if (symbol is ILocalSymbol { IsUsing: true } resource && Matches(resource.Type))
+                return true;
 
             foreach (var reference in symbol.DeclaringSyntaxReferences)
             {
@@ -418,6 +425,7 @@ internal static class EntryRule
                     => IsAnchored(suppressed.Operand),
                 CastExpressionSyntax cast => HasWrittenTypeName(cast.Type, _model) || IsAnchored(cast.Expression),
                 ObjectCreationExpressionSyntax creation => HasWrittenTypeName(creation.Type, _model),
+                ArrayCreationExpressionSyntax creation => HasWrittenTypeName(creation.Type.ElementType, _model),
                 ImplicitObjectCreationExpressionSyntax creation => BoundaryType(creation) is not null,
                 DefaultExpressionSyntax @default => HasWrittenTypeName(@default.Type, _model),
                 ThisExpressionSyntax or BaseExpressionSyntax => true,
@@ -436,7 +444,134 @@ internal static class EntryRule
         {
             var symbol = _model.GetSymbolInfo(name, _cancellationToken).Symbol;
             return WrittenType(name, symbol, _model) is not null || MemberType(symbol, receiver) is not null
-                   || DeclarationAnchors(symbol) || NameHasWrittenTypeArguments(name) || IsAnchored(receiver);
+                   || DeclarationAnchors(symbol) || NameHasWrittenTypeArguments(name) || IsAnchored(receiver)
+                   || (symbol is ILocalSymbol local && LocalAssignmentsAnchor(local, name));
+        }
+
+        private bool LocalAssignmentsAnchor(ILocalSymbol local, SimpleNameSyntax use)
+        {
+            if (_localAnchors.TryGetValue(local, out var anchored))
+                return anchored;
+            if (_checkingAnchors.Contains(local))
+                return true;
+            if (_model.GetOperation(use, _cancellationToken) is not { } body)
+                return false;
+
+            while (body.Parent is { } parent)
+                body = parent;
+            if (!_aliasesByBody.TryGetValue(body.Syntax, out var aliases))
+            {
+                aliases = new LocalAliases([body], _cancellationToken);
+                _aliasesByBody.Add(body.Syntax, aliases);
+            }
+
+            var outermost = _checkingAnchors.Count == 0;
+            var visited = new List<ILocalSymbol>();
+            try
+            {
+                anchored = AllAssignmentsAnchor(local, aliases, visited);
+            }
+            finally
+            {
+                foreach (var dependency in visited)
+                    _checkingAnchors.Remove(dependency);
+            }
+
+            // Only cache proofs that stand on their own. Revisiting an active local assumes its
+            // assignments preserve the anchor, which the outer search still has to verify.
+            if (outermost)
+            {
+                _localAnchors[local] = anchored;
+                if (anchored)
+                    foreach (var dependency in visited)
+                        _localAnchors[dependency] = true;
+            }
+
+            return anchored;
+        }
+
+        private bool AllAssignmentsAnchor(ILocalSymbol local, LocalAliases aliases, List<ILocalSymbol> visited)
+        {
+            var pending = new Stack<IOperation>();
+            if (!AddAssignments(local))
+                return false;
+
+            while (pending.Count > 0)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var value = pending.Pop();
+                switch (value)
+                {
+                    case IParenthesizedOperation parenthesized:
+                        pending.Push(parenthesized.Operand);
+                        break;
+                    case IConversionOperation { IsImplicit: true, OperatorMethod: null } conversion:
+                        pending.Push(conversion.Operand);
+                        break;
+                    case IConditionalOperation { WhenFalse: { } alternative } conditional:
+                        pending.Push(conditional.WhenTrue);
+                        pending.Push(alternative);
+                        break;
+                    case ICoalesceOperation coalesce:
+                        pending.Push(coalesce.Value);
+                        pending.Push(coalesce.WhenNull);
+                        break;
+                    case ISwitchExpressionOperation switched:
+                        foreach (var arm in switched.Arms)
+                            pending.Push(arm.Value);
+                        break;
+                    case ILocalReferenceOperation reference:
+                        if (!DeclarationAnchors(reference.Local) && !AddAssignments(reference.Local))
+                            return false;
+                        break;
+                    default:
+                        if (value.Syntax is not ExpressionSyntax expression || !IsAnchored(expression))
+                            return false;
+                        break;
+                }
+            }
+
+            return true;
+
+            bool AddAssignments(ILocalSymbol candidate)
+            {
+                if (_localAnchors.TryGetValue(candidate, out var known))
+                    return known;
+                if (!_checkingAnchors.Add(candidate))
+                    return true;
+
+                visited.Add(candidate);
+                var assignments = aliases.Assignments(candidate);
+                if (assignments.Count == 0)
+                    return false;
+
+                foreach (var assignment in assignments)
+                {
+                    if (AssignedValue(assignment) is not { } value)
+                        return false;
+                    pending.Push(value);
+                }
+
+                return true;
+            }
+        }
+
+        private static IOperation? AssignedValue(LocalAliases.Source source)
+        {
+            var value = source.Value;
+            if (source.Reads.IsDefaultOrEmpty)
+                return value;
+
+            foreach (var read in source.Reads)
+            {
+                while (value is IConversionOperation { IsImplicit: true, OperatorMethod: null } conversion)
+                    value = conversion.Operand;
+                if (read.TupleIndex < 0 || value is not ITupleOperation tuple || read.TupleIndex >= tuple.Elements.Length)
+                    break;
+                value = tuple.Elements[read.TupleIndex];
+            }
+
+            return value;
         }
 
         private static ExpressionSyntax? MemberReceiver(SimpleNameSyntax name)

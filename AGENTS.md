@@ -270,11 +270,14 @@ A Shell value (for FP0802: an Async value) is reported once, where it enters cor
    - an expression of such a type used as the operand of `foreach`, `using` or `await`, as an argument, as the
      target of a delegate call, or as a returned value: that expression.
 
-An expression is **anchored** when it, or a receiver inside it, is already reported by this rule; when it reads a
-parameter, local, field or property whose type syntax carries a reported name; or when it reads a local whose
-every assignment is an anchored expression (`var r = new StreamReader(path); r.ReadLine();` reports `StreamReader`
-once). The target type of a target-typed `new` also anchors it when that type is written and reported in core. An
-anchored expression adds nothing.
+An expression is **anchored** when it, or a receiver inside it, is already reported by this rule, or when it
+reads a parameter, local, field or property whose type syntax carries a reported name. A local is also anchored
+when each assignment comes from an anchored expression, including copies, `foreach` elements and pattern bindings.
+Each result alternative of a conditional, coalescing or switch expression assigned to a local needs an anchor.
+A `using` declaration anchors its resource at the initializer. For
+`var r = new StreamReader(path); var copy = r; copy.ReadLine();`, the only report is at `StreamReader`.
+The target type of a target-typed `new` also anchors it when that type is written and reported in core.
+An anchored expression adds nothing.
 Attribute lists, `using` directives, `nameof` operands and documentation comments lie outside the rule.
 
 FP0601 reports `dynamic`, so a call bound at run time is already marked at its source.

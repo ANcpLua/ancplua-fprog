@@ -140,6 +140,24 @@ public sealed class Fp0802Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0802_InferredCopyOfWrittenTaskParameter_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Threading.Tasks;
+
+                           [Fprog.FunctionalCore]
+                           public static class Work
+                           {
+                               public static async {|FP0802:Task|}<int> Wait({|FP0802:Task|}<int> input)
+                               {
+                                   var pending = input;
+                                   return await pending + await pending;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0802", source, testContext.CancellationToken);

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -425,6 +426,239 @@ public sealed class Fp0801Tests(TestContext testContext)
                                public static DateTimeOffset MachineTime() => {|FP0801:TimeProvider|}.System.GetUtcNow();
                            }
                            """);
+    }
+
+    [TestMethod]
+    public Task FP0801_LocalInitializedWithWrittenConstruction_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static string Read(string path)
+                               {
+                                   var reader = new {|FP0801:StreamReader|}(path);
+                                   return reader.ReadLine() + reader.ReadLine();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_LocalCopiedFromWrittenParameter_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static string Read({|FP0801:StreamReader|} reader)
+                               {
+                                   var copy = reader;
+                                   return copy.ReadLine() + copy.ReadLine();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_LongChainOfAnchoredLocals_NoReport()
+    {
+        var assignments = string.Join("\n", Enumerable.Range(1, 256)
+            .Select(index => $"var reader{index} = reader{index - 1};"));
+        return VerifyAsync($$"""
+                             using System.IO;
+
+                             [Fprog.FunctionalCore]
+                             public static class Report
+                             {
+                                 public static string Read({|FP0801:StreamReader|} reader0)
+                                 {
+                                     {{assignments}}
+                                     return reader256.ReadToEnd();
+                                 }
+                             }
+                             """);
+    }
+
+    [TestMethod]
+    public Task FP0801_AllAssignmentsAnchorLocalIncludingAliasCycle_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static string Read({|FP0801:StreamReader|} first,
+                                   {|FP0801:StreamReader|} second, bool replace)
+                               {
+                                   var reader = first;
+                                   var copy = reader;
+                                   if (replace)
+                                       reader = second;
+                                   else
+                                       reader = copy;
+                                   return reader.ReadLine() + copy.ReadLine();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_ForeachVariableInheritsCollectionAnchor_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static int Read(IEnumerable<{|FP0801:StreamReader|}> readers)
+                               {
+                                   var length = 0;
+                                   foreach (var reader in readers)
+                                       length += reader.ReadToEnd().Length;
+                                   return length;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_ForeachOverInferredArrayWithWrittenElementType_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static int Read()
+                               {
+                                   var readers = new {|FP0801:StreamReader|}[0];
+                                   var length = 0;
+                                   foreach (var reader in readers)
+                                       length += reader.ReadToEnd().Length;
+                                   return length;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_PatternVariableInheritsInputAnchor_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.IO;
+
+                           [Fprog.FunctionalCore]
+                           public static class Report
+                           {
+                               public static string Read({|FP0801:StreamReader|}? reader)
+                                   => reader is { } copy ? copy.ReadToEnd() : "";
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_DeconstructionUsesTheSelectedComponentAnchor_Reports()
+    {
+        return VerifyTrustedAsync("""
+                                  using Trusted;
+
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static int Read(Effects.{|FP0801:Cursor|} cursor)
+                                      {
+                                          var (first, second) = (cursor, Source.Open());
+                                          return first.Next() + second.{|FP0801:Next|}();
+                                      }
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    public Task FP0801_UsingDeclarationAnchorsTheInferredLocal_NoReport()
+    {
+        return VerifyTrustedAsync("""
+                                  using Trusted;
+
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static int Read()
+                                      {
+                                          using var cursor = {|FP0801:Source.Open()|};
+                                          var copy = cursor;
+                                          return copy.Next();
+                                      }
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    public Task FP0801_LocalFromPureSource_Reports()
+    {
+        return VerifyTrustedAsync("""
+                                  using Trusted;
+
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static int Read()
+                                      {
+                                          var cursor = Source.Open();
+                                          return cursor.{|FP0801:Next|}();
+                                      }
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    public Task FP0801_OneUnanchoredReassignmentOfLocal_Reports()
+    {
+        return VerifyTrustedAsync("""
+                                  using Trusted;
+
+                                  [Fprog.FunctionalCore]
+                                  public static class Report
+                                  {
+                                      public static int Read(Effects.{|FP0801:Cursor|} input, bool replace)
+                                      {
+                                          var cursor = input;
+                                          if (replace)
+                                              cursor = Source.Open();
+                                          return cursor.{|FP0801:Next|}();
+                                      }
+                                  }
+                                  """);
+    }
+
+    [TestMethod]
+    [DataRow("flag ? input : Source.Open()")]
+    [DataRow("input ?? Source.Open()")]
+    [DataRow("flag switch { true => input, false => Source.Open() }")]
+    public Task FP0801_OneUnanchoredAlternativeOfAnAssignment_Reports(string initializer)
+    {
+        return VerifyTrustedAsync($$"""
+                                    using Trusted;
+
+                                    [Fprog.FunctionalCore]
+                                    public static class Report
+                                    {
+                                        public static int Read(Effects.{|FP0801:Cursor|}? input, bool flag)
+                                        {
+                                            var cursor = {{initializer}};
+                                            return cursor.{|FP0801:Next|}();
+                                        }
+                                    }
+                                    """);
     }
 
     private Task VerifyAsync(string source)

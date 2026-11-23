@@ -14,7 +14,7 @@ public static class Importer
     public static string FirstLine(string path)
     {
         var reader = Shell.Open(path); // expect: FP0801
-        return reader.ReadLine() ?? ""; // expect: FP0801
+        return reader.ReadLine() ?? "";
     }
 
     public static string Everything(string path) => Shell.Open(path).ReadToEnd(); // expect: FP0801
