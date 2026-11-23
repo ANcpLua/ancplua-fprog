@@ -292,7 +292,8 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
   `MutationRoots` and `PartialUseGuards`.
 - Descriptors come from `FpDescriptors.Create(id, title, messageFormat)`: category `Functional`, severity `Warning`,
   enabled by default. The message tells the reader what to write instead.
-- `ancplua-fprog/AnalyzerReleases.Unshipped.md` lists exactly the IDs of the catalog.
+- `AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` in `ancplua-fprog/` together list exactly the
+  IDs of the catalog.
 - Analyzers run concurrently and skip generated code (`EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis`).
   A rule that needs the whole compilation builds its model once in `RegisterCompilationStartAction`.
 - Tests: `ancplua-fprog.Tests/Rules/Fp####Tests.cs`, one class per rule, methods named
@@ -316,8 +317,8 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
   as an internal type; `FPROG_NO_ATTRIBUTES` leaves it out. It declares the same targets as
   `FpAnalyzerTestHost.AnnotationsSource` and `demo/Fprog.Annotations.cs`. Change the three together.
 - CI (`.github/workflows/check.yml`) runs on every push: `check` with the steps of `make check` and the demo count,
-  then `pack` with a layout check. On a `v<version>` tag, `publish` pushes the package to nuget.org with the secret
-  `NUGET_API_KEY` of the GitHub environment `nuget`. The owner pushes the tag.
+  then `pack` with a layout check. On a `v<version>` tag, `publish` pushes the package to nuget.org through NuGet
+  Trusted Publishing. `docs/PUBLISHING.md` is the release runbook; `CHANGELOG.md` says what each release changes.
 - `VersionPrefix` in the project file is the next version. A new or wider rule can break a build that treats
   warnings as errors, so it is a minor version below 1.0 and a major version from 1.0 on.
 - A new ID goes into `AnalyzerReleases.Unshipped.md`. At a release its rows move to a `## Release <version>`

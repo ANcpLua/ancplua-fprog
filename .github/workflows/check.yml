@@ -109,12 +109,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: nuget
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+
+      - name: Check release inputs
+        env:
+          NUGET_USER: ${{ secrets.NUGET_USER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$NUGET_USER" ]]; then
+            echo "Set NUGET_USER in the nuget environment to the NuGet profile name."
+            exit 1
+          fi
+          project_version=$(dotnet msbuild ancplua-fprog/ancplua-fprog.csproj -getProperty:VersionPrefix -nologo)
+          if [[ "$project_version" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "The tag $GITHUB_REF_NAME must match VersionPrefix $project_version in ancplua-fprog.csproj."
+            exit 1
+          fi
 
       # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
       - name: Pack
@@ -138,10 +157,15 @@ jobs:
           done
           if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
 
+      # Trusted Publishing: NuGet exchanges this workflow's identity for a short-lived key, so no API key is stored.
+      - name: NuGet login with OIDC
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to nuget.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         shell: bash
-        run: |
-          test -n "$NUGET_API_KEY" || { echo "Set the NUGET_API_KEY secret in the nuget environment"; exit 1; }
-          dotnet nuget push artifacts/package/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push artifacts/package/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
