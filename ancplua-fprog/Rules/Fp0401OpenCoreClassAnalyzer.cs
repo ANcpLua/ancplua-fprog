@@ -26,8 +26,11 @@ public sealed class Fp0401OpenCoreClassAnalyzer : DiagnosticAnalyzer
     private static void Analyze(SymbolAnalysisContext context)
     {
         var type = (INamedTypeSymbol)context.Symbol;
-        if (type is { TypeKind: TypeKind.Class, IsSealed: false, IsStatic: false, IsClosed: false }
-            && type.BaseType is not { IsClosed: true }
+        if (type is
+            {
+                TypeKind: TypeKind.Class, IsSealed: false, IsStatic: false, IsClosed: false,
+                BaseType: not { IsClosed: true }
+            }
             && CoreScope.IsInCore(type)
             && CoreScope.IsDeclaredInSource(type)
             && type.Locations is { Length: > 0 } locations

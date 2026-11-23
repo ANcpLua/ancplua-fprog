@@ -199,9 +199,11 @@ internal static class Mutators
 
     private static bool IsCollectionExtensionWriter(IMethodSymbol method)
     {
-        return method.IsExtensionMethod
-               && method.Name is "TryAdd" or "Remove"
-               && method.ContainingType is { Name: "CollectionExtensions", ContainingType: null }
+        return method is
+               {
+                   IsExtensionMethod: true, Name: "TryAdd" or "Remove",
+                   ContainingType: { Name: "CollectionExtensions", ContainingType: null }
+               }
                && IsCollectionsChild(method.ContainingType.ContainingNamespace, "Generic");
     }
 
@@ -248,7 +250,7 @@ internal static class Mutators
         };
     }
 
-    public static string? CollectionBranch(ITypeSymbol type)
+    private static string? CollectionBranch(ITypeSymbol type)
     {
         INamespaceSymbol? child = null;
         for (var ns = type.ContainingNamespace; ns is { IsGlobalNamespace: false }; ns = ns.ContainingNamespace)
@@ -302,7 +304,7 @@ internal static class Mutators
                && named.Name == name && named.Arity == arity;
     }
 
-    public static bool IsMutableView(ITypeSymbol? type)
+    private static bool IsMutableView(ITypeSymbol? type)
     {
         return IsSystemType(type, "Span", 1) || IsSystemType(type, "Memory", 1);
     }

@@ -461,8 +461,8 @@ internal static class EntryRule
                 return null;
 
             var conversion = _model.GetConversion(expression, _cancellationToken);
-            return conversion.IsImplicit && conversion.IsUserDefined
-                   && conversion.MethodSymbol?.ContainingType is { } declaring && Matches(declaring)
+            return conversion is { IsImplicit: true, IsUserDefined: true, MethodSymbol.ContainingType: { } declaring }
+                   && Matches(declaring)
                 ? declaring
                 : null;
         }

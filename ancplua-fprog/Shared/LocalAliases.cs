@@ -107,7 +107,7 @@ internal sealed class LocalAliases
                         : default;
                     Deconstruct(deconstruction.Target, new Source(deconstruction.Value), info);
                     break;
-                case ISimpleAssignmentOperation assignment when assignment.IsRef:
+                case ISimpleAssignmentOperation { IsRef: true } assignment:
                     if (assignment.Target is ILocalReferenceOperation rebind)
                         AddAssignment(rebind.Local, new Source(assignment.Value));
                     break;
