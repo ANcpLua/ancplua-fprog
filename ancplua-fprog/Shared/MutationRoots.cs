@@ -1,14 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace ancplua_fprog.Shared;
 
-/// <summary>Follows one write's receiver or storage back to the parameter or field that owns it.</summary>
-internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, ISymbol containingSymbol)
+/// <summary>Resolves writes and the local aliases they reach within one operation block.</summary>
+internal sealed class MutationRoots(
+    LocalAliases aliases, MutationOwner owner, ISymbol containingSymbol, CancellationToken cancellationToken)
 {
+    private readonly object _gate = new();
+    private Dictionary<LocalRead, Match>? _resolved;
+    private Dictionary<ILocalSymbol, bool>? _acyclicLocals;
+    private Dictionary<IOperation, bool>? _acyclicValues;
     private HashSet<ILocalSymbol>? _active;
 
     // A cycle can preserve an alias, provided an assignment in the cycle establishes a root and
@@ -27,7 +34,8 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
 
     public Match Value(IOperation value)
     {
-        return Trace(value, value.Syntax.SpanStart, false, [], true);
+        lock (_gate)
+            return Trace(value, value.Syntax.SpanStart, false, [], true);
     }
 
     public Match Target(IOperation target, bool rebind)
@@ -36,7 +44,8 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
         if (target is IParameterReferenceOperation || (rebind && (owner == MutationOwner.Field || target is ILocalReferenceOperation)))
             return default;
 
-        return Storage(target, target.Syntax.SpanStart, true, rebind);
+        lock (_gate)
+            return Storage(target, target.Syntax.SpanStart, true, rebind);
     }
 
     public Match Event(IOperation target)
@@ -74,8 +83,8 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
             {
                 case ILocalReferenceOperation local:
                     return ReadLocal(local.Local, start, shared, reads, false);
-                case IParenthesizedOperation parentheses:
-                    value = parentheses.Operand;
+                case IParenthesizedOperation or IConversionOperation or IConditionalAccessOperation:
+                    value = ValueSource(value);
                     continue;
                 case IConditionalOperation conditional:
                     return Trace(conditional.WhenTrue, start, shared, reads, widen)
@@ -97,16 +106,6 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
                                                 && reads[0].TupleIndex < tuple.Elements.Length:
                     value = tuple.Elements[reads[0].TupleIndex];
                     reads = reads.RemoveAt(0);
-                    continue;
-                case IConversionOperation conversion:
-                    // A reference cast or a conversion to a built-in view preserves the underlying value.
-                    if (!IsPreservingConversion(conversion))
-                        return default;
-
-                    value = conversion.Operand;
-                    continue;
-                case IConditionalAccessOperation access:
-                    value = access.WhenNotNull;
                     continue;
                 case IConditionalAccessInstanceOperation instance:
                     if (EnclosingAccess(instance) is not { } enclosing)
@@ -138,11 +137,8 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
                     reads = reads.Insert(0, new LocalAliases.Read(field.Type, tupleIndex));
                     value = instance;
                     continue;
-                case IInvocationOperation invocation:
-                    value = Mutators.ViewReceiver(invocation) ?? Mutators.ElementReceiver(invocation, invocation.Type);
-                    continue;
                 default:
-                    value = ReceiverOfRead(value);
+                    value = ValueSource(value);
                     continue;
             }
         }
@@ -152,14 +148,47 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
 
     private Match ReadLocal(ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // A by-value copy has its own slots. A reference or view carried by the copy can still reach the source.
         if (!local.IsRef && !shared && !SharesStorage(local.Type) && !SharesProjectedValue(reads))
             return default;
 
+        if (!IsAcyclic(local))
+            return ReadCyclicLocal(local, start, shared, reads, storage);
+
+        var read = new LocalRead(local, shared, reads, storage);
+        var resolved = _resolved ??= [];
+        if (!resolved.TryGetValue(read, out var match))
+        {
+            // An assignment cannot widen the write's span. Only its origin is shared between writes.
+            match = TraceAssignments(local, 0, shared, reads, storage);
+            resolved.Add(read, match);
+        }
+
+        return match.Known ? new Match(match.Symbol, start) : default;
+    }
+
+    private Match ReadCyclicLocal(
+        ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
+    {
         var active = _active ??= new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
         if (!active.Add(local))
             return new Match(null, start);
 
+        try
+        {
+            return TraceAssignments(local, start, shared, reads, storage);
+        }
+        finally
+        {
+            active.Remove(local);
+        }
+    }
+
+    private Match TraceAssignments(
+        ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
+    {
         var result = default(Match);
         foreach (var assignment in aliases.Assignments(local))
         {
@@ -168,16 +197,97 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
                 : Trace(assignment.Value, start, shared,
                     assignment.Reads.IsDefaultOrEmpty ? reads : assignment.Reads.AddRange(reads), false);
             if (!part.Known)
-            {
-                result = default;
-                break;
-            }
+                return default;
 
             result = result.Include(part);
         }
 
-        active.Remove(local);
         return result;
+    }
+
+    // Classify the dependency graph before resolving a read. The same local can be reached with a
+    // different projection while it is active, so independence has to hold for all its reads.
+    private bool IsAcyclic(ILocalSymbol local)
+    {
+        var known = _acyclicLocals ??= new Dictionary<ILocalSymbol, bool>(SymbolEqualityComparer.Default);
+        if (known.TryGetValue(local, out var acyclic))
+            return acyclic;
+
+        known.Add(local, false);
+        foreach (var assignment in aliases.Assignments(local))
+            if (!IsAcyclic(assignment.Value))
+                return false;
+
+        known[local] = true;
+        return true;
+    }
+
+    private bool IsAcyclic(IOperation? value)
+    {
+        if (value is null)
+            return true;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var known = _acyclicValues ??= [];
+        if (known.TryGetValue(value, out var acyclic))
+            return acyclic;
+
+        known.Add(value, false);
+        acyclic = value switch
+        {
+            ILocalReferenceOperation local => IsAcyclic(local.Local),
+            IConditionalOperation conditional => IsAcyclic(conditional.WhenTrue) && IsAcyclic(conditional.WhenFalse),
+            ICoalesceOperation coalesce => IsAcyclic(coalesce.Value) && IsAcyclic(coalesce.WhenNull),
+            ISwitchExpressionOperation expression => expression.Arms.All(arm => IsAcyclic(arm.Value)),
+            ITupleOperation tuple => tuple.Elements.All(IsAcyclic),
+            IInvocationOperation invocation when invocation.TargetMethod.RefKind != RefKind.None =>
+                IsAcyclic(Mutators.CallReceiver(invocation)) && IsAcyclic(ValueSource(invocation)),
+            _ => IsAcyclic(ValueSource(value))
+        };
+        known[value] = acyclic;
+        return acyclic;
+    }
+
+    private readonly struct LocalRead(
+        ILocalSymbol local, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage) : IEquatable<LocalRead>
+    {
+        private readonly ILocalSymbol _local = local;
+        private readonly bool _shared = shared;
+        private readonly ImmutableArray<LocalAliases.Read> _reads = reads;
+        private readonly bool _storage = storage;
+
+        public bool Equals(LocalRead other)
+        {
+            if (_shared != other._shared || _storage != other._storage || _reads.Length != other._reads.Length
+                || !SymbolEqualityComparer.Default.Equals(_local, other._local))
+                return false;
+
+            for (var index = 0; index < _reads.Length; index++)
+                if (_reads[index].TupleIndex != other._reads[index].TupleIndex
+                    || !SymbolEqualityComparer.Default.Equals(_reads[index].Type, other._reads[index].Type))
+                    return false;
+
+            return true;
+        }
+
+        public override bool Equals(object? obj) => obj is LocalRead other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = SymbolEqualityComparer.Default.GetHashCode(_local);
+                hash = hash * 31 + _shared.GetHashCode();
+                hash = hash * 31 + _storage.GetHashCode();
+                foreach (var read in _reads)
+                {
+                    hash = hash * 31 + read.TupleIndex;
+                    hash = hash * 31 + (read.Type is { } type ? SymbolEqualityComparer.Default.GetHashCode(type) : 0);
+                }
+
+                return hash;
+            }
+        }
     }
 
     private static bool SharesStorage(ITypeSymbol? type)
@@ -204,6 +314,20 @@ internal sealed class MutationRoots(LocalAliases aliases, MutationOwner owner, I
                && (Mutators.IsView(conversion.Operand.Type) || conversion.Operand.Type is IArrayTypeSymbol
                    || conversion.Operand.Type?.SpecialType == SpecialType.System_String
                    || Mutators.IsSystemType(conversion.Operand.Type, "ArraySegment", 1));
+    }
+
+    private static IOperation? ValueSource(IOperation value)
+    {
+        return value switch
+        {
+            IParenthesizedOperation parentheses => parentheses.Operand,
+            IConversionOperation conversion when IsPreservingConversion(conversion) => conversion.Operand,
+            IConditionalAccessOperation access => access.WhenNotNull,
+            IConditionalAccessInstanceOperation instance => EnclosingAccess(instance)?.Operation,
+            IInvocationOperation invocation => Mutators.ViewReceiver(invocation)
+                                               ?? Mutators.ElementReceiver(invocation, invocation.Type),
+            _ => ReceiverOfRead(value)
+        };
     }
 
     private static IOperation? ReceiverOfRead(IOperation operation)

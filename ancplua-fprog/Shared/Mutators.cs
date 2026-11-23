@@ -55,12 +55,13 @@ internal static class Mutators
                 return;
 
             var aliases = new LocalAliases(start.OperationBlocks, start.CancellationToken);
-            start.RegisterOperationAction(operation => Analyze(operation, rule, owner, aliases), WriteKinds);
+            var roots = new MutationRoots(aliases, owner, start.OwningSymbol, start.CancellationToken);
+            start.RegisterOperationAction(operation => Analyze(operation, rule, owner, roots), WriteKinds);
         });
     }
 
     private static void Analyze(OperationAnalysisContext context, DiagnosticDescriptor rule, MutationOwner owner,
-        LocalAliases aliases)
+        MutationRoots roots)
     {
         if (!CoreScope.IsInCore(context.ContainingSymbol))
             return;
@@ -84,7 +85,6 @@ internal static class Mutators
                 if (token.RawKind != 0)
                     foreach (var destination in WrittenValues(invocation))
                     {
-                        var roots = new MutationRoots(aliases, owner, context.ContainingSymbol);
                         if (roots.Value(destination).Symbol is not { } root)
                             continue;
 
@@ -106,7 +106,6 @@ internal static class Mutators
                 return;
             }
 
-            var roots = new MutationRoots(aliases, owner, context.ContainingSymbol);
             var match = roots.Target(target, rebind);
             if (match.Symbol is { } root)
                 context.ReportDiagnostic(Diagnostic.Create(rule, TargetLocation(target, match.Start), root.Name));
@@ -114,7 +113,6 @@ internal static class Mutators
 
         void CheckEvent(IOperation target)
         {
-            var roots = new MutationRoots(aliases, owner, context.ContainingSymbol);
             var match = roots.Event(target);
             if (match.Symbol is not { } root)
                 return;

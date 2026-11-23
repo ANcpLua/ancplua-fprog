@@ -1,3 +1,4 @@
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -1555,6 +1556,76 @@ public sealed class Fp0104Tests(TestContext testContext)
                                    var same = box;
                                    ({|FP0104:same.X|}, {|FP0104:same.Y|}) = (1, 2);
                                    return same.X;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    [Timeout(5000)]
+    public Task FP0104_WriteThroughDeepSpanAliasChain_Reports()
+    {
+        const int depth = 64;
+        var source = new StringBuilder("""
+                                       using System;
+
+                                       [Fprog.FunctionalCore]
+                                       public static class Ops
+                                       {
+                                           public static int Write(int[] values, bool fromStart)
+                                           {
+                                               var view0 = values.AsSpan();
+                                       """).AppendLine();
+        for (var index = 1; index <= depth; index++)
+            source.AppendLine($"        var view{index} = fromStart ? view{index - 1}.Slice(0) : view{index - 1}.Slice(1);");
+
+        source.AppendLine($$"""
+                                    return {|FP0104:view{{depth}}[0]|} = 1;
+                                }
+                            }
+                            """);
+        return VerifyAsync(source.ToString());
+    }
+
+    [TestMethod]
+    [Timeout(5000)]
+    public Task FP0104_WriteThroughDeepConditionalAliasChain_Reports()
+    {
+        const int depth = 64;
+        var source = new StringBuilder("""
+                                       [Fprog.FunctionalCore]
+                                       public static class Ops
+                                       {
+                                           public static int Write(bool prefer, int[] first, int[] second)
+                                           {
+                                               var choice0 = first;
+                                               var choice1 = second;
+                                       """).AppendLine();
+        for (var index = 2; index <= depth; index++)
+            source.AppendLine($"        var choice{index} = prefer ? choice{index - 1} : choice{index - 2};");
+
+        source.AppendLine($$"""
+                                    return {|FP0104:choice{{depth}}[0]|} = 10;
+                                }
+                            }
+                            """);
+        return VerifyAsync(source.ToString());
+    }
+
+    [TestMethod]
+    public Task FP0104_WriteThroughCyclicTupleProjection_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Write(Box box)
+                               {
+                                   var pair = (new Box(), box);
+                                   var copy = pair;
+                                   pair = (new Box(), copy.Item1);
+                                   (copy.Item1.Count, {|FP0104:pair.Item2.Count|}) = (1, 2);
+                                   return box.Count;
                                }
                            }
                            """);
