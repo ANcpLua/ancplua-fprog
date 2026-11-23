@@ -505,6 +505,105 @@ public sealed class Fp0801Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0801_QueryClauseBoundToExtensionOfShellClass_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Generic;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record ReportInput(string Path);
+
+                           public static class ReportReading
+                           {
+                               public static IEnumerable<T> Select<T>(this ReportInput input, Func<string, T> map)
+                                   => System.IO.File.ReadLines(input.Path).Select(map);
+
+                               public static IEnumerable<string> Where(this ReportInput input, Func<string, bool> keep)
+                                   => System.IO.File.ReadLines(input.Path).Where(keep);
+
+                               public static IOrderedEnumerable<string> OrderBy<TKey>(this ReportInput input, Func<string, TKey> key)
+                                   => System.IO.File.ReadLines(input.Path).OrderBy(key);
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Reports
+                           {
+                               public static IEnumerable<int> Lengths(ReportInput input)
+                                   => from line in input {|FP0801:select|} line.Length;
+
+                               public static IEnumerable<string> Filled(ReportInput input)
+                                   => from line in input {|FP0801:where|} line.Length > 0 select line;
+
+                               public static IEnumerable<string> Sorted(ReportInput input)
+                                   => from line in input {|FP0801:orderby|} line.Length select line;
+
+                               public static IEnumerable<int> Continued(ReportInput input)
+                                   => from line in input {|FP0801:select|} line.Length into length where length > 1 select length;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0801_QueryOverPureOrCoreExtension_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Generic;
+                           using System.Collections.Immutable;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public sealed record Lines(ImmutableArray<string> Items);
+
+                           [Fprog.FunctionalCore]
+                           public static class LineQueries
+                           {
+                               public static IEnumerable<T> Select<T>(this Lines lines, Func<string, T> map)
+                                   => lines.Items.Select(map);
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Reports
+                           {
+                               public static IEnumerable<int> OverCore(Lines lines) => from line in lines select line.Length;
+
+                               public static IEnumerable<int> OverEnumerable(IEnumerable<string> lines)
+                                   => from line in lines
+                                       where line.Length > 1
+                                       orderby line.Length
+                                       select line.Length;
+                           }
+                           """);
+    }
+
+    // The directory is a Shell value and enters at its written type. The query over it adds nothing.
+    [TestMethod]
+    public Task FP0801_QueryOverShellValue_ReportsTheValueOnce()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using System.Collections.Generic;
+                           using System.IO;
+                           using System.Linq;
+
+                           public static class DirectoryReading
+                           {
+                               public static IEnumerable<T> Select<T>(this DirectoryInfo directory, Func<string, T> map)
+                                   => directory.EnumerateFiles().Select(file => map(file.Name));
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Reports
+                           {
+                               public static IEnumerable<int> Sizes({|FP0801:DirectoryInfo|} directory)
+                                   => from name in directory select name.Length;
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public Task FP0801_ExtensionOfCoreClassBoundWithoutItsName_NoReport()
     {
         return VerifyAsync("""

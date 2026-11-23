@@ -16,9 +16,11 @@ public static class ReportReading
     }
 }
 
-// The query binds to ReportReading.Select, so the lengths depend on the file's content. See FINDINGS.md.
+// Bug: the query binds to ReportReading.Select, so the lengths depend on the file's content.
 [Fprog.FunctionalCore]
 public static class Reports
 {
-    public static IEnumerable<int> LineLengths(ReportInput input) => from line in input select line.Length;
+    public static IEnumerable<int> LineLengths(ReportInput input)
+        => from line in input
+            select line.Length; // expect: FP0801
 }

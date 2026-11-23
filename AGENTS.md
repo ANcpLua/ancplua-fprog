@@ -286,9 +286,10 @@ A Shell value (for FP0802: an Async value) is reported once, where it enters cor
      explicit cast, or the operand for an implicit conversion;
    - an expression of such a type used as the operand of `foreach`, `using` or `await`, as an argument, as the
      target of a delegate call, or as a returned value: that expression;
-   - an extension method of such a type that a `foreach`, an `await`, a deconstruction or a positional pattern
-     binds without naming it (`GetEnumerator`, `GetAwaiter`, `Deconstruct`): the operand, the deconstructed
-     value, or the positional pattern.
+   - an extension method of such a type that a `foreach`, an `await`, a deconstruction, a positional pattern or
+     a clause of a query expression binds without naming it (`GetEnumerator`, `GetAwaiter`, `Deconstruct`,
+     `Select`, `Where`): the operand, the deconstructed value, the positional pattern, or the keyword of the
+     first such clause of the query.
 
 An expression is **anchored** when it, or a receiver inside it, is already reported by this rule, or when it
 reads a parameter, local, field or property whose type syntax carries a reported name. A local is also anchored

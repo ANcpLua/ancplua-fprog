@@ -158,6 +158,9 @@ internal static class EntryRule
                     ReportUnnamedExtension(deconstruction.Right, deconstruction.Right,
                         Deconstructor(_model.GetDeconstructionInfo(deconstruction)));
                     break;
+                case QueryExpressionSyntax query:
+                    AnalyzeQuery(query);
+                    break;
                 case RecursivePatternSyntax { PositionalPatternClause: { } positions } pattern:
                     if (_model.GetOperation(pattern, _cancellationToken) is IRecursivePatternOperation
                         {
@@ -248,12 +251,57 @@ internal static class EntryRule
             return name is GenericNameSyntax generic && HasWrittenTypeName(generic.TypeArgumentList, _model);
         }
 
-        // A foreach, an await, a deconstruction or a positional pattern can bind to an extension method without
-        // naming it. Its class enters core code there, unless the value it works on has entered already.
+        // A foreach, an await, a deconstruction, a positional pattern or a query clause can bind to an extension
+        // method without naming it. Its class enters core code there, unless the value it works on has entered already.
         private void ReportUnnamedExtension(SyntaxNode at, ExpressionSyntax operand, IMethodSymbol? method)
         {
             if (UnnamedExtensionType(method) is { } type && BoundaryType(operand) is null && !IsAnchored(operand))
                 Report(at.GetLocation(), type.Name);
+        }
+
+        // A query expression calls Select, Where and the other query methods without naming them. The first
+        // clause that binds to an extension of a boundary class brings that class into core code, unless the
+        // value the query starts from has entered already.
+        private void AnalyzeQuery(QueryExpressionSyntax query)
+        {
+            var source = query.FromClause.Expression;
+            if (BoundaryType(source) is not null || IsAnchored(source))
+                return;
+
+            foreach (var (keyword, method) in QueryMethods(query))
+            {
+                if (UnnamedExtensionType(method) is not { } type)
+                    continue;
+
+                Report(keyword.GetLocation(), type.Name);
+                return;
+            }
+        }
+
+        private IEnumerable<(SyntaxToken Keyword, IMethodSymbol? Method)> QueryMethods(QueryExpressionSyntax query)
+        {
+            var start = query.FromClause;
+            yield return (start.FromKeyword,
+                _model.GetQueryClauseInfo(start, _cancellationToken).CastInfo.Symbol as IMethodSymbol);
+
+            for (var body = query.Body; body is not null; body = body.Continuation?.Body)
+            {
+                foreach (var clause in body.Clauses)
+                {
+                    var keyword = clause.GetFirstToken();
+                    var info = _model.GetQueryClauseInfo(clause, _cancellationToken);
+                    yield return (keyword, info.CastInfo.Symbol as IMethodSymbol);
+                    yield return (keyword, info.OperationInfo.Symbol as IMethodSymbol);
+                    if (clause is not OrderByClauseSyntax orderBy)
+                        continue;
+
+                    foreach (var ordering in orderBy.Orderings)
+                        yield return (keyword, _model.GetSymbolInfo(ordering, _cancellationToken).Symbol as IMethodSymbol);
+                }
+
+                yield return (body.SelectOrGroup.GetFirstToken(),
+                    _model.GetSymbolInfo(body.SelectOrGroup, _cancellationToken).Symbol as IMethodSymbol);
+            }
         }
 
         private INamedTypeSymbol? UnnamedExtensionType(IMethodSymbol? method)

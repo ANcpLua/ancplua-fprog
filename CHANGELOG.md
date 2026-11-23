@@ -3,6 +3,11 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.5.0
+
+* FP0801 and FP0802 report an extension method of a Shell or Async class that a clause of a query expression
+  binds, as in `from line in input select line.Length` with a `Select` extension outside the core.
+
 ## 0.4.0
 
 * A type parameter constrained to a closed class that is also a hand-written union is matched by the subtypes of
