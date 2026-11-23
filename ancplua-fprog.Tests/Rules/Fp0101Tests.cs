@@ -1206,6 +1206,25 @@ public sealed class Fp0101Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0101_WrittenDelegatesInTupleAndFunctionPointerTypes_Reports()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           using Notify = System.Action<int>;
+
+                           [Fprog.FunctionalCore]
+                           public static class Callbacks
+                           {
+                               public static (global::System.{|FP0101:Action|}?[], {|FP0101:Notify|}) Read(
+                                   (global::System.{|FP0101:Action|}?[], {|FP0101:Notify|}) source) => source;
+
+                               public static unsafe delegate*<{|FP0101:Notify|}, int> Pointer(
+                                   delegate*<{|FP0101:Notify|}, int> pointer) => pointer;
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public Task FP0101_VoidLambdaPassedToOutsideMember_Reports()
     {
         return VerifyAsync("""

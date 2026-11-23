@@ -30,7 +30,13 @@ public sealed class Fp0101VoidResultAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeMethod,
             SyntaxKind.MethodDeclaration, SyntaxKind.LocalFunctionStatement, SyntaxKind.OperatorDeclaration);
         context.RegisterSymbolAction(AnalyzeDelegate, SymbolKind.NamedType);
-        context.RegisterSyntaxNodeAction(AnalyzeDelegateType, SyntaxKind.IdentifierName, SyntaxKind.GenericName);
+        context.RegisterSyntaxNodeAction(AnalyzeWrittenDelegateTypes,
+            SyntaxKind.TypeArgumentList, SyntaxKind.FunctionPointerParameter, SyntaxKind.Parameter,
+            SyntaxKind.MethodDeclaration, SyntaxKind.OperatorDeclaration, SyntaxKind.ConversionOperatorDeclaration,
+            SyntaxKind.LocalFunctionStatement, SyntaxKind.DelegateDeclaration, SyntaxKind.ParenthesizedLambdaExpression,
+            SyntaxKind.VariableDeclaration, SyntaxKind.DeclarationExpression, SyntaxKind.ForEachStatement,
+            SyntaxKind.DeclarationPattern, SyntaxKind.RecursivePattern, SyntaxKind.PropertyDeclaration,
+            SyntaxKind.IndexerDeclaration, SyntaxKind.EventDeclaration);
         context.RegisterOperationAction(AnalyzeDelegateCreation, OperationKind.DelegateCreation);
     }
 
@@ -61,55 +67,64 @@ public sealed class Fp0101VoidResultAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Rule, locations[0], context.Symbol.Name));
     }
 
-    private static void AnalyzeDelegateType(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeWrittenDelegateTypes(SyntaxNodeAnalysisContext context)
     {
-        var name = (SimpleNameSyntax)context.Node;
-        if (name.IsVar || name.IsPartOfStructuredTrivia()
-            || !IsDelegateTypePosition(name) || !CoreScope.IsInCore(context.ContainingSymbol))
+        if (context.Node is TypeArgumentListSyntax list)
+        {
+            foreach (var argument in list.Arguments)
+                AnalyzeWrittenType(argument, context);
             return;
+        }
 
-        if (context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is ITypeSymbol type
-            && IsVoidDelegate(type))
-            context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation(), name.Identifier.ValueText));
+        var type = context.Node switch
+        {
+            FunctionPointerParameterSyntax parameter => parameter.Type,
+            DelegateDeclarationSyntax declaration => declaration.ReturnType,
+            ParenthesizedLambdaExpressionSyntax lambda => lambda.ReturnType,
+            VariableDeclarationSyntax variable => variable.Type,
+            DeclarationExpressionSyntax declaration => declaration.Type,
+            DeclarationPatternSyntax { Designation: SingleVariableDesignationSyntax } pattern => pattern.Type,
+            RecursivePatternSyntax { Designation: SingleVariableDesignationSyntax } pattern => pattern.Type,
+            _ => WrittenType(context.Node)
+        };
+        if (type is not null)
+            AnalyzeWrittenType(type, context);
     }
 
-    private static bool IsDelegateTypePosition(SimpleNameSyntax name)
+    private static void AnalyzeWrittenType(TypeSyntax type, SyntaxNodeAnalysisContext context)
     {
-        SyntaxNode type = name;
-        while (ContainingTypeSyntax(type) is { } container)
-            type = container;
-
-        return type.Parent switch
+        // Generic arguments and function pointer signatures have their own syntax actions.
+        switch (type)
         {
-            TypeArgumentListSyntax or FunctionPointerParameterSyntax => true,
-            ParameterSyntax parameter => parameter.Type == type,
-            BaseMethodDeclarationSyntax method => WrittenType(method) == type,
-            LocalFunctionStatementSyntax local => local.ReturnType == type,
-            DelegateDeclarationSyntax declaration => declaration.ReturnType == type,
-            ParenthesizedLambdaExpressionSyntax lambda => lambda.ReturnType == type,
-            VariableDeclarationSyntax variable => variable.Type == type,
-            DeclarationExpressionSyntax declaration => declaration.Type == type,
-            ForEachStatementSyntax loop => loop.Type == type,
-            DeclarationPatternSyntax { Designation: SingleVariableDesignationSyntax } pattern => pattern.Type == type,
-            RecursivePatternSyntax { Designation: SingleVariableDesignationSyntax } pattern => pattern.Type == type,
-            BasePropertyDeclarationSyntax property => property.Type == type,
-            _ => false
-        };
-    }
-
-    private static SyntaxNode? ContainingTypeSyntax(SyntaxNode type)
-    {
-        return type.Parent switch
-        {
-            QualifiedNameSyntax qualified when qualified.Right == type => qualified,
-            AliasQualifiedNameSyntax alias when alias.Name == type => alias,
-            NullableTypeSyntax nullable when nullable.ElementType == type => nullable,
-            ArrayTypeSyntax array when array.ElementType == type => array,
-            RefTypeSyntax reference when reference.Type == type => reference,
-            ScopedTypeSyntax scoped when scoped.Type == type => scoped,
-            TupleElementSyntax { Parent: TupleTypeSyntax tuple } element when element.Type == type => tuple,
-            _ => null
-        };
+            case QualifiedNameSyntax qualified:
+                AnalyzeWrittenType(qualified.Right, context);
+                break;
+            case AliasQualifiedNameSyntax alias:
+                AnalyzeWrittenType(alias.Name, context);
+                break;
+            case NullableTypeSyntax nullable:
+                AnalyzeWrittenType(nullable.ElementType, context);
+                break;
+            case ArrayTypeSyntax array:
+                AnalyzeWrittenType(array.ElementType, context);
+                break;
+            case RefTypeSyntax reference:
+                AnalyzeWrittenType(reference.Type, context);
+                break;
+            case ScopedTypeSyntax scoped:
+                AnalyzeWrittenType(scoped.Type, context);
+                break;
+            case TupleTypeSyntax tuple:
+                foreach (var element in tuple.Elements)
+                    AnalyzeWrittenType(element.Type, context);
+                break;
+            case SimpleNameSyntax { IsVar: false } name when !name.IsPartOfStructuredTrivia()
+                                                            && CoreScope.IsInCore(context.ContainingSymbol):
+                var symbol = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol;
+                if (IsVoidDelegate(symbol as ITypeSymbol))
+                    context.ReportDiagnostic(Diagnostic.Create(Rule, name.Identifier.GetLocation(), name.Identifier.ValueText));
+                break;
+        }
     }
 
     private static void AnalyzeDelegateCreation(OperationAnalysisContext context)
