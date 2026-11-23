@@ -890,6 +890,29 @@ public sealed class Fp0105Tests(TestContext testContext)
         return VerifyAsync(source.ToString());
     }
 
+    [TestMethod]
+    public Task FP0105_WriteThroughConvertedTupleBranch_Reports()
+    {
+        return VerifyAsync("""
+                           public abstract class Figure { public int Sides { get; set; } }
+                           public sealed class Square : Figure;
+                           public sealed class Triangle : Figure;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Drawing(Square square, Triangle triangle)
+                           {
+                               private readonly Square _square = square;
+                               private readonly Triangle _triangle = triangle;
+
+                               public int Grow(bool pick)
+                               {
+                                   (Figure Child, int Index) pair = pick ? (_square, 0) : (_triangle, 1);
+                                   return ++{|FP0105:pair.Child.Sides|};
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0105", source + Types, testContext.CancellationToken);

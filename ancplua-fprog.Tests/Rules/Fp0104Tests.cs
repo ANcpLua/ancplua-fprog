@@ -2505,6 +2505,85 @@ public sealed class Fp0104Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0104_WriteThroughConvertedTupleOrNullableBranch_Reports()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           public abstract class Figure { public int Sides { get; set; } }
+                           public sealed class Square : Figure;
+                           public sealed class Triangle : Figure;
+                           public readonly record struct Carrier(Figure Child);
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Literal(Square square, Triangle triangle, bool pick)
+                               {
+                                   (Figure Child, int Index) pair = pick ? (square, 0) : (triangle, 1);
+                                   return ++{|FP0104:pair.Child.Sides|};
+                               }
+
+                               public static int Value((Square Child, int Index) squares)
+                               {
+                                   (Figure Child, int Index) pair = squares;
+                                   return ++{|FP0104:pair.Child.Sides|};
+                               }
+
+                               public static int Nested(((Square Child, int Index) Inner, int Outer) squares)
+                               {
+                                   ((Figure Child, int Index) Inner, long Outer) pair = squares;
+                                   return ++{|FP0104:pair.Inner.Child.Sides|};
+                               }
+
+                               public static int Wrapped(Carrier source, bool pick)
+                               {
+                                   Carrier? chosen = pick switch { true => source, _ => null };
+                                   return chosen is { } carrier ? ++{|FP0104:carrier.Child.Sides|} : 0;
+                               }
+
+                               public static int Unwrapped(Carrier? source)
+                               {
+                                   if (source is null)
+                                       return 0;
+
+                                   var carrier = (Carrier)source;
+                                   return ++{|FP0104:carrier.Child.Sides|};
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_WriteToTupleElementMadeByConversion_NoReport()
+    {
+        return VerifyAsync("""
+                           public sealed class Entry { public int Count { get; set; } }
+
+                           public sealed class EntryCopy
+                           {
+                               public int Count { get; set; }
+                               public static implicit operator EntryCopy(Entry entry) => new EntryCopy { Count = entry.Count };
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Literal(Entry entry, bool pick)
+                               {
+                                   (EntryCopy Copy, int Index) pair = pick ? (entry, 0) : (entry, 1);
+                                   return ++pair.Copy.Count;
+                               }
+
+                               public static int Value((Entry Entry, int Index) entries)
+                               {
+                                   (EntryCopy Copy, int Index) pair = entries;
+                                   return ++pair.Copy.Count;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);

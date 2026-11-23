@@ -3,6 +3,12 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.3.0
+
+* FP0104 and FP0105 follow a value through a tuple conversion and through wrapping in or unwrapping from
+  `Nullable<T>`. A write such as `chosen.Values[0] = 0` after
+  `(IList<int> Values, int Kind) chosen = useFixed ? (fixedScores, 0) : (openScores, 1);` is now reported.
+
 ## 0.2.0
 
 * Faster analysis of functional-core boundaries, mutation through aliases and union cases.

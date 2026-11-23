@@ -84,6 +84,8 @@ internal sealed class MutationRoots(
             {
                 case ILocalReferenceOperation local:
                     return ReadLocal(local.Local, start, shared, reads, false);
+                case IConversionOperation tuples when IsTupleConversion(tuples) && !KeepsSelectedElement(tuples, reads):
+                    return default;
                 case IParenthesizedOperation or IConversionOperation or IConditionalAccessOperation:
                     value = ValueSource(value);
                     continue;
@@ -334,6 +336,12 @@ internal sealed class MutationRoots(
         if (conversion.GetConversion() is { IsConditionalExpression: true } or { IsSwitchExpression: true })
             return true;
 
+        // Wrapping a struct in Nullable<T>, or unwrapping it, copies the struct with the references it carries.
+        if (conversion.Conversion is { IsNullable: true, IsUserDefined: false }
+            && SymbolEqualityComparer.Default.Equals(
+                UnderlyingValue(conversion.Type), UnderlyingValue(conversion.Operand.Type)))
+            return true;
+
         return Mutators.IsView(conversion.Type)
                && (conversion.OperatorMethod is null || Mutators.IsView(conversion.OperatorMethod.ContainingType))
                && (Mutators.IsView(conversion.Operand.Type) || conversion.Operand.Type is IArrayTypeSymbol
@@ -341,12 +349,51 @@ internal sealed class MutationRoots(
                    || Mutators.IsSystemType(conversion.Operand.Type, "ArraySegment", 1));
     }
 
+    private static ITypeSymbol? UnderlyingValue(ITypeSymbol? type)
+    {
+        return type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
+    }
+
+    private static bool IsTupleConversion(IConversionOperation conversion)
+    {
+        return conversion.GetConversion() is { IsTupleConversion: true } or { IsTupleLiteralConversion: true };
+    }
+
+    // A tuple conversion converts element by element. A tuple literal shows each element's conversion as an
+    // operation of its own. For any other tuple value, the element that the pending reads select keeps its
+    // reference when its own conversion is an identity or reference conversion.
+    private static bool KeepsSelectedElement(IConversionOperation conversion, ImmutableArray<LocalAliases.Read> reads)
+    {
+        if (conversion.Operand is ITupleOperation)
+            return true;
+
+        return conversion.SemanticModel?.Compilation is { } compilation
+               && conversion.Operand.Type is { } source && conversion.Type is { } target
+               && KeepsElement(compilation, source, target, reads, 0);
+    }
+
+    private static bool KeepsElement(
+        Compilation compilation, ITypeSymbol source, ITypeSymbol target, ImmutableArray<LocalAliases.Read> reads, int position)
+    {
+        if (compilation.ClassifyConversion(source, target) is { IsIdentity: true } or { IsReference: true })
+            return true;
+
+        return position < reads.Length && reads[position].TupleIndex is >= 0 and var index
+               && source is INamedTypeSymbol { IsTupleType: true } from && target is INamedTypeSymbol { IsTupleType: true } to
+               && index < from.TupleElements.Length && index < to.TupleElements.Length
+               && KeepsElement(compilation, from.TupleElements[index].Type, to.TupleElements[index].Type, reads, position + 1);
+    }
+
+    // Also the operations that IsAcyclic follows, so it must name every conversion that Trace passes.
     private static IOperation? ValueSource(IOperation value)
     {
         return value switch
         {
             IParenthesizedOperation parentheses => parentheses.Operand,
-            IConversionOperation conversion when IsPreservingConversion(conversion) => conversion.Operand,
+            IConversionOperation conversion when IsPreservingConversion(conversion) || IsTupleConversion(conversion)
+                => conversion.Operand,
             IConditionalAccessOperation access => access.WhenNotNull,
             IConditionalAccessInstanceOperation instance => EnclosingAccess(instance)?.Operation,
             IInvocationOperation invocation => Mutators.ViewReceiver(invocation)

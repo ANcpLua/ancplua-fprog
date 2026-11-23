@@ -228,9 +228,14 @@ pattern, a type pattern), so every report comes with a way out.
   `ref` or `out` parameter at its signature.
 - An expression is **reached from** a parameter when it is the parameter; a field, property, indexer or element
   read from something reached; `?:`, `??` or a switch expression with a reached branch; a span or memory made from
-  something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; or a local that stands for something
-  reached. A local stands for it when each of its assignments is such an expression: declared locals, `ref` locals,
-  `foreach` variables, pattern variables at any depth, deconstruction variables.
+  something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; something reached after a
+  conversion that keeps the reference; or a local that stands for something reached. A local stands for it when
+  each of its assignments is such an expression: declared locals, `ref` locals, `foreach` variables, pattern
+  variables at any depth, deconstruction variables.
+- A conversion **keeps the reference** when it is an identity or reference conversion, wraps a struct in
+  `Nullable<T>` or unwraps it, or converts a tuple whose selected element is converted that way: in
+  `(IList<int> Values, int Kind) chosen = useFixed ? (fixedScores, 0) : (openScores, 1);`, `chosen.Values` is
+  the caller's array or list. A boxing, numeric or user-defined conversion hands over a value of its own.
 - A call on a reached collection whose result (or `out` variable) has the collection's element type, a reference
   type, hands out one of its elements, and that element is reached: `orders.First()`, `orders.Find(…)`,
   `byId.TryGetValue(id, out var order)`.
