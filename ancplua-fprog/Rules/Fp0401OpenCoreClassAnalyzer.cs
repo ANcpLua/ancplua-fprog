@@ -12,7 +12,7 @@ public sealed class Fp0401OpenCoreClassAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0401",
         "Declare a core class sealed, static or closed",
-        "Declare '{0}' sealed, static or closed");
+        "Declare '{0}' sealed or static, or closed when its subtypes are the cases of a union");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

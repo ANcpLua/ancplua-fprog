@@ -12,7 +12,7 @@ public sealed class Fp0203MutableCollectionMemberAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0203",
         "Do not store mutable collections or memory in records or readonly structs",
-        "Use an immutable collection from System.Collections.Immutable or System.Collections.Frozen");
+        "Hold an immutable collection instead: ImmutableArray<T>, ImmutableList<T>, ImmutableDictionary<TKey, TValue> or a frozen collection, and string in place of StringBuilder");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

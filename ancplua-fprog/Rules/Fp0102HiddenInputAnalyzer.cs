@@ -13,7 +13,7 @@ public sealed class Fp0102HiddenInputAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0102",
         "Do not read hidden inputs in the functional core",
-        "Pass '{0}' in as a parameter instead of reading it");
+        "Take the value of '{0}' as a parameter that the shell supplies instead of reading it here; keep static state readonly and return the new value");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

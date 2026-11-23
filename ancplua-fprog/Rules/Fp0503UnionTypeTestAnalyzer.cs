@@ -16,7 +16,7 @@ public sealed class Fp0503UnionTypeTestAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0503",
         "Match union cases in a switch",
-        "Match the cases of '{0}' in a switch");
+        "Pick the case of '{0}' in a switch that names every case instead of testing for one with 'is' or 'as'");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

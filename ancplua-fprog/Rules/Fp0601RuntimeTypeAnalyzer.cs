@@ -16,7 +16,7 @@ public sealed class Fp0601RuntimeTypeAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0601",
         "Do not inspect a runtime type hidden by the static type",
-        "Use a statically typed value or pass in the operation to perform");
+        "Work through the static type instead of testing the runtime type: add a constraint and call its member, take a function parameter, or model the alternatives as a union");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

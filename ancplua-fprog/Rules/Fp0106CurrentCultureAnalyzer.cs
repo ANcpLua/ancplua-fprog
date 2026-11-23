@@ -16,7 +16,7 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0106",
         "Pass the culture or comparer explicitly",
-        "Supply a culture or ordinal comparer explicitly");
+        "Name the culture or comparison explicitly: pass CultureInfo.InvariantCulture or the culture you were given, and StringComparison.Ordinal or StringComparer.Ordinal for text");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

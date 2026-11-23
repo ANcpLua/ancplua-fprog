@@ -16,7 +16,7 @@ public sealed class Fp0107UnsafeCodeAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0107",
         "Do not use pointers or unsafe code in the functional core",
-        "Use safe values and operations in the functional core");
+        "Use Span<T>, ReadOnlySpan<T> or Memory<T> in place of pointers and unsafe code, and keep interop in the shell");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

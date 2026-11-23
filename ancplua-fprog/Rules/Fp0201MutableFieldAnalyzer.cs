@@ -31,7 +31,7 @@ public sealed class Fp0201MutableFieldAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0201",
         "Do not declare mutable fields in the functional core",
-        "Keep '{0}' immutable by using a readonly field, a constant, or a new result value");
+        "Keep '{0}' immutable: declare a field readonly or const, leave a primary-constructor parameter unassigned, and return a new instance with the changed value");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

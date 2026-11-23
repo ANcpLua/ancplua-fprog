@@ -12,7 +12,7 @@ public sealed class Fp0105FieldStateChangeAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0105",
         "Do not change state held in a field of the functional core",
-        "Return a new value instead of changing the state held in '{0}'");
+        "Keep the state held in '{0}' as constructed and return a new instance with the changed value instead");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

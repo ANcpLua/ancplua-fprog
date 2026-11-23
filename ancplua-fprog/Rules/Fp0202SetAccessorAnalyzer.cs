@@ -18,7 +18,7 @@ public sealed class Fp0202SetAccessorAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0202",
         "Do not declare set accessors in the functional core",
-        "Use an init accessor or a get-only property instead of a set accessor");
+        "Replace 'set' with 'init', or remove it for a get-only property, and produce a changed copy with a 'with' expression");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

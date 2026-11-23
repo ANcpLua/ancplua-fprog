@@ -17,7 +17,7 @@ public sealed class Fp0101VoidResultAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0101",
         "Do not use void results in the functional core",
-        "'{0}' has a void result. Return a value instead.");
+        "'{0}' has a void result; return what it computes instead: the new state as a 'with' copy or a new record, a result value for an outcome that can fail, or a Func delegate in place of an Action delegate");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

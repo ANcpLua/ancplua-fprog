@@ -12,7 +12,7 @@ public sealed class Fp0801ShellBoundaryAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0801",
         "Keep Shell types and locks outside the functional core",
-        "Use a core or Pure value in place of '{0}'");
+        "'{0}' is outside the functional core; take its result as a parameter or return a value that describes the effect for the shell to run, and mark a pure type [Fprog.FunctionalCore] or list a trusted library in fprog_pure_apis");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

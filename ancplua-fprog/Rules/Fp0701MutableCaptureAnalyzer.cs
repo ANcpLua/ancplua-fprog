@@ -26,7 +26,7 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0701",
         "Do not capture a variable that is reassigned",
-        "The closure captures '{0}', which is assigned after its declaration");
+        "The closure captures '{0}', which is assigned after its declaration; capture a local that is assigned once instead, or pass the value to the closure as a parameter");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

@@ -24,7 +24,7 @@ public sealed class Fp0103RefOutParameterAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0103",
         "Do not use ref or out parameters in the functional core",
-        "Return the result instead of writing through the '{0}' parameter");
+        "Return the value that parameter '{0}' carries as part of the result instead: a tuple, a record or an option; for input, take a plain or 'in' parameter");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

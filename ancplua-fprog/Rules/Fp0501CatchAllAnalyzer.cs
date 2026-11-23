@@ -14,7 +14,7 @@ public sealed class Fp0501CatchAllAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0501",
         "Do not use a catch-all in a switch over a union",
-        "Handle each case of the union explicitly instead of using a catch-all");
+        "Replace this catch-all with one arm or label per case of the union, so that a case added later is reported instead of falling through");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 

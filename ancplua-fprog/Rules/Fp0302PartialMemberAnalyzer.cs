@@ -17,7 +17,7 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0302",
         "Use total operations in the functional core",
-        "Use a total alternative or guard the operation because '{0}' fails for some inputs");
+        "'{0}' fails for some inputs; use its total sibling (TryParse, FirstOrDefault, TryGetValue, a list pattern, a type pattern) or guard it, and return the failure as a value");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

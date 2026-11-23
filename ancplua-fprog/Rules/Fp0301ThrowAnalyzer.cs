@@ -19,7 +19,7 @@ public sealed class Fp0301ThrowAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0301",
         "Do not throw in the functional core",
-        "Return an error value instead of throwing");
+        "Return the failure as a value instead of throwing: a result or option type, or an error case of a union that the caller matches");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

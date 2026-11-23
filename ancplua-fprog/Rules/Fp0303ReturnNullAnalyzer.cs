@@ -19,7 +19,7 @@ public sealed class Fp0303ReturnNullAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0303",
         "Represent missing results explicitly in the functional core",
-        "Use an option or result value to represent absence, or check the value before using it");
+        "Represent a missing result explicitly: return an option or result value or an empty case of a union, and test a value instead of asserting it with '!'");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

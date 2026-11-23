@@ -12,7 +12,7 @@ public sealed class Fp0104ParameterWriteAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0104",
         "Do not write through a parameter in the functional core",
-        "Return a new value instead of mutating data reached from parameter '{0}'");
+        "Leave the data reached from parameter '{0}' unchanged and return a changed copy instead: a 'with' expression for a record, a new immutable collection for elements");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];

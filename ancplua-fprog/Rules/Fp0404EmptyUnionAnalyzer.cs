@@ -13,7 +13,7 @@ public sealed class Fp0404EmptyUnionAnalyzer : DiagnosticAnalyzer
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0404",
         "Construct a union from a case",
-        "Construct '{0}' from one of its cases");
+        "Create '{0}' from one of its cases; an empty union value matches no case and makes a complete switch throw");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 
