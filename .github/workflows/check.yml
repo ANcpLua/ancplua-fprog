@@ -1,0 +1,147 @@
+name: check
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore local tools
+        run: make tools
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: InspectCode
+        if: ${{ !cancelled() }}
+        run: make inspect
+
+      - name: RefTrace
+        if: ${{ !cancelled() }}
+        run: make verify-dll
+
+      - name: Demo
+        if: ${{ !cancelled() }}
+        run: python3 demo/count.py
+
+      # The account's artifact storage can run full; a failed upload must not fail the gate.
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        continue-on-error: true
+        with:
+          name: artifacts
+          path: |
+            artifacts/**/*.trx
+            artifacts/*.sarif
+            artifacts/*.json
+            artifacts/*.binlog
+          if-no-files-found: ignore
+
+  pack:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
+      - name: Pack
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version_args=("-p:Version=${GITHUB_REF_NAME#v}")
+          else
+            version_args=("-p:VersionSuffix=ci.${GITHUB_RUN_NUMBER}")
+          fi
+          dotnet pack ancplua-fprog/ancplua-fprog.csproj -c Release -warnaserror -o artifacts/package "${version_args[@]}"
+
+      - name: Check the package layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing=$(unzip -Z1 artifacts/package/*.nupkg)
+          echo "$listing"
+          for entry in analyzers/dotnet/cs/ancplua-fprog.dll contentFiles/cs/any/Fprog/FprogAttributes.cs README.md LICENSE; do
+            grep -qx "$entry" <<< "$listing" || { echo "missing: $entry"; exit 1; }
+          done
+          if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: nupkg
+          path: artifacts/package/*.nupkg
+          if-no-files-found: error
+
+  # Packs and checks the tagged commit itself, so it does not depend on artifact storage.
+  publish:
+    needs: pack
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: nuget
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
+      - name: Pack
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version_args=("-p:Version=${GITHUB_REF_NAME#v}")
+          else
+            version_args=("-p:VersionSuffix=ci.${GITHUB_RUN_NUMBER}")
+          fi
+          dotnet pack ancplua-fprog/ancplua-fprog.csproj -c Release -warnaserror -o artifacts/package "${version_args[@]}"
+
+      - name: Check the package layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing=$(unzip -Z1 artifacts/package/*.nupkg)
+          echo "$listing"
+          for entry in analyzers/dotnet/cs/ancplua-fprog.dll contentFiles/cs/any/Fprog/FprogAttributes.cs README.md LICENSE; do
+            grep -qx "$entry" <<< "$listing" || { echo "missing: $entry"; exit 1; }
+          done
+          if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
+        run: |
+          test -n "$NUGET_API_KEY" || { echo "Set the NUGET_API_KEY secret in the nuget environment"; exit 1; }
+          dotnet nuget push artifacts/package/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

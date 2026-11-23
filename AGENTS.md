@@ -70,6 +70,7 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 | `make verify-dll` | RefTrace: the analyzer DLL is free of Workspaces, reflection and dynamic code |
 | `make check` | All of the above. Work is done when this exits 0 |
 | `python3 demo/count.py` | Builds `demo/`, compares every diagnostic with the `// expect: <ID>` comments, ends with `RESULT: everything as expected` |
+| `make pack` | Packs `ANcpLua.Fprog.Analyzers` into `artifacts/package` |
 
 ## Scope
 
@@ -303,6 +304,23 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
   `demo/HappyPath/<Rule>_<Case>.cs` (the same job done correctly, silent under every rule).
   `demo/KnownGaps/` holds real bugs that still pass, each with its reason in `demo/FINDINGS.md`.
 - Spawn as many subagents as useful.
+
+## Package and release
+
+- The product is the NuGet package `ANcpLua.Fprog.Analyzers`, packed from `ancplua-fprog/ancplua-fprog.csproj`. It
+  holds the analyzer DLL under `analyzers/dotnet/cs`, the source file `contentFiles/cs/any/Fprog/FprogAttributes.cs`,
+  `README.md` and `LICENSE`. It has no `lib/` folder and no dependencies, because the compiler provides Roslyn.
+- `ancplua-fprog/contentFiles/FprogAttributes.cs` compiles `Fprog.FunctionalCoreAttribute` into the consuming project
+  as an internal type; `FPROG_NO_ATTRIBUTES` leaves it out. It declares the same targets as
+  `FpAnalyzerTestHost.AnnotationsSource` and `demo/Fprog.Annotations.cs`. Change the three together.
+- CI (`.github/workflows/check.yml`) runs on every push: `check` with the steps of `make check` and the demo count,
+  then `pack` with a layout check. On a `v<version>` tag, `publish` pushes the package to nuget.org with the secret
+  `NUGET_API_KEY` of the GitHub environment `nuget`. The owner pushes the tag.
+- `VersionPrefix` in the project file is the next version. A new or wider rule can break a build that treats
+  warnings as errors, so it is a minor version below 1.0 and a major version from 1.0 on.
+- A new ID goes into `AnalyzerReleases.Unshipped.md`. At a release its rows move to a `## Release <version>`
+  section in `AnalyzerReleases.Shipped.md`.
+- `tools/feed` carries the RefTrace package for `make verify-dll` until RefTrace is on nuget.org.
 
 ## Boundaries
 

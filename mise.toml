@@ -11,9 +11,6 @@ description = "The done gate: build, tests, InspectCode, RefTrace"
 run = "make check"
 
 [tasks.test]
-description = "Run all visible tests"
+description = "Run all tests"
 run = "make test"
 
-[tasks.score]
-description = "Referee: hidden tests and corpus (needs BASE and REFEREE)"
-run = "make score"
