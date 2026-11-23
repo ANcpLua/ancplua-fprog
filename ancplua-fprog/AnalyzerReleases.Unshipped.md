@@ -10,6 +10,7 @@
  FP0103  | Functional | Warning  | Do not use ref or out parameters in the functional core            
  FP0104  | Functional | Warning  | Do not write through a parameter in the functional core            
  FP0105  | Functional | Warning  | Do not change state held in a field of the functional core         
+ FP0106  | Functional | Warning  | Pass the culture or comparer explicitly
  FP0201  | Functional | Warning  | Do not declare mutable fields in the functional core               
  FP0202  | Functional | Warning  | Do not declare set accessors in the functional core                
  FP0203  | Functional | Warning  | Do not store mutable collections in records or readonly structs    

@@ -82,7 +82,6 @@ Each needs a decision about the catalog, or cannot be decided by a rule of this 
 
 | File | What passes | Why it was left |
 | --- | --- | --- |
-| `Fp0102_ClockAndRandomnessNotInTheList.cs` | `TimeZoneInfo.Local`, `ToString("C")`, `string.GetHashCode()` (three process runs, three values) | FP0102 and FP0106 have yet to cover these hidden inputs and implicit culture uses. |
 | `Fp0303_NullThroughALocal.cs` | `string? result = null; ...; return result;` | Needs data flow; a constant holding null is encoded as not reported. |
 | `Fp0302_OtherPartialMembers.cs` | `ParseExact`, `Convert.ToInt32`, `Max()`/`Average()` on an empty sequence, `xs[0]`, division, a hard cast | Outside the row's list; `ParseExact` and `BigInteger.Parse` are encoded as not reported. |
 | `Fp0203_ImmutableBuilderMember.cs` | a record holding `ImmutableArray<T>.Builder` (a `with` copy shares it) | The row allows the whole namespace, and the test is named "Decided". |

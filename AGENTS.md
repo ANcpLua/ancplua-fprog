@@ -123,7 +123,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | ID | Reports | At |
 | --- | --- | --- |
 | FP0101 | A `void` result: (a) a method or local function returns `void`; (b) a delegate declaration returns `void`; (c) a written delegate type whose `Invoke` returns `void` (`Action`, `Action<…>`, `EventHandler`, …) as the type of a parameter, return, local, field, property, event or type argument; (d) a lambda, anonymous method or method group that becomes such a delegate where the delegate type is unwritten (an argument for a member outside core, a `var` local) | (a)(b) the name; (c) the type's name token; (d) the `=>` token, the `delegate` keyword, or the method group's name |
-| FP0102 | Reads a hidden input (list below) | the name token of the member |
+| FP0102 | Reads a hidden input or accesses mutable static state (list below) | the name token of the member |
 | FP0103 | A `ref` or `out` parameter (`in` and `ref readonly` are allowed) | the parameter name |
 | FP0104 | Writes into memory the caller owns: the target or receiver is *reached from a parameter* (below). Forms: assignment, compound assignment, `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, a *mutating call* (below) | the target or argument expression; for a mutating call the method name |
 | FP0105 | Changes state held in a field after construction: the forms of FP0104 with a target or receiver *reached from a field*, and `+=`/`-=` on an event | as FP0104; for an event the event name |
@@ -152,8 +152,9 @@ constructor and the suppressor used to imitate.
 
 ### FP0102: hidden inputs
 
-Members of Pure types. `Random`, `Environment`, `TimeProvider`, `Stopwatch`, `RandomNumberGenerator` and `Thread`
-are Shell types and arrive as FP0801.
+The ambient members and mutable static state below belong to Pure types. Calls or method groups count for the
+ambient methods. The hash-code check also applies to a call named `GetHashCode` on any type.
+`Random`, `Environment`, `TimeProvider`, `Stopwatch`, `RandomNumberGenerator` and `Thread` arrive as FP0801.
 
 - Clock: `DateTime.Now`, `DateTime.UtcNow`, `DateTime.Today`, `DateTimeOffset.Now`, `DateTimeOffset.UtcNow`.
 - Local time zone: `TimeZoneInfo.Local`, `TimeZoneInfo.FindSystemTimeZoneById`, `TryFindSystemTimeZoneById`,

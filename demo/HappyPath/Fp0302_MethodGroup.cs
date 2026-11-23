@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 
 namespace Demo.Fp0302_MethodGroup;
@@ -17,5 +18,5 @@ public static class Quantities
     public static string Name() => nameof(int.Parse);
 
     private static IEnumerable<int> ReadOne(string text)
-        => int.TryParse(text, out var number) ? [number] : [];
+        => int.TryParse(text, CultureInfo.InvariantCulture, out var number) ? [number] : [];
 }

@@ -408,6 +408,25 @@ public sealed class Fp0801Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0801_RandomEnvironmentAndTimeProvider_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+                           using static System.Environment;
+
+                           [Fprog.FunctionalCore]
+                           public static class Work
+                           {
+                               public static int Capacity() => {|FP0801:ProcessorCount|};
+                               public static int Roll({|FP0801:Random|} random) => random.Next(1, 7);
+                               public static int Seeded() => new {|FP0801:Random|}(42).Next();
+                               public static bool IsLate(DateTimeOffset due, {|FP0801:TimeProvider|} clock) => clock.GetUtcNow() > due;
+                               public static DateTimeOffset MachineTime() => {|FP0801:TimeProvider|}.System.GetUtcNow();
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0801", source, testContext.CancellationToken);

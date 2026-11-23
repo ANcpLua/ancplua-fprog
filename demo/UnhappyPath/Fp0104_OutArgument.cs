@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Demo.Fp0104_OutArgument;
 
 [Fprog.FunctionalCore]
@@ -13,10 +15,10 @@ public sealed class Counter
 public static class Reader
 {
     public static bool Read(string text, Counter counter)
-        => int.TryParse(text, out counter.Value); // expect: FP0104
+        => int.TryParse(text, CultureInfo.InvariantCulture, out counter.Value); // expect: FP0104
 
     public static bool ReadInto(string text, int[] slots)
-        => int.TryParse(text, out slots[0]); // expect: FP0104
+        => int.TryParse(text, CultureInfo.InvariantCulture, out slots[0]); // expect: FP0104
 
     public static int Bump(Counter counter) => Cells.Increment(ref counter.History[0]); // expect: FP0104, FP0801
 }
