@@ -11,7 +11,7 @@ core is functional.
 ## Install
 
 ```xml
-<PackageReference Include="ANcpLua.Fprog.Analyzers" Version="0.4.0" PrivateAssets="all" />
+<PackageReference Include="ANcpLua.Fprog.Analyzers" Version="0.5.0" PrivateAssets="all" />
 ```
 
 The package needs the .NET 11 SDK (11.0.100 or later), whose compiler is Roslyn 5.12. It adds the analyzers and
