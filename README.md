@@ -168,6 +168,9 @@ python3 demo/count.py  # every rule on a wrong and a correct example
 make pack              # artifacts/package/ANcpLua.Fprog.Analyzers.<version>.nupkg
 ```
 
+`make inspect` prints each InspectCode suggestion, warning and error with its source location and rule ID.
+Warnings and errors fail the check. The full report is in `artifacts/inspectcode.sarif`.
+
 [CHANGELOG.md](https://github.com/ANcpLua/ancplua-fprog/blob/main/CHANGELOG.md) lists the changes of each release.
 
 ## License

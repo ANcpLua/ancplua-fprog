@@ -67,7 +67,7 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 | `make tools` | Restores the pinned local tools `jb` and `ref` |
 | `make build` | Builds the solution with warnings as errors |
 | `make test` | Runs all tests |
-| `make inspect` | ReSharper InspectCode; passes with 0 findings at warning level or above |
+| `make inspect` | Prints InspectCode suggestions, warnings and errors and writes `artifacts/inspectcode.sarif`. Passes with zero warnings and errors |
 | `make verify-dll` | RefTrace: the analyzer DLL is free of Workspaces, reflection and dynamic code |
 | `make check` | All of the above. Work is done when this exits 0 |
 | `python3 demo/count.py` | Builds `demo/`, compares every diagnostic with the `// expect: <ID>` comments, ends with `RESULT: everything as expected` |

@@ -26,11 +26,11 @@ test: ## Run all tests
 	@set -eu; mkdir -p artifacts; results=$$(mktemp -d artifacts/test-results.XXXXXX); \
 	$(DOTNET) test --solution $(SLN) -c Release --report-trx --results-directory "$$results" "-bl:artifacts/test-{}.binlog"
 
-inspect: tools ## ReSharper InspectCode; fails on any warning or error
-	@set -eu; mkdir -p artifacts; \
-	$(JB) inspectcode $(SLN) --swea --severity=WARNING --output=artifacts/inspectcode.sarif; \
-	count=$$($(JQ) '[.runs[].results[]] | length' artifacts/inspectcode.sarif); \
-	echo "InspectCode findings: $$count"; test "$$count" -eq 0
+inspect: tools ## Show InspectCode suggestions and fail on warnings or errors
+	@mkdir -p artifacts
+	@rm -f artifacts/inspectcode.sarif
+	$(JB) inspectcode $(SLN) --swea --severity=SUGGESTION --output=artifacts/inspectcode.sarif
+	@$(JQ) -ersf scripts/inspectcode.jq artifacts/inspectcode.sarif
 
 verify-dll: tools ## Check the analyzer binary with RefTrace
 	@set -eu; mkdir -p $(ANALYZER_OUT); \
