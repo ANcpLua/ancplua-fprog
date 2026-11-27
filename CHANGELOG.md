@@ -3,6 +3,13 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.7.0 (unreleased)
+
+* FP0502 checks switches against the most derived class constraint of a type parameter. When the bounds are
+  `Shape` and its closed subclass `Polygon`, only polygon cases need labels, in either constraint order.
+  If the most derived class is open, sealed or has an incomplete case list, FP0601 applies its ordinary
+  type-parameter checks in the functional core.
+
 ## 0.6.0
 
 * FP0106 reports each string key in a LINQ to Objects `orderby` that uses the default string comparer. Use `OrderBy` or

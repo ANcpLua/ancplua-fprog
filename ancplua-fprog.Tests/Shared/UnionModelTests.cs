@@ -171,6 +171,8 @@ public sealed class UnionModelTests(TestContext testContext)
     [DataRow("(System.Collections.Generic.List<int> ints)", "(object)ints", null)]
     [DataRow("<T>(T shape) where T : Shape", "(object)shape", "Shape")]
     [DataRow("<T, U>(T shape) where T : U where U : Shape", "shape", "Shape")]
+    [DataRow("<T, U, V>(T shape) where T : U, V where U : Polygon where V : Polygon", "shape", "Polygon")]
+    [DataRow("<T, U, V, W>(T shape) where T : U, V where U : W where V : Polygon, W where W : Shape", "shape", "Polygon")]
     [DataRow("<T>(T item) where T : class", "item", null)]
     public void UnionValueKeepsItsTypeThroughNullableConstraintsAndUpcasts(
         string signature, string value, string? expected)

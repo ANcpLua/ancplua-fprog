@@ -140,6 +140,7 @@ All rules have category `Functional` and severity `Warning`.
 | FP0503 | `is` or `as` that picks one case | a `switch` that names every case |
 
 FP0501, FP0502 and FP0503 apply to a closed class when the compiler can list every case for the type being matched.
+For a type parameter, the most derived class constraint determines those cases.
 
 | ID | Outside the core, the rule reports | Write instead |
 | --- | --- | --- |

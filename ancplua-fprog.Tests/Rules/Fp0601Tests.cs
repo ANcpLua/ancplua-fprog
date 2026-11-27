@@ -186,6 +186,25 @@ public sealed class Fp0601Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0601_GetTypeWithIncompleteMostDerivedConstraint_Reports()
+    {
+        return VerifyAsync("""
+            public closed class Root<X>;
+            public closed class Inner<X> : Root<X>;
+            public sealed class Known<X> : Inner<X>;
+            public sealed class Extra<X> : Inner<System.Collections.Generic.List<X>>;
+
+            [Fprog.FunctionalCore]
+            public static class Inspect
+            {
+                public static System.Type RuntimeType<T, X, Wide, Narrow>(T value)
+                    where T : Wide, Narrow where Wide : Root<X> where Narrow : Inner<X>
+                    => value.{|FP0601:GetType|}();
+            }
+            """);
+    }
+
+    [TestMethod]
     public Task FP0601_GetTypeOnValueOfT_Reports()
     {
         return VerifyAsync("""

@@ -23,7 +23,8 @@ internal sealed class UnionModel(Compilation compilation)
             INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed => AsClosedClass(closed, cancellationToken),
             INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
                 => GetUnionType(nullable.TypeArguments[0], cancellationToken),
-            ITypeParameterSymbol parameter => GetClosedConstraint(parameter, null, cancellationToken),
+            ITypeParameterSymbol parameter when GetClassConstraint(parameter, null, cancellationToken) is { IsClosed: true } bound
+                => AsClosedClass(bound, cancellationToken),
             _ => null
         };
     }
@@ -34,26 +35,30 @@ internal sealed class UnionModel(Compilation compilation)
         return GetCases(union, cancellationToken).IsComplete ? union : null;
     }
 
-    // A value of a type parameter is an instance of a subtype of its constraint. Its cases are the subtypes
-    // of a closed constraint, also when that class is a hand-written union with a case list of its own.
-    private Union? GetClosedConstraint(
+    // All constraints apply at once. Only the most derived class can supply the cases, including when
+    // it is a hand-written union: an instance of a type parameter is a subtype of its class constraint.
+    private INamedTypeSymbol? GetClassConstraint(
         ITypeParameterSymbol parameter, HashSet<ITypeParameterSymbol>? visited, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        INamedTypeSymbol? best = null;
         foreach (var constraint in parameter.ConstraintTypes)
         {
-            if (constraint is INamedTypeSymbol { TypeKind: TypeKind.Class, IsClosed: true } closed
-                && AsClosedClass(closed, cancellationToken) is { } constrained)
-                return constrained;
-
+            var candidate = constraint as INamedTypeSymbol;
             if (constraint is ITypeParameterSymbol other)
             {
                 visited ??= new HashSet<ITypeParameterSymbol>(SymbolEqualityComparer.Default) { parameter };
-                if (visited.Add(other) && GetClosedConstraint(other, visited, cancellationToken) is { } union)
-                    return union;
+                if (!visited.Add(other))
+                    continue;
+
+                candidate = GetClassConstraint(other, visited, cancellationToken);
             }
+
+            if (candidate is { TypeKind: TypeKind.Class } && (best is null || AlwaysConvertsTo(candidate, best)))
+                best = candidate;
         }
 
-        return null;
+        return best;
     }
 
     public Union? GetUnionOfExpression(IOperation value, CancellationToken cancellationToken)

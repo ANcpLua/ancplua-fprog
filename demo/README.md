@@ -10,7 +10,7 @@ One C# file per case, named after the rule and the case it tests. Every case exi
 
 The three demo projects compile with the analyzers of this repository (`../ancplua-fprog/ancplua-fprog.csproj` as analyzer
 reference), with nullable enabled and .NET 11's default language version, C# 15.
-The warning-free ReferencedTypes library provides the closed cases for the FP0502 demo pair.
+The warning-free ReferencedTypes library provides the payment and shipment hierarchies for the FP0502 demos.
 
 ## Expected numbers
 
@@ -19,7 +19,7 @@ Generated from `python3 demo/count.py --json`.
 | Project | Errors | Warnings | Infos |
 | --- | --- | --- | --- |
 | HappyPath | 0 | 0 | 0 |
-| UnhappyPath | 0 | 149 | 0 |
+| UnhappyPath | 0 | 150 | 0 |
 | KnownGaps | 0 | 0 | 0 |
 
 | UnhappyPath file | Warnings | IDs |
@@ -67,6 +67,7 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0501_NativeUnionCatchAll.cs` | 1 | FP0501 x1 |
 | `Fp0501_NegatedCase.cs` | 1 | FP0501 x1 |
 | `Fp0502_CastHidesCases.cs` | 1 | FP0502 x1 |
+| `Fp0502_MostDerivedConstraint.cs` | 1 | FP0502 x1 |
 | `Fp0502_SwitchStatementMissesCase.cs` | 1 | FP0502 x1 |
 | `Fp0503_IsChain.cs` | 2 | FP0503 x2 |
 | `Fp0601_CastThroughObject.cs` | 3 | FP0601 x3 |

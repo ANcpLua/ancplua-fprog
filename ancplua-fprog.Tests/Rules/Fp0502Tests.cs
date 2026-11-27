@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using ancplua_fprog.Tests.Shared;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Testing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -57,6 +58,100 @@ public sealed class Fp0502Tests(TestContext testContext)
                                }
                            }
                            """ + Shapes);
+    }
+
+    [TestMethod]
+    [DataRow("Wide, Narrow")]
+    [DataRow("Narrow, Wide")]
+    public Task FP0502_CompleteSwitchOverMostDerivedConstraint_NoReport(string constraints)
+    {
+        return VerifyAsync($$"""
+                             public static class Area
+                             {
+                                 public static int Size<T, Wide, Narrow>(T shape)
+                                     where T : {{constraints}} where Wide : Shape where Narrow : Polygon
+                                 {
+                                     switch (shape)
+                                     {
+                                         case Square: return 1;
+                                         case Triangle: return 2;
+                                     }
+                                     return 0;
+                                 }
+                             }
+                             """ + Shapes);
+    }
+
+    [TestMethod]
+    [DataRow("Wide, Narrow")]
+    [DataRow("Narrow, Wide")]
+    public Task FP0502_SwitchOverMostDerivedConstraintMissingLeaf_Reports(string constraints)
+    {
+        return FpAnalyzerTestHost.VerifyRuleAsync("FP0502", $$"""
+            public static class Area
+            {
+                public static int Size<T, Wide, Narrow>(T shape)
+                    where T : {{constraints}} where Wide : Shape where Narrow : Polygon
+                {
+                    {|#0:switch|} (shape)
+                    {
+                        case Square: return 1;
+                    }
+                    return 0;
+                }
+            }
+            """ + Shapes, testContext.CancellationToken,
+            new DiagnosticResult("FP0502", DiagnosticSeverity.Warning).WithLocation(0).WithArguments("Polygon", "Triangle", ""));
+    }
+
+    [TestMethod]
+    [DataRow("Open<T>")]
+    [DataRow("Inner<T>")]
+    public Task FP0502_MostDerivedConstraintWithNoCompleteCaseList_NoReport(string bound)
+    {
+        return VerifyAsync($$"""
+            public closed class Root<T>;
+            public class Open<T> : Root<T>;
+            public closed class Inner<T> : Root<T>;
+            public sealed class Known<T> : Inner<T>;
+            public sealed class Extra<T> : Inner<System.Collections.Generic.List<T>>;
+
+            public static class Area
+            {
+                public static int Size<T, Value, Wide, Narrow>(Value shape)
+                    where Value : Wide, Narrow where Wide : Root<T> where Narrow : {{bound}}
+                {
+                    switch (shape)
+                    {
+                        case null: return 0;
+                    }
+                    return 1;
+                }
+            }
+            """);
+    }
+
+    [TestMethod]
+    public Task FP0502_MostDerivedInheritedConstraintIsASealedCase_NoReport()
+    {
+        return VerifyAsync("""
+            public abstract class Area<Key> where Key : Shape
+            {
+                public abstract int Size<T, Wide>(T shape) where T : Wide, Key where Wide : Shape;
+            }
+
+            public sealed class CircleArea : Area<Circle>
+            {
+                public override int Size<T, Wide>(T shape)
+                {
+                    switch (shape)
+                    {
+                        case null: return 0;
+                    }
+                    return 1;
+                }
+            }
+            """ + Shapes);
     }
 
     [TestMethod]
