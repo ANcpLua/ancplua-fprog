@@ -3,7 +3,7 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
-## 0.6.0 (unreleased)
+## 0.6.0
 
 * FP0106 reports each string key in a LINQ to Objects `orderby` that uses the default string comparer. Use `OrderBy` or
   `ThenBy` and pass `StringComparer.Ordinal` for culture-independent ordering.
