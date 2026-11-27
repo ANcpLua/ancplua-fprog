@@ -19,7 +19,7 @@ Generated from `python3 demo/count.py --json`.
 | Project | Errors | Warnings | Infos |
 | --- | --- | --- | --- |
 | HappyPath | 0 | 0 | 0 |
-| UnhappyPath | 0 | 150 | 0 |
+| UnhappyPath | 0 | 153 | 0 |
 | KnownGaps | 0 | 0 | 0 |
 
 | UnhappyPath file | Warnings | IDs |
@@ -33,15 +33,18 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0104_ConvertedBranches.cs` | 1 | FP0104 x1 |
 | `Fp0104_ElementHandedOutByCall.cs` | 2 | FP0104 x2 |
 | `Fp0104_MutatingCallOnParameter.cs` | 3 | FP0104 x3 |
+| `Fp0104_NamedTupleSlot.cs` | 1 | FP0104 x1 |
 | `Fp0104_OutArgument.cs` | 5 | FP0104 x3, FP0201 x1, FP0801 x1 |
 | `Fp0104_ReferenceInsideValueParameter.cs` | 1 | FP0104 x1 |
 | `Fp0104_SpanOverParameter.cs` | 2 | FP0104 x2 |
 | `Fp0105_EventSubscription.cs` | 2 | FP0105 x2 |
 | `Fp0105_FieldBehindAlias.cs` | 3 | FP0105 x2, FP0202 x1 |
+| `Fp0105_NamedTupleSlot.cs` | 1 | FP0105 x1 |
 | `Fp0105_StateHeldInAField.cs` | 3 | FP0105 x3 |
 | `Fp0106_FormattingByCulture.cs` | 2 | FP0106 x2 |
 | `Fp0106_QueryOrdersText.cs` | 2 | FP0106 x2 |
 | `Fp0106_SortingStringsByCulture.cs` | 1 | FP0106 x1 |
+| `Fp0106_SpanBinarySearch.cs` | 1 | FP0106 x1 |
 | `Fp0106_SpanStringComparer.cs` | 1 | FP0106 x1 |
 | `Fp0107_PointersInCore.cs` | 9 | FP0107 x9 |
 | `Fp0201_PrimaryConstructorParameter.cs` | 2 | FP0201 x2 |

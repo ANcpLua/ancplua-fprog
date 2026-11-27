@@ -2605,6 +2605,143 @@ public sealed class Fp0104Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0104_NamedTupleSlotsSelectTheSameStorageAsTheirOrdinals_Reports()
+    {
+        return VerifyAsync("""
+                           #nullable enable
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(List<int> input)
+                               {
+                                   var pair = (Items: input, Fresh: new List<int>());
+                                   pair.Items.{|FP0104:Add|}(1);
+                                   pair.Item1.{|FP0104:Add|}(2);
+                                   pair.Fresh.Add(3);
+                                   pair.Item2.Add(4);
+
+                                   var wide = (1, 2, 3, 4, 5, 6, 7, input);
+                                   wide.input.{|FP0104:Clear|}();
+                                   wide.Item8.{|FP0104:Clear|}();
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_TupleSlotAssignmentsFollowOnlyTheSelectedStorage_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(Box input, Box other)
+                               {
+                                   var pair = (Reset: input, Keep: input);
+                                   pair.Item1 = new Box();
+                                   pair.Reset.X++;
+                                   pair.Keep = other;
+                                   {|FP0104:pair.Item2.X|}++;
+
+                                   var outer = (Nested: (Reset: input, Keep: input), Keep: input);
+                                   ref var inner = ref outer.Nested;
+                                   ref var slot = ref inner.Reset;
+                                   slot = new Box();
+                                   slot.X++;
+                                   outer.Nested.Item1.X++;
+                                   {|FP0104:inner.Item2.X|}++;
+                                   {|FP0104:outer.Keep.X|}++;
+
+                                   var copied = outer;
+                                   copied.Keep = new Box();
+                                   copied.Keep.X++;
+                                   {|FP0104:outer.Keep.Y|}++;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_FreshListAssignedToTupleSlotDirectlyOrThroughRef_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(List<int> input)
+                               {
+                                   var direct = (input, 0);
+                                   direct.Item1 = new List<int>();
+                                   direct.Item1.Add(42);
+
+                                   var indirect = (input, 0);
+                                   ref var slot = ref indirect.Item1;
+                                   slot = new List<int>();
+                                   indirect.Item1.Add(42);
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_TupleSlotCycleThroughAnObjectMemberStaysReached_Reports()
+    {
+        return VerifyAsync("""
+                           public sealed class Node
+                           {
+                               public (Node Left, Node Right) Children;
+                               public int Value;
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static int Change(Node input)
+                               {
+                                   var pair = (Current: input, Fresh: new Node());
+                                   pair.Current = pair.Current.Children.Right;
+                                   pair.Fresh = pair.Fresh.Children.Right;
+                                   pair.Fresh.Value++;
+                                   return ++{|FP0104:pair.Current.Value|};
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0104_TupleSlotsKeepTheDocumentedAssignmentJoin_Reports()
+    {
+        return VerifyAsync("""
+                           [Fprog.FunctionalCore]
+                           public static class Ops
+                           {
+                               public static void Change(Box input, bool choose)
+                               {
+                                   var pair = (Reset: input, Keep: input);
+                                   var saved = pair.Reset;
+                                   saved.X++;
+                                   (pair.Reset, pair.Keep) = (new Box(), choose ? input : new Box());
+                                   var (_, kept) = pair;
+                                   {|FP0104:kept.X|}++;
+
+                                   var other = ((input, input), (input, input));
+                                   ref var both = ref other;
+                                   ref var selected = ref (choose ? ref both.Item1 : ref both.Item2);
+                                   selected.Item1 = new Box();
+                                   other.Item1.Item1.X++;
+                                   other.Item2.Item1.X++;
+                                   {|FP0104:other.Item1.Item2.X|}++;
+                                   {|FP0104:other.Item2.Item2.X|}++;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0104", source + Types, testContext.CancellationToken);

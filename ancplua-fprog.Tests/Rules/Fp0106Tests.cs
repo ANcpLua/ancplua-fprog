@@ -88,6 +88,59 @@ public sealed class Fp0106Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow("names.AsSpan().{|FP0106:BinarySearch|}(key)")]
+    [DataRow("names.AsSpan().{|FP0106:BinarySearch|}((IComparable<string>)key)")]
+    [DataRow("MemoryExtensions.{|FP0106:BinarySearch|}<string>(comparable: key, span: readOnly)")]
+    [DataRow("readOnly.{|FP0106:BinarySearch|}<string>((IComparable<string>)(string)boxedKey)")]
+    [DataRow("readOnly.{|FP0106:BinarySearch|}(key, Comparer<string>.Default)")]
+    [DataRow("names.AsSpan().{|FP0106:BinarySearch|}(key, (IComparer<string>)null)")]
+    public Task FP0106_SpanBinarySearchUsesStringOrDefaultComparer_Reports(string search)
+    {
+        return VerifyAsync($$"""
+                             using System;
+                             using System.Collections.Generic;
+
+                             [Fprog.FunctionalCore]
+                             public static class Directory
+                             {
+                                 public static int Find(string[] names, ReadOnlySpan<string> readOnly, string key, object boxedKey)
+                                     => {{search}};
+                             }
+                             """);
+    }
+
+    [TestMethod]
+    [DataRow("names.AsSpan().BinarySearch(new OrdinalNeedle(key))")]
+    [DataRow("readOnly.BinarySearch(comparable)")]
+    [DataRow("MemoryExtensions.BinarySearch<string>(comparable: broader, span: names.AsSpan())")]
+    [DataRow("readOnly.BinarySearch(needle)")]
+    [DataRow("readOnly.BinarySearch<string>(null)")]
+    [DataRow("names.AsSpan().BinarySearch(default(string))")]
+    [DataRow("readOnly.BinarySearch(key, StringComparer.Ordinal)")]
+    [DataRow("readOnly.BinarySearch(key, comparer)")]
+    public Task FP0106_SpanBinarySearchUsesSuppliedStrategy_NoReport(string search)
+    {
+        return VerifyAsync($$"""
+                             using System;
+                             using System.Collections.Generic;
+
+                             [Fprog.FunctionalCore]
+                             public static class Directory
+                             {
+                                 public readonly struct OrdinalNeedle(string key) : IComparable<string>
+                                 {
+                                     public int CompareTo(string other) => string.CompareOrdinal(key, other);
+                                 }
+
+                                 public static int Find<T>(string[] names, ReadOnlySpan<string> readOnly, string key,
+                                     IComparable<string> comparable, IComparable<object> broader, T needle,
+                                     IComparer<object> comparer) where T : IComparable<string>
+                                     => {{search}};
+                             }
+                             """);
+    }
+
+    [TestMethod]
     [DataRow("{|FP0106:entry.City|}, entry.Rank, {|FP0106:entry.Name|} descending")]
     [DataRow("{|FP0106:entry.City|} descending, {|FP0106:entry.Name|} ascending")]
     public Task FP0106_QueryOrdersByStringKeys_Reports(string orderings)

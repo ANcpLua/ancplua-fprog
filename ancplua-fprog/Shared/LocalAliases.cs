@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -16,16 +17,58 @@ namespace ancplua_fprog.Shared;
 /// </summary>
 internal sealed class LocalAliases
 {
-    private readonly Lazy<Dictionary<ILocalSymbol, List<Source>>> _sources;
+    private readonly Lazy<Dictionary<ILocalSymbol, LocalAssignments>> _sources;
 
     public LocalAliases(ImmutableArray<IOperation> blocks, CancellationToken cancellationToken)
     {
-        _sources = new Lazy<Dictionary<ILocalSymbol, List<Source>>>(() => Build(blocks, cancellationToken));
+        _sources = new Lazy<Dictionary<ILocalSymbol, LocalAssignments>>(() => Build(blocks, cancellationToken));
+    }
+
+    private sealed class LocalAssignments
+    {
+        public List<Source> Whole { get; } = [];
+        public List<Assignment>? Slots { get; set; }
     }
 
     public IReadOnlyList<Source> Assignments(ILocalSymbol local)
     {
-        return _sources.Value.TryGetValue(local, out var assignments) ? assignments : Array.Empty<Source>();
+        return _sources.Value.TryGetValue(local, out var assignments) ? assignments.Whole : Array.Empty<Source>();
+    }
+
+    public IEnumerable<Assignment> AssignmentsIncludingSlots(ILocalSymbol local)
+    {
+        if (!_sources.Value.TryGetValue(local, out var assignments))
+            yield break;
+
+        foreach (var source in assignments.Whole)
+            yield return new Assignment(source, []);
+        if (assignments.Slots is { } slots)
+            foreach (var assignment in slots)
+                yield return assignment;
+    }
+
+    /// <summary>An assignment to the entire local or to the tuple slot selected by a sequence of ordinals.</summary>
+    public readonly struct Assignment(Source source, ImmutableArray<int> slots)
+    {
+        public Source Source { get; } = source;
+        public ImmutableArray<int> Slots { get; } = slots;
+
+        public bool TrySelect(ImmutableArray<Read> reads, out ImmutableArray<Read> remaining)
+        {
+            remaining = reads;
+            if (Slots.IsDefaultOrEmpty)
+                return true;
+
+            if (Slots.Length > reads.Length)
+                return false;
+
+            for (var i = 0; i < Slots.Length; i++)
+                if (Slots[i] != reads[i].TupleIndex)
+                    return false;
+
+            remaining = reads.RemoveRange(0, Slots.Length);
+            return true;
+        }
     }
 
     /// <summary>The expression assigned, followed by any unwritten reads that select the assigned value.</summary>
@@ -41,6 +84,12 @@ internal sealed class LocalAliases
         public ImmutableArray<Read> Reads { get; } = [];
 
         public ITypeSymbol? Type => Reads.IsDefaultOrEmpty ? Value?.Type : Reads[Reads.Length - 1].Type;
+
+        // A source binding that boxes a value gives the target an independent copy of its storage.
+        public Source StoredAs(ITypeSymbol? targetType)
+        {
+            return Type is { IsValueType: true } && Mutators.MayBeReference(targetType) ? default : this;
+        }
 
         public Source Select(ITypeSymbol? type, int tupleIndex = -1)
         {
@@ -58,12 +107,14 @@ internal sealed class LocalAliases
     /// <summary>Returns the ordinal of a tuple field, including a field addressed by its declared name.</summary>
     public static int GetTupleIndex(IFieldSymbol field)
     {
-        if (!field.ContainingType.IsTupleType)
+        if (field.CorrespondingTupleField is not { } ordinal)
             return -1;
 
+        // Roslyn can expose differently constructed field symbols for an inferred tuple's named and
+        // ordinal access. Each default field name identifies one slot in this same tuple type.
         var fields = field.ContainingType.TupleElements;
         for (var index = 0; index < fields.Length; index++)
-            if (SymbolEqualityComparer.Default.Equals(fields[index].CorrespondingTupleField, field.CorrespondingTupleField))
+            if (fields[index].CorrespondingTupleField?.Name == ordinal.Name)
                 return index;
 
         return -1;
@@ -75,7 +126,7 @@ internal sealed class LocalAliases
         return operation is IDeclarationExpressionOperation declaration ? declaration.Expression : operation;
     }
 
-    private static Dictionary<ILocalSymbol, List<Source>> Build(
+    private static Dictionary<ILocalSymbol, LocalAssignments> Build(
         ImmutableArray<IOperation> blocks, CancellationToken cancellationToken)
     {
         var builder = new Builder();
@@ -91,8 +142,8 @@ internal sealed class LocalAliases
 
     private sealed class Builder
     {
-        private readonly Dictionary<ILocalSymbol, List<Source>> _assignments = new(SymbolEqualityComparer.Default);
-        private readonly List<(ILocalSymbol Alias, Source Source)> _refWrites = [];
+        private readonly Dictionary<ILocalSymbol, LocalAssignments> _assignments = new(SymbolEqualityComparer.Default);
+        private readonly List<(ILocalSymbol Alias, Assignment Write)> _refWrites = [];
 
         public void Add(IOperation operation, CancellationToken cancellationToken)
         {
@@ -144,45 +195,59 @@ internal sealed class LocalAliases
             }
         }
 
-        public Dictionary<ILocalSymbol, List<Source>> Finish(CancellationToken cancellationToken)
+        public Dictionary<ILocalSymbol, LocalAssignments> Finish(CancellationToken cancellationToken)
         {
             // Writing through a ref alias to a variable also changes what that variable stands for.
-            foreach (var (alias, source) in _refWrites)
+            foreach (var (alias, write) in _refWrites)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var visited = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
-                WriteThrough(alias, source, visited);
+                var visited = new Dictionary<ILocalSymbol, List<ImmutableArray<int>>>(SymbolEqualityComparer.Default);
+                WriteThrough(alias, write, visited);
             }
 
             return _assignments;
         }
 
-        private void WriteThrough(ILocalSymbol alias, Source source, HashSet<ILocalSymbol> visited)
+        private void WriteThrough(ILocalSymbol alias, Assignment write,
+            Dictionary<ILocalSymbol, List<ImmutableArray<int>>> visited)
         {
-            if (!visited.Add(alias) || !_assignments.TryGetValue(alias, out var assignments))
+            if (!_assignments.TryGetValue(alias, out var bindings))
                 return;
 
-            foreach (var assignment in assignments)
-                if (assignment.Reads.IsDefaultOrEmpty)
-                    WriteStorage(assignment.Value, source, visited);
+            if (!visited.TryGetValue(alias, out var paths))
+                visited.Add(alias, paths = []);
+            else if (paths.Any(path => path.SequenceEqual(write.Slots)))
+                return;
+            paths.Add(write.Slots);
+
+            foreach (var sourceBinding in bindings.Whole)
+                if (sourceBinding.Reads.IsDefaultOrEmpty)
+                    WriteStorage(sourceBinding.Value, write, visited);
         }
 
-        private void WriteStorage(IOperation? target, Source source, HashSet<ILocalSymbol> visited)
+        private void WriteStorage(IOperation? target, Assignment write,
+            Dictionary<ILocalSymbol, List<ImmutableArray<int>>>? visited)
         {
             switch (target)
             {
                 case ILocalReferenceOperation { Local.IsRef: true } reference:
-                    WriteThrough(reference.Local, source, visited);
+                    if (visited is null)
+                        _refWrites.Add((reference.Local, write));
+                    else
+                        WriteThrough(reference.Local, write, visited);
                     break;
                 case ILocalReferenceOperation reference:
-                    AddAssignment(reference.Local, source);
+                    AddAssignment(reference.Local, write);
+                    break;
+                case IFieldReferenceOperation field when GetTupleIndex(field.Field) is >= 0 and var index:
+                    WriteStorage(field.Instance, new Assignment(write.Source, write.Slots.Insert(0, index)), visited);
                     break;
                 case IConditionalOperation { IsRef: true } conditional:
-                    WriteStorage(conditional.WhenTrue, source, visited);
-                    WriteStorage(conditional.WhenFalse, source, visited);
+                    WriteStorage(conditional.WhenTrue, write, visited);
+                    WriteStorage(conditional.WhenFalse, write, visited);
                     break;
                 case IParenthesizedOperation parenthesized:
-                    WriteStorage(parenthesized.Operand, source, visited);
+                    WriteStorage(parenthesized.Operand, write, visited);
                     break;
             }
         }
@@ -297,35 +362,27 @@ internal sealed class LocalAliases
 
         private void Write(IOperation target, Source source)
         {
-            switch (UnwrapDeclaration(target))
-            {
-                case ILocalReferenceOperation { Local.IsRef: true } reference:
-                    _refWrites.Add((reference.Local, source));
-                    break;
-                case ILocalReferenceOperation reference:
-                    AddAssignment(reference.Local, source);
-                    break;
-                case IConditionalOperation { IsRef: true } conditional:
-                    if (conditional.WhenTrue is { } whenTrue)
-                        Write(whenTrue, source);
-                    if (conditional.WhenFalse is { } whenFalse)
-                        Write(whenFalse, source);
-                    break;
-            }
+            target = UnwrapDeclaration(target);
+            WriteStorage(target, new Assignment(source.StoredAs(target.Type), []), null);
         }
 
         private void AddAssignment(ILocalSymbol local, Source source)
         {
+            AddAssignment(local, new Assignment(source.StoredAs(local.Type), []));
+        }
+
+        private void AddAssignment(ILocalSymbol local, Assignment assignment)
+        {
             if (!_assignments.TryGetValue(local, out var assignments))
             {
-                assignments = [];
+                assignments = new LocalAssignments();
                 _assignments.Add(local, assignments);
             }
 
-            // A binding that boxes a value gets an independent copy of its storage.
-            assignments.Add(source.Type is { IsValueType: true } && Mutators.MayBeReference(local.Type)
-                ? default
-                : source);
+            if (assignment.Slots.IsEmpty)
+                assignments.Whole.Add(assignment.Source);
+            else
+                (assignments.Slots ??= []).Add(assignment);
         }
     }
 }

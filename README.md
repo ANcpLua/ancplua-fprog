@@ -117,7 +117,7 @@ All rules have category `Functional` and severity `Warning`.
 | FP0103 | a `ref` or `out` parameter | return a tuple or a record; `in` and `ref readonly` are allowed |
 | FP0104 | a write into memory the caller owns | return a changed copy: `with`, an immutable collection |
 | FP0105 | a change of state after construction | return a new instance |
-| FP0106 | formatting, parsing, comparing or sorting by the current culture, including LINQ to Objects `orderby` on a string key and sorting strings with `Comparer<string>.Default` | pass an explicit culture for formatting and parsing, `StringComparison.Ordinal` for comparison, or `StringComparer.Ordinal` to the ordering method for sorting |
+| FP0106 | formatting, parsing, comparing, sorting or searching by the current culture, including LINQ to Objects `orderby` on a string key, sorting with `Comparer<string>.Default` and searching a string span with a string as the comparable | pass an explicit culture for formatting and parsing, `StringComparison.Ordinal` for comparison, or `StringComparer.Ordinal` for sorting and binary search |
 | FP0107 | a pointer or `unsafe` code | `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>` |
 | FP0201 | a field without `readonly` or `const` | `readonly`, and a new instance for a new value |
 | FP0202 | a property with a `set` accessor | `init` or get-only, and a `with` copy |

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Immutable;
 using System.Linq;
 using ancplua_fprog.Shared;
@@ -126,9 +127,17 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
             return false;
 
         foreach (var argument in invocation.Arguments)
-            if (argument.Parameter is { } parameter && IsComparerParameter(parameter)
-                && !UsesDefaultStringComparer(argument.Value, compilation))
+        {
+            if (argument.Parameter is not { } parameter)
+                continue;
+
+            if (IsOrderingParameter(parameter, IsComparer) && !UsesDefaultStringComparer(argument.Value, compilation))
                 return false;
+
+            if (IsOrderingParameter(parameter, static type => MemberSyntax.IsType(type, "System", "IComparable"))
+                && !UsesStringCompareTo(argument.Value))
+                return false;
+        }
 
         return true;
     }
@@ -166,13 +175,13 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
             || collection.Parameter?.Type is INamedTypeSymbol sequence && HasStringTypeArgument(sequence.TypeArguments));
     }
 
-    private static bool IsComparerParameter(IParameterSymbol parameter)
+    private static bool IsOrderingParameter(IParameterSymbol parameter, Func<ITypeSymbol, bool> matches)
     {
-        // Span.Sort infers the concrete TComparer. Its declared constraint identifies the comparer argument.
+        // Span sorting and searching can infer a concrete strategy type. Its declared constraint identifies the role.
         var declaredType = parameter.OriginalDefinition.Type;
         return declaredType is ITypeParameterSymbol typeParameter
-            ? typeParameter.ConstraintTypes.Any(IsComparer)
-            : IsComparer(declaredType);
+            ? typeParameter.ConstraintTypes.Any(matches)
+            : matches(declaredType);
     }
 
     private static bool IsComparer(ITypeSymbol type)
@@ -185,6 +194,19 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
     private static bool HasStringTypeArgument(ImmutableArray<ITypeSymbol> arguments)
     {
         return arguments.Length == 1 && arguments[0].SpecialType == SpecialType.System_String;
+    }
+
+    private static bool UsesStringCompareTo(IOperation comparable)
+    {
+        while (comparable.Type?.SpecialType != SpecialType.System_String)
+        {
+            if (comparable is not IConversionOperation { Conversion: { IsIdentity: true } or { IsReference: true } } conversion)
+                return false;
+
+            comparable = conversion.Operand;
+        }
+
+        return comparable.ConstantValue is not { HasValue: true, Value: null };
     }
 
     private static bool UsesDefaultStringComparer(IOperation value, Compilation compilation)

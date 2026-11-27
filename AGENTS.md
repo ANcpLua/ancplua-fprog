@@ -139,9 +139,9 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0101 | A `void` result in any of these forms. (a) A method, user-defined operator or local function returns `void`. (b) A delegate declaration returns `void`. (c) A written delegate type whose `Invoke` returns `void` (`Action`, `Action<…>`, `EventHandler`, …) in the type of a parameter, return, local, field, property, event or type argument. (d) A lambda, anonymous method or method group that becomes such a delegate without its target type written in core, as in an argument to a member outside core or a `var` local | (a) the name or the operator token, (b) the name, (c) the type's name token, (d) the `=>` token, the `delegate` keyword or the method group's name |
 | FP0102 | Reads a hidden input or accesses mutable static state (list below) | the name token of the member |
 | FP0103 | A `ref` or `out` parameter (`in` and `ref readonly` are allowed) | the parameter name |
-| FP0104 | Writes into memory the caller owns: the target or receiver is *reached from a parameter* (below). Forms: assignment, compound assignment (including event subscription), `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, a *mutating call* (below) | the target or argument expression; for a mutating call the method name |
-| FP0105 | Changes state after construction. The forms of FP0104 apply to a target or receiver *reached from a field*. Event subscriptions also count on `this` and on static events | as FP0104. For an event, the event name |
-| FP0106 | Depends on the current culture when formatting, parsing, comparing or sorting, including LINQ to Objects `orderby` with a string key (list below) | see list |
+| FP0104 | Writes into memory the caller owns when the target or receiver is *reached from a parameter* (below), including through a named or positional element of a tuple local. Forms include assignment, compound assignment (including event subscription), `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, and a *mutating call* (below) | the target or argument expression, or the method name for a mutating call |
+| FP0105 | Changes state after construction. The forms of FP0104 apply to a target or receiver *reached from a field*, including through a named or positional element of a tuple local. Event subscriptions also count on `this` and on static events | as FP0104. For an event, the event name |
+| FP0106 | Depends on the current culture when formatting, parsing, comparing, sorting or searching, including LINQ to Objects `orderby` with a string key and span binary search with a string as the comparable (list below) | see list |
 | FP0107 | Uses a pointer or unsafe code: a pointer or function-pointer type, the address-of operator, a `fixed` statement, the `unsafe` modifier, an `unsafe` block, an `unsafe(…)` expression | the type syntax, the `&` token, the `fixed` keyword, the `unsafe` keyword |
 | FP0201 | A field without `readonly` or `const`, or a primary-constructor parameter that a member body writes directly or through a `ref` local | the variable declarator name or parameter name |
 | FP0202 | A property with a `set` accessor (`init` is allowed) | the `set` keyword |
@@ -191,7 +191,8 @@ Culture-free types: `char`, `bool`, `Guid`, `Rune`, `Version`, `Uri`, every enum
 | --- | --- |
 | A call to a method of a Pure type, outside the culture-free types, while the type has an overload with the same name and the same parameters plus one `IFormatProvider` or `CultureInfo` (`value.ToString("C")`, `value.ToString()`, `int.TryParse(text, out n)`, `string.Format(format, value)`, `text.ToUpper()`, `Convert.ToDouble(text)`) | the method name |
 | `string.Compare`, `CompareTo`, `StartsWith`, `EndsWith`, `IndexOf` and `LastIndexOf` with `string` arguments, bound to an overload that takes neither `StringComparison` nor `CultureInfo` | the method name |
-| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Order`, `OrderDescending`, `Min`, `Max`, `MinBy`, `MaxBy`, and `Sort`/`BinarySearch` of arrays, lists and spans, with a `string` key or element and the default comparer. This includes omitting the comparer, passing a null constant or passing `System.Collections.Generic.Comparer<string>.Default`. In a LINQ to Objects query, each `orderby` key bound to a standard ordering method counts | the method name in a call or the key expression in a query |
+| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Order`, `OrderDescending`, `Min`, `Max`, `MinBy`, `MaxBy`, and `Sort`/`BinarySearch` of arrays, lists and spans, with a `string` key or element, when the overload uses the default comparer or the comparer argument is a null constant or `System.Collections.Generic.Comparer<string>.Default`. In a LINQ to Objects query, each `orderby` key bound to a standard ordering method counts | the method name in a call or the key expression in a query |
+| `Span<string>.BinarySearch(comparable)` or `ReadOnlySpan<string>.BinarySearch(comparable)` when the comparable is visibly a string, including through a cast to `IComparable<string>`. The search calls the string's culture-sensitive `CompareTo`. A supplied comparable defines its own order. A constant null comparable throws before the search compares any elements | the method name |
 | An interpolated string that becomes a `string` and has a hole whose value is `IFormattable` and outside the culture-free types. `string.Create(CultureInfo.InvariantCulture, $"…")` and `FormattableString.Invariant($"…")` are the invariant forms | the expression in the hole |
 | String concatenation with such a value as an operand | that operand |
 
@@ -242,9 +243,13 @@ For an integer conversion that can overflow, check the range and cast the value 
   something reached by `AsSpan`, `AsMemory`, slicing or an implicit conversion; something reached after a
   conversion that keeps the reference; or a local that stands for something reached. A local stands for it when
   each of its assignments is such an expression: declared locals, `ref` locals, `foreach` variables, pattern
-  variables at any depth, deconstruction variables. Each element of a tuple local is followed on its own, also
-  around a cycle of assignments: in `pair = (new Cell(), copy.Item1)` the second element continues with the first
-  element of `copy`.
+  variables at any depth, deconstruction variables. Each element of a tuple local is followed on its own, by
+  its declared name or its `ItemN` position. Assigning the whole tuple supplies every element. Assigning
+  `pair.Items` or its positional alias `pair.Item1` supplies only the first element when `Items` is first.
+  A write through a `ref` local bound to that element also supplies its value. For a nested element,
+  assignments to its enclosing tuple count as well.
+  This also applies around a cycle of assignments. In `pair = (new Cell(), copy.Item1)` the second element
+  continues with the first element of `copy`.
 - A conversion **keeps the reference** when it is an identity or reference conversion, wraps a struct in
   `Nullable<T>` or unwraps it, or converts a tuple whose selected element is converted that way: in
   `(IList<int> Values, int Kind) chosen = useFixed ? (fixedScores, 0) : (openScores, 1);`, `chosen.Values` is
@@ -371,9 +376,11 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
 - FP0104 and FP0105 do not follow conditions. A local that can hold reached memory on one branch counts as
   reached wherever it is written: `var result = add ? new List<int>(input) : input; if (add) result.Add(42);`
   is reported, although the write only meets the copy. Write to the copy before the two values meet.
-- FP0104 and FP0105 do not follow the order of statements either. A local, or one element of a tuple local, that
-  is assigned a fresh value anywhere no longer stands for reached memory, also where it is read before that
-  assignment: `var a = input; var b = a; a = new Cell(); b.X++;` passes. Give the fresh value a local of its own.
+- FP0104 and FP0105 combine assignments across the whole block. Giving a local a fresh value anywhere prevents
+  it from standing for reached memory, even for an earlier read. In `var a = input; var b = a; a = new Cell(); b.X++;`
+  the write passes. The same boundary applies per tuple element. After `var p = (Items: input, Other: input);`,
+  assigning a new list to `p.Item1` anywhere in the block leaves writes through `p.Items` silent, while writes
+  through `p.Other` still report. Give each fresh value a local of its own when the distinction matters.
 - FP0302 guards are syntactic. FP0303 (b) relies on nullable annotations.
 - A record's copy constructor is protected by the language (CS8878), so a record union can be copied by a subtype
   that FP0403 reports in its own project.

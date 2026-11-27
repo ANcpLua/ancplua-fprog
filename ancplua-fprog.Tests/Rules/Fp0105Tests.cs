@@ -913,6 +913,53 @@ public sealed class Fp0105Tests(TestContext testContext)
                            """);
     }
 
+    [TestMethod]
+    public Task FP0105_NamedTupleSlotsTrackFieldStorageThroughRefAssignments_Reports()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Scores
+                           {
+                               private readonly List<int> _values = [];
+
+                               public int Reset()
+                               {
+                                   var pair = (Items: _values, Kept: _values);
+                                   ref var slot = ref pair.Item1;
+                                   slot = new List<int>();
+                                   pair.Kept.{|FP0105:Add|}(42);
+                                   return pair.Item2.Count;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0105_FreshListAssignedThroughRefToTupleSlot_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+
+                           [Fprog.FunctionalCore]
+                           public sealed class Scores
+                           {
+                               private readonly List<int> _values = [];
+
+                               public int Reset()
+                               {
+                                   var pair = (Items: _values, Count: 0);
+                                   ref var slot = ref pair.Item1;
+                                   slot = new List<int>();
+                                   pair.Items.Clear();
+                                   slot.Clear();
+                                   return pair.Count;
+                               }
+                           }
+                           """);
+    }
+
     private Task VerifyAsync(string source)
     {
         return FpAnalyzerTestHost.VerifyRuleAsync("FP0105", source + Types, testContext.CancellationToken);

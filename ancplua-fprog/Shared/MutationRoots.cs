@@ -157,6 +157,7 @@ internal sealed class MutationRoots(
         if (!local.IsRef && !shared && !SharesStorage(local.Type) && !SharesProjectedValue(reads))
             return default;
 
+        reads = Pending(local.Type, reads);
         if (!IsAcyclic(local))
             return ReadCyclicLocal(local, start, shared, reads, storage);
 
@@ -196,12 +197,16 @@ internal sealed class MutationRoots(
         ILocalSymbol local, int start, bool shared, ImmutableArray<LocalAliases.Read> reads, bool storage)
     {
         var result = default(Match);
-        foreach (var assignment in aliases.Assignments(local))
+        foreach (var assignment in aliases.AssignmentsIncludingSlots(local))
         {
-            var part = storage && assignment.Reads.IsDefaultOrEmpty
-                ? Storage(assignment.Value, start, false)
-                : Trace(assignment.Value, start, shared,
-                    assignment.Reads.IsDefaultOrEmpty ? reads : Pending(assignment.Reads.AddRange(reads)), false);
+            if (!assignment.TrySelect(reads, out var remaining))
+                continue;
+
+            var source = assignment.Source;
+            var part = storage && source.Reads.IsDefaultOrEmpty
+                ? Storage(source.Value, start, false)
+                : Trace(source.Value, start, shared,
+                    source.Reads.IsDefaultOrEmpty ? remaining : source.Reads.AddRange(remaining), false);
             if (!part.Known)
                 return default;
 
@@ -211,16 +216,21 @@ internal sealed class MutationRoots(
         return result;
     }
 
-    // Only a leading tuple read can be consumed, by a tuple expression that supplies that element. The first
-    // other read stops that for good, and every read from there on counts only through whether one of them
-    // shares storage. One read stands for all of them, so a chain of projections does not grow the path.
-    private static ImmutableArray<LocalAliases.Read> Pending(ImmutableArray<LocalAliases.Read> reads)
+    // Around a cycle, a tuple field of an object in a slot can otherwise keep extending the path.
+    // Only ordinals belonging to the local's tuple shape select parts of its assigned values. Beyond
+    // that shape the read matters only through whether it crosses shared storage.
+    private static ImmutableArray<LocalAliases.Read> Pending(ITypeSymbol? type, ImmutableArray<LocalAliases.Read> reads)
     {
         var rest = 0;
-        while (rest < reads.Length && reads[rest].TupleIndex >= 0)
+        while (rest < reads.Length && reads[rest].TupleIndex is >= 0 and var index
+               && UnderlyingValue(type) is INamedTypeSymbol { IsTupleType: true } tuple
+               && index < tuple.TupleElements.Length)
+        {
+            type = tuple.TupleElements[index].Type;
             rest++;
+        }
 
-        if (reads.Length - rest < 2)
+        if (rest == reads.Length || (rest == reads.Length - 1 && reads[rest].TupleIndex < 0))
             return reads;
 
         var kept = reads[rest];
@@ -239,8 +249,8 @@ internal sealed class MutationRoots(
             return acyclic;
 
         known.Add(local, false);
-        foreach (var assignment in aliases.Assignments(local))
-            if (!IsAcyclic(assignment.Value))
+        foreach (var assignment in aliases.AssignmentsIncludingSlots(local))
+            if (!IsAcyclic(assignment.Source.Value))
                 return false;
 
         known[local] = true;

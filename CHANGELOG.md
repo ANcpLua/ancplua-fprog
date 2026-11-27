@@ -5,6 +5,11 @@ rule catalog in [AGENTS.md](AGENTS.md).
 
 ## 0.7.0 (unreleased)
 
+* FP0104 and FP0105 follow references in a tuple local through both its element names and its `ItemN` fields.
+  If `pair.Items` holds a caller's list or a field's list, `pair.Items.Add(item)` is reported. Replacing that
+  element with a fresh list leaves writes through it silent and preserves the checks on the other elements.
+* FP0106 accepts a supplied `IComparable<string>` in a binary search on a string span. Passing a string as the
+  comparable still gets FP0106 because its `CompareTo` uses the current culture.
 * FP0502 checks switches against the most derived class constraint of a type parameter. When the bounds are
   `Shape` and its closed subclass `Polygon`, only polygon cases need labels, in either constraint order.
   If the most derived class is open, sealed or has an incomplete case list, FP0601 applies its ordinary
