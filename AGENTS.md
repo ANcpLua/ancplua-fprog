@@ -140,7 +140,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0103 | A `ref` or `out` parameter (`in` and `ref readonly` are allowed) | the parameter name |
 | FP0104 | Writes into memory the caller owns: the target or receiver is *reached from a parameter* (below). Forms: assignment, compound assignment (including event subscription), `??=`, `++`, `--`, a deconstruction target, an argument bound to a `ref` or `out` parameter, a *mutating call* (below) | the target or argument expression; for a mutating call the method name |
 | FP0105 | Changes state after construction. The forms of FP0104 apply to a target or receiver *reached from a field*. Event subscriptions also count on `this` and on static events | as FP0104. For an event, the event name |
-| FP0106 | Depends on the current culture (list below) | see list |
+| FP0106 | Depends on the current culture when formatting, parsing, comparing or sorting, including LINQ to Objects `orderby` with a string key (list below) | see list |
 | FP0107 | Uses a pointer or unsafe code: a pointer or function-pointer type, the address-of operator, a `fixed` statement, the `unsafe` modifier, an `unsafe` block, an `unsafe(…)` expression | the type syntax, the `&` token, the `fixed` keyword, the `unsafe` keyword |
 | FP0201 | A field without `readonly` or `const`, or a primary-constructor parameter that a member body writes directly or through a `ref` local | the variable declarator name or parameter name |
 | FP0202 | A property with a `set` accessor (`init` is allowed) | the `set` keyword |
@@ -190,7 +190,7 @@ Culture-free types: `char`, `bool`, `Guid`, `Rune`, `Version`, `Uri`, every enum
 | --- | --- |
 | A call to a method of a Pure type, outside the culture-free types, while the type has an overload with the same name and the same parameters plus one `IFormatProvider` or `CultureInfo` (`value.ToString("C")`, `value.ToString()`, `int.TryParse(text, out n)`, `string.Format(format, value)`, `text.ToUpper()`, `Convert.ToDouble(text)`) | the method name |
 | `string.Compare`, `CompareTo`, `StartsWith`, `EndsWith`, `IndexOf` and `LastIndexOf` with `string` arguments, bound to an overload that takes neither `StringComparison` nor `CultureInfo` | the method name |
-| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Order`, `OrderDescending`, `Min`, `Max`, `MinBy`, `MaxBy`, and `Sort`/`BinarySearch` of arrays and lists, with a `string` key or element and without a comparer | the method name |
+| `OrderBy`, `OrderByDescending`, `ThenBy`, `ThenByDescending`, `Order`, `OrderDescending`, `Min`, `Max`, `MinBy`, `MaxBy`, and `Sort`/`BinarySearch` of arrays, lists and spans, with a `string` key or element and the default comparer. This includes omitting the comparer, passing a null constant or passing `System.Collections.Generic.Comparer<string>.Default`. In a LINQ to Objects query, each `orderby` key bound to a standard ordering method counts | the method name in a call or the key expression in a query |
 | An interpolated string that becomes a `string` and has a hole whose value is `IFormattable` and outside the culture-free types. `string.Create(CultureInfo.InvariantCulture, $"…")` and `FormattableString.Invariant($"…")` are the invariant forms | the expression in the hole |
 | String concatenation with such a value as an operand | that operand |
 

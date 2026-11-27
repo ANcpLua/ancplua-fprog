@@ -3,6 +3,13 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.6.0 (unreleased)
+
+* FP0106 reports each string key in a LINQ to Objects `orderby` that uses the default string comparer. Use `OrderBy` or
+  `ThenBy` and pass `StringComparer.Ordinal` for culture-independent ordering.
+* FP0106 also identifies `Comparer<string>.Default` when passed explicitly to a checked sorting or search method.
+  Sorting a span with `StringComparer.Ordinal` or a supplied comparer is accepted.
+
 ## 0.5.0
 
 * FP0801 and FP0802 report an extension method of a Shell or Async class that a clause of a query expression

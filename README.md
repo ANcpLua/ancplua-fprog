@@ -1,12 +1,12 @@
 # ANcpLua.Fprog.Analyzers
 
-Roslyn analyzers that hold C# 15 code to functional-programming rules. You mark the part of your code that has to
-be pure, immutable and total. The compiler then reports every place that is not, and each message says what to write
-instead. Unions are checked everywhere; the rest of your code stays as it is.
+Roslyn analyzers check C# 15 code against functional-programming rules. Mark the domain types that should be pure,
+immutable and total. Each diagnostic identifies a rule violation and suggests a change. Union checks also run
+outside the marked core, where FP0803 checks inheritance from core types.
 
-The package is made for code that coding agents write and people review: the rules are exact, the messages are
-instructions, and one line of configuration turns every finding into a build error. A green build then means the
-core is functional.
+For code that coding agents write and people review, one setting turns findings into build errors. A green build
+then means the enabled checks passed. The analyzers trust delegate targets and interface implementations at the
+call site. For example, an injected `Func<int>` can read the clock when the core invokes it.
 
 ## Install
 
@@ -97,8 +97,8 @@ Tell the agent what the core is. A block for the `AGENTS.md` of your repository:
 ```markdown
 ## Functional core
 
-- Types marked `[Fprog.FunctionalCore]` hold the domain logic. They are pure, immutable and total; the `FP` rules of
-  ANcpLua.Fprog.Analyzers check that in every build.
+- Keep the domain logic in types marked `[Fprog.FunctionalCore]` pure, immutable and total. Run the enabled
+  `FP` rules on every build. Review callbacks and interface implementations supplied to the core for hidden effects.
 - An `FP####` finding says what to write instead. Change the code that way and keep the rule switched on.
 - I/O, clocks, randomness, tasks and third-party calls live in the shell: code without the attribute. The shell
   does the work and passes plain values into the core.
@@ -117,7 +117,7 @@ All rules have category `Functional` and severity `Warning`.
 | FP0103 | a `ref` or `out` parameter | return a tuple or a record; `in` and `ref readonly` are allowed |
 | FP0104 | a write into memory the caller owns | return a changed copy: `with`, an immutable collection |
 | FP0105 | a change of state after construction | return a new instance |
-| FP0106 | formatting, parsing, comparing or sorting by the current culture | pass `CultureInfo.InvariantCulture` or `StringComparison.Ordinal` |
+| FP0106 | formatting, parsing, comparing or sorting by the current culture, including LINQ to Objects `orderby` on a string key and sorting strings with `Comparer<string>.Default` | pass an explicit culture for formatting and parsing, `StringComparison.Ordinal` for comparison, or `StringComparer.Ordinal` to the ordering method for sorting |
 | FP0107 | a pointer or `unsafe` code | `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>` |
 | FP0201 | a field without `readonly` or `const` | `readonly`, and a new instance for a new value |
 | FP0202 | a property with a `set` accessor | `init` or get-only, and a `with` copy |

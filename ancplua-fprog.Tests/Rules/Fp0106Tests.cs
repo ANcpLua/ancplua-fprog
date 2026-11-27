@@ -61,7 +61,14 @@ public sealed class Fp0106Tests(TestContext testContext)
     [DataRow("list.{|FP0106:Sort|}()")]
     [DataRow("list.{|FP0106:BinarySearch|}(\"a\")")]
     [DataRow("values.{|FP0106:OrderBy|}(s => s, comparer: null)")]
-    public Task FP0106_StringKeysOrElementsWithoutComparer_Reports(string statement)
+    [DataRow("values.{|FP0106:OrderBy|}(s => s, Comparer<string>.Default)")]
+    [DataRow("ordered.{|FP0106:ThenByDescending|}(s => s, comparer: (IComparer<string>)Comparer<string>.Default)")]
+    [DataRow("Array.{|FP0106:Sort|}(values, Comparer<string>.Default)")]
+    [DataRow("list.{|FP0106:BinarySearch|}(\"a\", Comparer<string>.Default)")]
+    [DataRow("values.AsSpan().{|FP0106:Sort|}()")]
+    [DataRow("values.AsSpan().{|FP0106:Sort|}(Comparer<string>.Default)")]
+    [DataRow("values.AsSpan().{|FP0106:Sort|}(new IComparer<string>[values.Length].AsSpan())")]
+    public Task FP0106_StringKeysOrElementsUseDefaultComparer_Reports(string statement)
     {
         return VerifyAsync($$"""
                              using System;
@@ -78,6 +85,69 @@ public sealed class Fp0106Tests(TestContext testContext)
                                  }
                              }
                              """);
+    }
+
+    [TestMethod]
+    [DataRow("{|FP0106:entry.City|}, entry.Rank, {|FP0106:entry.Name|} descending")]
+    [DataRow("{|FP0106:entry.City|} descending, {|FP0106:entry.Name|} ascending")]
+    public Task FP0106_QueryOrdersByStringKeys_Reports(string orderings)
+    {
+        return VerifyAsync($$"""
+                             using System.Collections.Generic;
+                             using System.Linq;
+
+                             [Fprog.FunctionalCore]
+                             public static class Directory
+                             {
+                                 public static IEnumerable<string> Sort((string City, string Name, int Rank)[] entries)
+                                     => from entry in entries orderby {{orderings}} select entry.Name;
+                             }
+                             """);
+    }
+
+    [TestMethod]
+    public Task FP0106_QueryOrdersByNumericKeyOrRunsOutsideCore_NoReport()
+    {
+        return VerifyAsync("""
+                           using System.Collections.Generic;
+                           using System.Linq;
+
+                           [Fprog.FunctionalCore]
+                           public static class Core
+                           {
+                               public static IEnumerable<string> ByLength(string[] names)
+                                   => from name in names orderby name.Length descending select name;
+                           }
+
+                           public static class Shell
+                           {
+                               public static IEnumerable<string> ByName(string[] names)
+                                   => from name in names orderby name select name;
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0106_QueryBindsToCustomOrdinalOrdering_NoReport()
+    {
+        return FpAnalyzerTestHost.VerifyRuleAsync("FP0106", """
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+
+            public sealed class OrdinalNames(string[] names)
+            {
+                public IEnumerable<string> OrderBy(Func<string, string> key)
+                    => names.OrderBy(key, StringComparer.Ordinal);
+            }
+
+            [Fprog.FunctionalCore]
+            public static class Directory
+            {
+                public static IEnumerable<string> Sort(OrdinalNames names)
+                    => from name in names orderby name select name;
+            }
+            """, "is_global = true\nfprog_pure_apis = OrdinalNames", testContext.CancellationToken);
     }
 
     [TestMethod]
@@ -142,13 +212,21 @@ public sealed class Fp0106Tests(TestContext testContext)
                            [Fprog.FunctionalCore]
                            public static class Sample
                            {
-                               public static int Test(string[] values, List<string> list)
+                               private static IComparer<string> Default => StringComparer.Ordinal;
+
+                               public static int Test(string[] values, List<string> list, IComparer<string> comparer)
                                {
                                    Array.Sort(values, StringComparer.Ordinal);
                                    Array.Sort(new[] { 1, 2 }, values);
                                    list.Sort(StringComparer.Ordinal);
                                    list.Sort(string.CompareOrdinal);
                                    values.OrderBy(s => s, StringComparer.Ordinal);
+                                   values.OrderBy(s => s, comparer);
+                                   values.OrderBy(s => s, Default);
+                                   values.AsSpan().Sort(StringComparer.Ordinal);
+                                   values.AsSpan().Sort(comparer);
+                                   values.AsSpan().Sort(new int[values.Length].AsSpan(), StringComparer.Ordinal);
+                                   new int[values.Length].AsSpan().Sort(values.AsSpan());
                                    values.MinBy(s => s.Length);
                                    values.OrderBy(s => s.Length);
                                    return Array.BinarySearch(values, "a", StringComparer.Ordinal);

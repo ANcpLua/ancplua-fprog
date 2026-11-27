@@ -15,8 +15,8 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
 {
     private static readonly DiagnosticDescriptor Rule = FpDescriptors.Create(
         "FP0106",
-        "Pass the culture or comparer explicitly",
-        "Name the culture or comparison explicitly: pass CultureInfo.InvariantCulture or the culture you were given, and StringComparison.Ordinal or StringComparer.Ordinal for text");
+        "Avoid dependence on the current culture",
+        "Format and parse with CultureInfo.InvariantCulture or a supplied culture. Compare text with StringComparison.Ordinal. To sort text, use StringComparer.Ordinal or a supplied comparer in an ordering call such as OrderBy(key, StringComparer.Ordinal).");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rule];
 
@@ -33,7 +33,8 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
     {
         var invocation = (IInvocationOperation)context.Operation;
         var method = invocation.TargetMethod;
-        if (invocation.Syntax is not InvocationExpressionSyntax syntax
+        var syntax = invocation.Syntax;
+        if (syntax is not (InvocationExpressionSyntax or OrderingSyntax)
             || !CoreScope.IsInCore(context.ContainingSymbol)
             || Purity.Classify(method.ContainingType, context.Options.AnalyzerConfigOptionsProvider,
                 syntax.SyntaxTree) != PurityClass.Pure
@@ -41,8 +42,15 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
             || method is { Name: "ToString", ContainingType.SpecialType: SpecialType.System_String })
             return;
 
+        if (syntax is OrderingSyntax ordering)
+        {
+            if (SortsStrings(invocation, context.Compilation))
+                context.ReportDiagnostic(Diagnostic.Create(Rule, ordering.Expression.GetLocation()));
+            return;
+        }
+
         if (!IsCultureSensitiveStringComparison(method)
-            && !SortsStrings(invocation)
+            && !SortsStrings(invocation, context.Compilation)
             && !HasProviderOverload(method))
             return;
 
@@ -101,7 +109,7 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
                    || MemberSyntax.IsType(parameter.Type, "System", "StringComparison"));
     }
 
-    private static bool SortsStrings(IInvocationOperation invocation)
+    private static bool SortsStrings(IInvocationOperation invocation, Compilation compilation)
     {
         var method = invocation.TargetMethod;
         var owner = method.ContainingType;
@@ -114,8 +122,15 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
             _ => false
         };
 
-        return sortsStrings && !invocation.Arguments.Any(static argument =>
-            argument.Parameter is { } parameter && IsComparer(parameter.Type) && !IsNullConstant(argument.Value));
+        if (!sortsStrings)
+            return false;
+
+        foreach (var argument in invocation.Arguments)
+            if (argument.Parameter is { } parameter && IsComparerParameter(parameter)
+                && !UsesDefaultStringComparer(argument.Value, compilation))
+                return false;
+
+        return true;
     }
 
     private static bool LinqUsesString(IMethodSymbol method)
@@ -151,6 +166,15 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
             || collection.Parameter?.Type is INamedTypeSymbol sequence && HasStringTypeArgument(sequence.TypeArguments));
     }
 
+    private static bool IsComparerParameter(IParameterSymbol parameter)
+    {
+        // Span.Sort infers the concrete TComparer. Its declared constraint identifies the comparer argument.
+        var declaredType = parameter.OriginalDefinition.Type;
+        return declaredType is ITypeParameterSymbol typeParameter
+            ? typeParameter.ConstraintTypes.Any(IsComparer)
+            : IsComparer(declaredType);
+    }
+
     private static bool IsComparer(ITypeSymbol type)
     {
         return MemberSyntax.IsType(type, "System.Collections.Generic", "IComparer")
@@ -163,10 +187,17 @@ public sealed class Fp0106CurrentCultureAnalyzer : DiagnosticAnalyzer
         return arguments.Length == 1 && arguments[0].SpecialType == SpecialType.System_String;
     }
 
-    private static bool IsNullConstant(IOperation operation)
+    private static bool UsesDefaultStringComparer(IOperation value, Compilation compilation)
     {
-        return operation.ConstantValue is { HasValue: true, Value: null }
-               || WrittenOperand(operation).ConstantValue is { HasValue: true, Value: null };
+        while (value is IConversionOperation { Conversion: { IsIdentity: true } or { IsReference: true } } conversion)
+            value = conversion.Operand;
+
+        return value.ConstantValue is { HasValue: true, Value: null }
+               || value is IPropertyReferenceOperation { Property: { IsStatic: true, Name: "Default" } property }
+               && HasStringTypeArgument(property.ContainingType.TypeArguments)
+               && !SymbolEqualityComparer.Default.Equals(property.ContainingAssembly, compilation.Assembly)
+               && SymbolEqualityComparer.Default.Equals(property.ContainingType.OriginalDefinition,
+                   compilation.GetTypeByMetadataName("System.Collections.Generic.Comparer`1"));
     }
 
     private static void AnalyzeInterpolation(SyntaxNodeAnalysisContext context)

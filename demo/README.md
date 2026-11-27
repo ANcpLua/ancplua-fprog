@@ -19,7 +19,7 @@ Generated from `python3 demo/count.py --json`.
 | Project | Errors | Warnings | Infos |
 | --- | --- | --- | --- |
 | HappyPath | 0 | 0 | 0 |
-| UnhappyPath | 0 | 134 | 0 |
+| UnhappyPath | 0 | 146 | 0 |
 | KnownGaps | 0 | 0 | 0 |
 
 | UnhappyPath file | Warnings | IDs |
@@ -30,6 +30,7 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0102_LocalTimeZone.cs` | 3 | FP0102 x3 |
 | `Fp0104_AliasOfParameter.cs` | 8 | FP0104 x4, FP0201 x3, FP0601 x1 |
 | `Fp0104_ConditionalReceiver.cs` | 4 | FP0104 x3, FP0201 x1 |
+| `Fp0104_ConvertedBranches.cs` | 1 | FP0104 x1 |
 | `Fp0104_ElementHandedOutByCall.cs` | 2 | FP0104 x2 |
 | `Fp0104_MutatingCallOnParameter.cs` | 3 | FP0104 x3 |
 | `Fp0104_OutArgument.cs` | 5 | FP0104 x3, FP0201 x1, FP0801 x1 |
@@ -39,7 +40,9 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0105_FieldBehindAlias.cs` | 3 | FP0105 x2, FP0202 x1 |
 | `Fp0105_StateHeldInAField.cs` | 3 | FP0105 x3 |
 | `Fp0106_FormattingByCulture.cs` | 2 | FP0106 x2 |
+| `Fp0106_QueryOrdersText.cs` | 2 | FP0106 x2 |
 | `Fp0106_SortingStringsByCulture.cs` | 1 | FP0106 x1 |
+| `Fp0106_SpanStringComparer.cs` | 1 | FP0106 x1 |
 | `Fp0107_PointersInCore.cs` | 9 | FP0107 x9 |
 | `Fp0201_PrimaryConstructorParameter.cs` | 2 | FP0201 x2 |
 | `Fp0203_BuilderInRecord.cs` | 5 | FP0203 x5 |
@@ -55,11 +58,14 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0303_NullableReturnType.cs` | 4 | FP0303 x4 |
 | `Fp0401_OpenClassInCore.cs` | 2 | CS8509 x1, FP0401 x1 |
 | `Fp0403_CaseLeftOpen.cs` | 1 | FP0403 x1 |
+| `Fp0404_ComputedUnionValue.cs` | 4 | FP0404 x4 |
 | `Fp0404_EmptyUnion.cs` | 3 | FP0404 x3 |
 | `Fp0501_CatchAllBehindCast.cs` | 1 | FP0501 x1 |
 | `Fp0501_CatchAllInTuple.cs` | 1 | FP0501 x1 |
+| `Fp0501_IncompleteClosedHierarchy.cs` | 1 | FP0501 x1 |
 | `Fp0501_NativeUnionCatchAll.cs` | 1 | FP0501 x1 |
 | `Fp0501_NegatedCase.cs` | 1 | FP0501 x1 |
+| `Fp0502_CastHidesCases.cs` | 1 | FP0502 x1 |
 | `Fp0502_SwitchStatementMissesCase.cs` | 1 | FP0502 x1 |
 | `Fp0503_IsChain.cs` | 2 | FP0503 x2 |
 | `Fp0601_CastThroughObject.cs` | 3 | FP0601 x3 |
@@ -68,8 +74,10 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0801_CoreCallsNonCoreCode.cs` | 2 | FP0801 x2 |
 | `Fp0801_ImplicitlyTypedShellObject.cs` | 4 | FP0801 x3, FP0802 x1 |
 | `Fp0801_InjectedClock.cs` | 3 | FP0801 x3 |
+| `Fp0801_QueryOverShellExtension.cs` | 1 | FP0801 x1 |
 | `Fp0801_ShellValueWithoutTypeName.cs` | 6 | FP0801 x6 |
 | `Fp0801_TrustedLibrary.cs` | 1 | FP0801 x1 |
+| `Fp0801_UnnamedShellExtension.cs` | 1 | FP0801 x1 |
 | `Fp0801_UsingStaticShellMember.cs` | 3 | FP0801 x3 |
 | `Fp0802_TasksInCore.cs` | 5 | FP0802 x5 |
 | `Fp0803_ShellTypeDerivesFromCore.cs` | 1 | FP0803 x1 |
