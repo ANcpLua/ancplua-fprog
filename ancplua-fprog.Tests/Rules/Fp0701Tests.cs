@@ -833,6 +833,96 @@ public sealed class Fp0701Tests(TestContext testContext)
     }
 
     [TestMethod]
+    [DataRow("count.Advance();")]
+    [DataRow("_ = count.Next;")]
+    [DataRow("count.Next = 3;")]
+    [DataRow("_ = count[1];")]
+    [DataRow("count[1] = 3;")]
+    public Task FP0701_RefExtensionDeclarationReceiver_Reports(string use)
+    {
+        return FpAnalyzerTestHost.VerifyRuleWithReferencedAssemblyAsync("FP0701", $$"""
+                [Fprog.FunctionalCore]
+                public static class Counter
+                {
+                    public static int Run(int count)
+                    {
+                        System.Func<int> read = () => {|FP0701:count|};
+                        {{use}}
+                        return read();
+                    }
+                }
+                """, """
+                public static class CounterExtensions
+                {
+                    extension(ref int count)
+                    {
+                        public int Advance() => ++count;
+                        public int Next { get => ++count; set => count = value; }
+                        public int this[int step] { get => count += step; set => count = step + value; }
+                    }
+                }
+                """, testContext.CancellationToken);
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("in ")]
+    [DataRow("ref readonly ")]
+    public Task FP0701_ExtensionDeclarationWithoutWritableReceiver_NoReport(string modifier)
+    {
+        return VerifyAsync($$"""
+                             public static class WindowExtensions
+                             {
+                                 extension({{modifier}}System.ArraySegment<int> window)
+                                 {
+                                     public int Size() => window.Count;
+                                     public int First { set => window[0] = value; }
+                                     public int this[bool last] { set => window[last ? window.Count - 1 : 0] = value; }
+                                 }
+                             }
+
+                             [Fprog.FunctionalCore]
+                             public static class Windows
+                             {
+                                 public static int Fill(System.ArraySegment<int> window)
+                                 {
+                                     System.Func<int> size = () => window.Count;
+                                     if (window.Size() > 0)
+                                     {
+                                         window.First = 1;
+                                         window[true] = 2;
+                                     }
+                                     return size();
+                                 }
+                             }
+                             """);
+    }
+
+    [TestMethod]
+    public Task FP0701_RefExtensionDeclarationGetterInNameof_NoReport()
+    {
+        return VerifyAsync("""
+                           public static class CounterExtensions
+                           {
+                               extension(ref int count)
+                               {
+                                   public int Next => ++count;
+                               }
+                           }
+
+                           [Fprog.FunctionalCore]
+                           public static class Counter
+                           {
+                               public static System.Func<int> Watch(int count)
+                               {
+                                   _ = nameof(count.Next.CompareTo);
+                                   return () => count;
+                               }
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public Task FP0701_NestedStructMemberTupleElementAndOutField_Reports()
     {
         return VerifyAsync("""

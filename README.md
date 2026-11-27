@@ -123,11 +123,11 @@ All rules have category `Functional` and severity `Warning`.
 | FP0202 | a property with a `set` accessor | `init` or get-only, and a `with` copy |
 | FP0203 | a mutable collection in a record or readonly struct | `ImmutableArray<T>`, `ImmutableList<T>`, `ImmutableDictionary<TKey, TValue>`, a frozen collection |
 | FP0301 | `throw`, a `Throw…` helper, a `[DoesNotReturn]` call | return the failure as a value |
-| FP0302 | a partial operation: `Parse`, `First`, `Single`, a dictionary indexer, an unguarded index or integer division, a downcast | `TryParse`, `FirstOrDefault`, `TryGetValue`, a list pattern, a guard |
+| FP0302 | partial operations such as `Parse`, `Convert.ToInt32(long)`, `First`, `Single`, a dictionary indexer, an unguarded index or integer division, or a downcast | `TryParse`, `FirstOrDefault`, `TryGetValue`, a list pattern or a guard. For a narrowing integer conversion, check the range before casting |
 | FP0303 | `null` or `default` as a result, `T?` in a return type, the `!` operator | an option or result value, or an empty case of a union |
 | FP0401 | a class or record that is neither `sealed`, `static` nor `closed` | add the modifier |
 | FP0601 | a runtime type test on `object`, `dynamic` or a type parameter; any `dynamic` | a constraint and its member, a function parameter, a union |
-| FP0701 | a closure that captures a variable assigned after its declaration | capture a local that is assigned once, or pass the value in |
+| FP0701 | a closure that captures a variable assigned after its declaration or passed by writable reference, including as an extension receiver | capture a local that is assigned once, or pass the value in |
 | FP0801 | a shell type: I/O, network, processes, threads, third-party libraries, your types outside the core; `lock` | take the result as a parameter, or return a value that describes the effect |
 | FP0802 | an asynchronous type or an `async` lambda | await in the shell and pass the plain result |
 

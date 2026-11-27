@@ -13,7 +13,8 @@ namespace ancplua_fprog.Rules;
 /// <summary>
 ///     FP0701: inside the functional core, a lambda, anonymous method or local function captures a local
 ///     or parameter that is written anywhere other than by its declaration: assignment, compound or
-///     coalescing assignment, <c>++</c>/<c>--</c>, deconstruction, a <c>ref</c> or <c>out</c> argument, binding
+///     coalescing assignment, <c>++</c>/<c>--</c>, deconstruction, a <c>ref</c> or <c>out</c> argument (including
+///     the <c>ref</c> receiver of an extension method, property or indexer), binding
 ///     a writable <c>ref</c> alias to it, or a write to a field, inline-array element or mutating property of a
 ///     value-type variable. Locals and ordinary parameters are written only inside their member; a primary
 ///     constructor parameter can be written by any member of its type. Reported once per variable and
@@ -108,6 +109,8 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
             var operation = pending.Pop();
             switch (operation)
             {
+                case INameOfOperation:
+                    continue;
                 case ISimpleAssignmentOperation { IsRef: true } refAssignment:
                     AddWrittenTarget(refAssignment.Target, written);
                     if (IsWritableReference(refAssignment.Target))
@@ -121,6 +124,12 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
                     break;
                 case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out } argument:
                     AddWrittenTarget(argument.Value, written);
+                    break;
+                case IInvocationOperation { TargetMethod.ContainingType.ExtensionParameter.RefKind: RefKind.Ref } invocation:
+                    AddWrittenTarget(invocation.Instance, written);
+                    break;
+                case IPropertyReferenceOperation { Property.ContainingType.ExtensionParameter.RefKind: RefKind.Ref } property:
+                    AddWrittenTarget(property.Instance, written);
                     break;
                 case IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref } refLocal:
                     AddWrittenTarget(refLocal.GetVariableInitializer()?.Value, written);
@@ -181,10 +190,12 @@ public sealed class Fp0701MutableCaptureAnalyzer : DiagnosticAnalyzer
     /// <summary>
     ///     A write through a <c>readonly</c> accessor (every accessor of a <c>readonly struct</c>) cannot change the
     ///     variable it is called on, for example the indexer setter of <c>ArraySegment&lt;T&gt;</c>.
+    ///     Extension properties pass the receiver according to its declaration when the accessor runs.
     /// </summary>
     private static bool MutatesInstance(IPropertySymbol property)
     {
-        return (property.ReturnsByRef ? property.GetMethod : property.SetMethod) is { IsReadOnly: false };
+        return !property.ContainingType.IsExtension
+               && (property.ReturnsByRef ? property.GetMethod : property.SetMethod) is { IsReadOnly: false };
     }
 
     /// <summary>The first reference inside <paramref name="closure" /> to each captured candidate variable.</summary>

@@ -1350,6 +1350,56 @@ public sealed class Fp0302Tests(TestContext testContext)
     }
 
     [TestMethod]
+    public Task FP0302_TotalScalarConvertOverloads_NoReport()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Numbers
+                           {
+                               public static int Same(int value) => Convert.ToInt32(value);
+                               public static DateTime SameDate(DateTime value) => Convert.ToDateTime(value);
+                               public static int FromByte(byte value) => Convert.ToInt32(value);
+                               public static Func<byte, int> FromByte() => Convert.ToInt32;
+                               public static long FromUnsigned(uint value) => Convert.ToInt64(value);
+                               public static int FromBit(bool value) => Convert.ToInt32(value);
+                               public static bool Nonzero(double value) => Convert.ToBoolean(value);
+                               public static char FromByteCode(byte value) => Convert.ToChar(value);
+                               public static char FromCodeUnit(ushort value) => Convert.ToChar(value);
+                               public static ushort CodeUnit(char value) => Convert.ToUInt16(value);
+                               public static decimal ExactInteger(ulong value) => Convert.ToDecimal(value);
+                               public static double Approximate(decimal value) => Convert.ToDouble(value);
+                               public static float Round(double value) => Convert.ToSingle(value);
+                           }
+                           """);
+    }
+
+    [TestMethod]
+    public Task FP0302_OverflowingAndUnsupportedScalarConvertOverloads_Reports()
+    {
+        return VerifyAsync("""
+                           using System;
+
+                           [Fprog.FunctionalCore]
+                           public static class Numbers
+                           {
+                               public static int Narrow(long value) => Convert.{|FP0302:ToInt32|}(value);
+                               public static Func<long, int> Narrow() => Convert.{|FP0302:ToInt32|};
+                               public static ulong Unsigned(long value) => Convert.{|FP0302:ToUInt64|}(value);
+                               public static char FromSigned(sbyte value) => Convert.{|FP0302:ToChar|}(value);
+                               public static short NarrowCode(char value) => Convert.{|FP0302:ToInt16|}(value);
+                               public static decimal FromReal(double value) => Convert.{|FP0302:ToDecimal|}(value);
+                               public static double FromCode(char value) => Convert.{|FP0302:ToDouble|}(value);
+                               public static decimal DecimalCode(char value) => Convert.{|FP0302:ToDecimal|}(value);
+                               public static bool NonzeroCode(char value) => Convert.{|FP0302:ToBoolean|}(value);
+                               public static DateTime Date(int value) => Convert.{|FP0302:ToDateTime|}(value);
+                               public static int FromBox(byte value) => Convert.{|FP0302:ToInt32|}((object)value);
+                           }
+                           """);
+    }
+
+    [TestMethod]
     public Task FP0302_ConvertStringProducingAndTryMethods_NoReport()
     {
         return VerifyAsync("""

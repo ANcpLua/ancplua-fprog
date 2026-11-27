@@ -9,6 +9,11 @@ rule catalog in [AGENTS.md](AGENTS.md).
   `ThenBy` and pass `StringComparer.Ordinal` for culture-independent ordering.
 * FP0106 also identifies `Comparer<string>.Default` when passed explicitly to a checked sorting or search method.
   Sorting a span with `StringComparer.Ordinal` or a supplied comparer is accepted.
+* FP0302 accepts one-argument scalar `System.Convert` overloads that succeed for every input of the declared
+  type, in both calls and method groups. `ToInt32(byte)` is accepted. `ToInt32(long)` is reported because it
+  can overflow.
+* FP0701 counts a captured variable passed as the writable `ref` receiver of an extension method, property or
+  indexer. A setter that reassigns a by-value struct receiver changes its local copy.
 
 ## 0.5.0
 

@@ -19,7 +19,7 @@ Generated from `python3 demo/count.py --json`.
 | Project | Errors | Warnings | Infos |
 | --- | --- | --- | --- |
 | HappyPath | 0 | 0 | 0 |
-| UnhappyPath | 0 | 146 | 0 |
+| UnhappyPath | 0 | 149 | 0 |
 | KnownGaps | 0 | 0 | 0 |
 
 | UnhappyPath file | Warnings | IDs |
@@ -55,6 +55,7 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0302_EmptySequence.cs` | 2 | FP0302 x2 |
 | `Fp0302_MethodGroup.cs` | 3 | FP0302 x3 |
 | `Fp0302_ParseExactAndConvert.cs` | 2 | FP0302 x2 |
+| `Fp0302_ScalarConvertOverloads.cs` | 2 | FP0302 x2 |
 | `Fp0303_NullableReturnType.cs` | 4 | FP0303 x4 |
 | `Fp0401_OpenClassInCore.cs` | 2 | CS8509 x1, FP0401 x1 |
 | `Fp0403_CaseLeftOpen.cs` | 1 | FP0403 x1 |
@@ -70,6 +71,7 @@ Generated from `python3 demo/count.py --json`.
 | `Fp0503_IsChain.cs` | 2 | FP0503 x2 |
 | `Fp0601_CastThroughObject.cs` | 3 | FP0601 x3 |
 | `Fp0601_Dynamic.cs` | 1 | FP0601 x1 |
+| `Fp0701_ExtensionReceiver.cs` | 1 | FP0701 x1 |
 | `Fp0801_ConcurrencyPrimitives.cs` | 5 | FP0801 x5 |
 | `Fp0801_CoreCallsNonCoreCode.cs` | 2 | FP0801 x2 |
 | `Fp0801_ImplicitlyTypedShellObject.cs` | 4 | FP0801 x3, FP0802 x1 |

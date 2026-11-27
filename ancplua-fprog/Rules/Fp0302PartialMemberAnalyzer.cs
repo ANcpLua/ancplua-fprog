@@ -106,7 +106,8 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
             {
                 "ToString" or "ToBase64String" or "ToBase64CharArray" or "ToHexString" or "ToHexStringLower" => false,
                 "ChangeType" => true,
-                _ => method.Name.StartsWith("To", StringComparison.Ordinal) || method.Name.StartsWith("From", StringComparison.Ordinal)
+                _ => method.Name.StartsWith("From", StringComparison.Ordinal)
+                     || method.Name.StartsWith("To", StringComparison.Ordinal) && !IsTotalScalarConversion(context.Compilation, method)
             };
         }
 
@@ -123,6 +124,39 @@ public sealed class Fp0302PartialMemberAnalyzer : DiagnosticAnalyzer
         }
 
         return method.Name is "Dequeue" or "Peek" or "Pop" && IsInSystemCollections(type);
+    }
+
+    private static bool IsTotalScalarConversion(Compilation compilation, IMethodSymbol method)
+    {
+        if (method.Parameters.Length != 1)
+            return false;
+
+        var source = method.Parameters[0].Type;
+        var destination = method.ReturnType;
+        var from = source.SpecialType;
+        var to = destination.SpecialType;
+        if (from == to && from != SpecialType.None)
+            return true;
+
+        if (from == SpecialType.System_Boolean || to == SpecialType.System_Boolean)
+        {
+            var other = from == SpecialType.System_Boolean ? to : from;
+            return other is SpecialType.System_SByte or SpecialType.System_Byte
+                or SpecialType.System_Int16 or SpecialType.System_UInt16 or SpecialType.System_Int32 or SpecialType.System_UInt32
+                or SpecialType.System_Int64 or SpecialType.System_UInt64
+                or SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal;
+        }
+
+        if (to == SpecialType.System_Char)
+            return from is SpecialType.System_Byte or SpecialType.System_UInt16;
+
+        // Convert rejects these character conversions even though C# has implicit numeric conversions for them.
+        if (from == SpecialType.System_Char && to is SpecialType.System_Single or SpecialType.System_Double or SpecialType.System_Decimal)
+            return false;
+
+        var conversion = compilation.ClassifyConversion(source, destination);
+        // Floating-point results can round or become infinity. Neither outcome throws.
+        return conversion.IsNumeric && (conversion.IsImplicit || to is SpecialType.System_Single or SpecialType.System_Double);
     }
 
     private static bool IsLinqOperatorClass(INamedTypeSymbol type, out bool isEnumerable)

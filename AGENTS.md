@@ -146,7 +146,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0202 | A property with a `set` accessor (`init` is allowed) | the `set` keyword |
 | FP0203 | A record or readonly struct has a field or property whose type is an array (including `System.Array`), `StringBuilder`, `Memory<T>`, `ArraySegment<T>`, any type declared directly in `System.Collections`, `System.Collections.Generic` or `System.Collections.ObjectModel` (interfaces included), or a nested `Builder` type of an immutable collection. The other types of `System.Collections.Immutable` and `.Frozen` are the collections to use | the member name (for positional records: the parameter name) |
 | FP0301 | A `throw` statement or `throw` expression, including `throw;`; a call to a static `Throw…` helper of an exception type; a call to a member annotated `[DoesNotReturn]` | the `throw` keyword; the method name |
-| FP0302 | Uses a partial operation in the list below. Method entries cover calls and method groups | see list |
+| FP0302 | Uses a partial operation in the list below. Method entries apply to the overload selected for a call or method group | see list |
 | FP0303 | (a) A method, local function, lambda, getter or operator returns `null` or `default` through a result type that can hold null, including async results, yielded values, pointers and unconstrained type parameters. (b) A method, local function or operator writes `T?` anywhere in its return type, including tuple elements and type arguments. (c) The null-forgiving operator `!` | (a) the literal or `default` expression; (b) each such `?` token; (c) the `!` token |
 | FP0401 | A class or record in core is open: it carries neither `sealed`, `static` nor `closed`. Cases of a closed class belong to FP0403 | the type's name |
 | FP0403 | A direct subtype of a closed class carries neither `sealed` nor `closed` | the case's name |
@@ -155,7 +155,7 @@ The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section m
 | FP0502 | A `switch` statement over a union value has no catch-all and leaves a case unhandled (handling: below). Behind a cast to `object` or an interface, no label handles a case of a union that holds its case in `Value` | the `switch` keyword |
 | FP0503 | Picks one case out of a union value outside a `switch`: an `is` expression whose pattern names a type, or an `as` expression | the type or pattern to the right of `is`; the type to the right of `as` |
 | FP0601 | Inspects a runtime type that the static type hides. The inspected value has static type `object`, `dynamic`, a type parameter or `Nullable<T>` of a type parameter. Union values are exempt and keep their identity through upcasts at the head of `switch`, `is` or `as`. Reports `is` and `as` type tests, type patterns in switches, explicit reference downcasts, unboxing casts, casts from `dynamic` to a more specific type, and calls to `Object.GetType()` or its dynamic equivalent. Tests for null alone are allowed. An `object` parameter of a member that overrides or implements a member declared outside core (`Equals(object)`, `CompareTo(object)`) may be inspected within that member. Also reports `typeof(T)` and `typeof(T?)` of a type parameter and every written use of `dynamic` | the `is` or `as` keyword, the switch pattern, the cast or `typeof` expression, the `GetType` name, the `dynamic` identifier |
-| FP0701 | A lambda or local function captures a local or parameter that is assigned anywhere after its declaration, inside or outside the closure (including `++`, `--`, compound assignment, `ref`/`out` argument) | the first use of that variable inside the closure body |
+| FP0701 | A lambda, anonymous method or local function captures a local or parameter that is assigned anywhere after its declaration, inside or outside the closure (including `++`, `--`, compound assignment and `ref`/`out` arguments). Calling an extension method or evaluating an extension property or indexer with a `ref` receiver counts as passing the receiver by writable reference. A by-value setter on a struct gets a copy of the receiver. An `in` or `ref readonly` receiver permits reads | the first use of that variable inside the closure body |
 | FP0801 | Uses a Shell type (entry rule below); a `lock` statement | see entry rule; the `lock` keyword |
 | FP0802 | Uses an Async type (entry rule below); an `async` lambda or anonymous method | see entry rule; the `async` keyword |
 | FP0803 | A type outside core derives from a core class or implements a core interface | the name token of that core type in the base list |
@@ -199,7 +199,7 @@ Culture-free types: `char`, `bool`, `Guid`, `Rune`, `Version`, `Uri`, every enum
 | Member | At |
 | --- | --- |
 | A static `Parse` or `ParseExact` of a Pure type, or through a type parameter (`T.Parse`) | the method name |
-| `System.Convert`: every `To…` method except `ToString`, `ToBase64String`, `ToBase64CharArray`, `ToHexString`, `ToHexStringLower`; every `From…` method; `ChangeType` | the method name |
+| `System.Convert.ChangeType`, every `From…` method and every `To…` method except `ToString`, `ToBase64String`, `ToBase64CharArray`, `ToHexString`, `ToHexStringLower` and the total one-argument scalar overloads described below | the method name |
 | `First`, `Last`, `Single`, `ElementAt` of `Enumerable` and `ImmutableArrayExtensions`; `Enumerable.Aggregate` without a seed; `Min`, `Max`, `Average`, `MinBy`, `MaxBy` when the result is a non-nullable value type | the method name |
 | `Dequeue`, `Peek`, `Pop` of any `System.Collections*` type | the method name |
 | A read of a dictionary indexer: the type is declared in `System.Collections` or below, implements `IDictionary<,>` or `IReadOnlyDictionary<,>` or derives from `KeyedCollection<,>`, and the indexer takes the key | the whole element access |
@@ -207,6 +207,13 @@ Culture-free types: `char`, `bool`, `Guid`, `Rune`, `Version`, `Uri`, every enum
 | `Nullable<T>.Value`, unless guarded | the `Value` name |
 | Integer or `decimal` division and remainder (`/`, `%`, `/=`, `%=`), unless the divisor is a constant other than zero or guarded | the operator token |
 | An explicit reference downcast or unboxing cast between named types (casts from `object`, `dynamic` and type parameters are FP0601) | the cast expression |
+
+A one-argument scalar `System.Convert` overload accepts every input for an identity conversion (including
+`DateTime`), a conversion between `bool` and a numeric type other than `char`, or an integral conversion whose
+destination includes the entire source range (`char` has the range of `ushort`). The other total cases are
+conversion from an integral type other than `char` to `decimal` and from a numeric type other than `char` to
+`float` or `double`. Rounding and floating-point infinity are successful results. Scalar overloads taking text,
+an object, a provider or a radix can fail and are reported.
 
 A use is **guarded** when a condition that tests the same symbol stands before it: the condition of an enclosing
 `if`, `while`, `for`, `?:` or `when`, the left side of an enclosing `&&` or `||`, or the condition of an `if`
@@ -217,8 +224,8 @@ for `Value`, `HasValue` or a null test on the same nullable. When several case l
 each label needs a qualifying `when` to guard its body. The rule accepts the conditions as written and leaves their
 logic to the author.
 
-FP0302 is a list by nature. Each entry has a total sibling (`TryParse`, `FirstOrDefault`, `TryGetValue`, a list
-pattern, a type pattern), so every report comes with a way out.
+Use a total alternative such as `TryParse`, `FirstOrDefault`, `TryGetValue`, a list pattern or a type pattern.
+For an integer conversion that can overflow, check the range and cast the value on the in-range branch.
 
 ### Reached from a parameter, reached from a field, mutating call (FP0104, FP0105, FP0203)
 
