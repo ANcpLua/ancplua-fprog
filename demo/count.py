@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the demo and counts what the compiler and the ancplua-fprog analyzers report, file by file.
+"""Builds the demo and counts what the compiler and ANcpLua.Fprog.Analyzers report, file by file.
 
 Usage:  python3 count.py            build, print the table, exit 1 when a file differs from its expectation
         python3 count.py --no-build read the SARIF logs of the last build

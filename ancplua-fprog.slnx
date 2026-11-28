@@ -1,4 +1,4 @@
 <Solution>
-    <Project Path="ancplua-fprog.Tests/ancplua-fprog.Tests.csproj"/>
-    <Project Path="ancplua-fprog/ancplua-fprog.csproj"/>
+    <Project Path="ANcpLua.Fprog.Analyzers.Tests/ANcpLua.Fprog.Analyzers.Tests.csproj"/>
+    <Project Path="ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj"/>
 </Solution>

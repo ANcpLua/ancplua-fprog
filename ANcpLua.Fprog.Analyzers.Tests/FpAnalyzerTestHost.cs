@@ -23,7 +23,7 @@ namespace ancplua_fprog.Tests;
 /// </summary>
 internal static class FpAnalyzerTestHost
 {
-    private const string AnalyzerAssemblyName = "ancplua-fprog";
+    private const string AnalyzerAssemblyName = "ANcpLua.Fprog.Analyzers";
 
     /// <summary>The marker attributes that define the rule scope (see AGENTS.md, "Scope").</summary>
     internal const string AnnotationsSource = """

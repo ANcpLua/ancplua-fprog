@@ -15,8 +15,9 @@ from xml.etree import ElementTree
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROJECT = "ancplua-fprog/ancplua-fprog.csproj"
 PACKAGE = "ANcpLua.Fprog.Analyzers"
+PROJECT = f"{PACKAGE}/{PACKAGE}.csproj"
+LEGACY_PROJECT = "ancplua-fprog/ancplua-fprog.csproj"
 REPO = "ANcpLua/ancplua-fprog"
 PLAYGROUND = ROOT / "ANcpLua.Fprog.Analyzers.Playground" / "verify.py"
 INDEX = "https://api.nuget.org/v3-flatcontainer/ancplua.fprog.analyzers/index.json"
@@ -49,7 +50,10 @@ def output(key, value):
 
 
 def version_at(revision):
-    xml = read("git", "show", f"{revision}:{PROJECT}")
+    paths = read("git", "ls-tree", "-r", "--name-only", revision, "--", PROJECT, LEGACY_PROJECT).splitlines()
+    if len(paths) != 1:
+        raise ValueError(f"Expected one analyzer project at {revision}, found {paths}")
+    xml = read("git", "show", f"{revision}:{paths[0]}")
     return ElementTree.fromstring(xml).findtext(".//VersionPrefix")
 
 
@@ -111,7 +115,7 @@ def gate(directory, version):
 
 def local(release):
     sha = read("git", "rev-parse", "HEAD")
-    version = version_at("HEAD")
+    version = ElementTree.parse(ROOT / PROJECT).findtext(".//VersionPrefix")
     if release:
         if read("git", "branch", "--show-current") != "main" or read("git", "status", "--porcelain"):
             raise ValueError("Commit the intended release on a clean local main before running make release")

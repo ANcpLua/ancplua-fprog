@@ -17,6 +17,21 @@ MARK = f"Release notes\n<!-- nuget-accepted source={SHA} payload-sha256={DIGEST}
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_version_at_reads_the_project_at_each_historical_revision(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(r, "ROOT", Path(tmp)):
+            r.run("git", "init", "--quiet", ".")
+            trees = {}
+            for path, version in ((r.LEGACY_PROJECT, "0.7.0"), (r.PROJECT, "0.8.0")):
+                project = Path(tmp) / path
+                project.parent.mkdir()
+                project.write_text(f"<Project><PropertyGroup><VersionPrefix>{version}</VersionPrefix>"
+                                   "</PropertyGroup></Project>", encoding="utf-8")
+                r.run("git", "add", "-A")
+                trees[r.read("git", "write-tree")] = version
+                project.unlink()
+            for tree, version in trees.items():
+                self.assertEqual(r.version_at(tree), version)
+
     def stub(self, name, **kwargs):
         stub = patch.object(r, name, **kwargs)
         mock = stub.start()

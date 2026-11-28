@@ -91,7 +91,7 @@ jobs:
         id: playground
         run: |
           set -euo pipefail
-          version=$(dotnet msbuild ancplua-fprog/ancplua-fprog.csproj -getProperty:VersionPrefix -nologo)
+          version=$(dotnet msbuild ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj -getProperty:VersionPrefix -nologo)
           python3 -B scripts/release.py pack --version "${version}-ci.${GITHUB_RUN_NUMBER}" --output "$RUNNER_TEMP/fprog-package"
 
       - uses: actions/upload-artifact@v4

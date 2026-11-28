@@ -1,6 +1,6 @@
 <Project>
 
-    <!-- Demo for the ancplua-fprog analyzers. Every project here compiles with the analyzers of this repository.
+    <!-- Demo for ANcpLua.Fprog.Analyzers. Every project here compiles with the analyzers of this repository.
          HappyPath must build with 0 warnings. UnhappyPath must report exactly the lines marked "// expect: <ID>".
          KnownGaps holds real bugs that the analyzers do not report (0 warnings on purpose, see README). -->
     <PropertyGroup>
@@ -15,7 +15,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="$(MSBuildThisFileDirectory)../ancplua-fprog/ancplua-fprog.csproj"
+        <ProjectReference Include="$(MSBuildThisFileDirectory)../ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj"
                           OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <Compile Include="$(MSBuildThisFileDirectory)Fprog.Annotations.cs" Link="Fprog.Annotations.cs" />
     </ItemGroup>

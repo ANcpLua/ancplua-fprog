@@ -21,7 +21,6 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 PACKAGE = "ANcpLua.Fprog.Analyzers"
 PROJECT = HERE.name + ".csproj"
-ANALYZER = "analyzers/dotnet/cs/ancplua-fprog.dll"
 MARKER = "contentFiles/cs/any/Fprog/FprogAttributes.cs"
 OFFICIAL = "https://api.nuget.org/v3/index.json"
 CASES = ("HappyPath", "UnhappyPath")
@@ -39,6 +38,13 @@ def run(args, cwd, env, success=True):
     if success and result.returncode:
         raise ValueError(f"{' '.join(map(str, args))} failed ({result.returncode})\n{result.stdout[-8000:]}")
     return result
+
+
+def analyzer_asset(version):
+    # Packages built before the 0.8 rename used the original assembly name.
+    core = tuple(map(int, version.partition("-")[0].split(".")))
+    name = "ancplua-fprog" if core < (0, 8, 0) else PACKAGE
+    return f"analyzers/dotnet/cs/{name}.dll"
 
 
 def inspect_package(archive, expected_commit):
@@ -64,7 +70,7 @@ def inspect_package(archive, expected_commit):
         payload = sorted(name for name in names if not name.endswith("/") and not (
             name in {".signature.p7s", "[Content_Types].xml", "_rels/.rels"} or
             name.startswith("package/services/metadata/core-properties/")))
-        require(set(payload) == {specs[0], ANALYZER, MARKER, "README.md", "LICENSE"},
+        require(set(payload) == {specs[0], analyzer_asset(version), MARKER, "README.md", "LICENSE"},
                 f"Unexpected package payload: {payload}")
         digest = hashlib.sha256()
         for name in payload:
@@ -105,7 +111,7 @@ def stage(workspace):
 def active_rules():
     active = set()
     for name in ("Shipped", "Unshipped"):
-        table = ROOT / "ancplua-fprog" / f"AnalyzerReleases.{name}.md"
+        table = ROOT / PACKAGE / f"AnalyzerReleases.{name}.md"
         section = None
         for line in table.read_text(encoding="utf-8").splitlines():
             if line.startswith("### "):
@@ -149,6 +155,7 @@ def read_sarif(path):
 
 
 def verify_restore(workspace, project, version, config, props, env, source, candidate):
+    analyzer = analyzer_asset(version)
     run(["dotnet", "restore", project / PROJECT, "--configfile", config, "--no-http-cache", "--disable-build-servers", *props], workspace, env)
     install = workspace / "packages" / PACKAGE.lower() / version.lower()
     archive = install / f"{PACKAGE.lower()}.{version.lower()}.nupkg"
@@ -169,19 +176,19 @@ def verify_restore(workspace, project, version, config, props, env, source, cand
         key = f"{PACKAGE}/{version}"
         target = assets["targets"]["net11.0"][key]
         require(not target.get("compile") and not target.get("runtime"), "Analyzer unexpectedly supplies runtime/compile assets")
-        require(ANALYZER in target.get("analyzers", {}), "No recorded analyzer asset for the exact restored version")
+        require(analyzer in target.get("analyzers", {}), f"Restore did not record the expected analyzer: {analyzer}")
         require(target["contentFiles"][MARKER]["buildAction"] == "Compile", "Package did not inject its marker source")
         # NuGet's package content hash omits the repository-signing envelope.
         require(assets["libraries"][key]["sha512"] == metadata["contentHash"],
                 "project.assets.json does not match NuGet's restored package content hash")
     with zipfile.ZipFile(archive) as package:
-        for name in (ANALYZER, MARKER):
+        for name in (analyzer, MARKER):
             require((install / name).read_bytes() == package.read(name), f"Restored {name} differs from packaged bytes")
     resolved = run(["dotnet", "msbuild", project / PROJECT, "-nologo", "-nodeReuse:false",
                     "-t:ResolveLockFileAnalyzers;RunProduceContentAssets", "-getItem:Analyzer,Compile", *props],
                    project, env)
     items = json.loads(resolved.stdout)["Items"]
-    for kind, file in (("Analyzer", ANALYZER), ("Compile", MARKER)):
+    for kind, file in (("Analyzer", analyzer), ("Compile", MARKER)):
         paths = [Path(item["FullPath"]).resolve() for item in items[kind]]
         require(paths.count((install / file).resolve()) == 1, f"MSBuild did not select the packaged {kind} item: {file}")
     return archive

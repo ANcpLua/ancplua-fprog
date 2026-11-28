@@ -33,7 +33,7 @@ key, so the repository stores no long-lived NuGet API key.
 
 ## Release a version
 
-1. Set the stable `VersionPrefix` in `ancplua-fprog/ancplua-fprog.csproj`, give `CHANGELOG.md` a released
+1. Set the stable `VersionPrefix` in `ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj`, give `CHANGELOG.md` a released
    `## <version>` section, and update the README installation example. Move new rule rows from
    `AnalyzerReleases.Unshipped.md` to the named release in `AnalyzerReleases.Shipped.md`. A new or wider rule can
    break warnings-as-errors builds, so use a minor version below 1.0 and a major version from 1.0 on.
@@ -41,10 +41,10 @@ key, so the repository stores no long-lived NuGet API key.
    DLL, marker source, package version and compiler diagnostics; it removes its temporary projects, packages, and caches.
 3. Commit the intended release on local `main`. Use the exact stable version as a Git trailer, keeping a blank line
    before it. From a clean checkout run `make release`. This tests the package for that committed SHA and pushes it to
-   the canonical `main` only if the consumer gate passes. For example, for the next patch after 0.7.0:
+   the canonical `main` only if the consumer gate passes. For example, when preparing 0.8.0:
 
    ```sh
-   git commit -m "Release 0.7.1" -m "NuGet-Release: 0.7.1"
+   git commit -m "Release 0.8.0" -m "NuGet-Release: 0.8.0"
    make release
    ```
 

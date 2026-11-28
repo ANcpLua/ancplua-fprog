@@ -3,6 +3,7 @@
     <PropertyGroup>
         <TargetFramework>net11.0</TargetFramework>
         <Nullable>enable</Nullable>
+        <RootNamespace>ancplua_fprog.Tests</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
@@ -17,7 +18,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="../ancplua-fprog/ancplua-fprog.csproj"/>
+        <ProjectReference Include="../ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj"/>
     </ItemGroup>
 
 </Project>

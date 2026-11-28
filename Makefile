@@ -4,9 +4,9 @@ JB ?= $(DOTNET) tool run jb
 REF ?= $(DOTNET) tool run ref
 
 SLN := ancplua-fprog.slnx
-ANALYZER_PROJ := ancplua-fprog/ancplua-fprog.csproj
+ANALYZER_PROJ := ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj
 ANALYZER_OUT := artifacts/analyzer
-ANALYZER_DLL := $(ANALYZER_OUT)/ancplua-fprog.dll
+ANALYZER_DLL := $(ANALYZER_OUT)/ANcpLua.Fprog.Analyzers.dll
 PACKAGE_OUT := artifacts/package
 
 .DEFAULT_GOAL := help

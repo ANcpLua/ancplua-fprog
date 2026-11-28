@@ -11,7 +11,7 @@ call site. For example, an injected `Func<int>` can read the clock when the core
 ## Install
 
 ```xml
-<PackageReference Include="ANcpLua.Fprog.Analyzers" Version="0.7.0" PrivateAssets="all" />
+<PackageReference Include="ANcpLua.Fprog.Analyzers" Version="0.8.0" PrivateAssets="all" />
 ```
 
 The package needs the .NET 11 SDK (11.0.100 or later), whose compiler is Roslyn 5.12. It adds the analyzers and

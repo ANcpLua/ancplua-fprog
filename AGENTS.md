@@ -130,7 +130,7 @@ Pure list:
 namespace or type names that count as Pure, each namespace with everything below it. It is the door for trusted
 libraries: `fprog_pure_apis = NodaTime, LanguageExt`. Read it per syntax tree, with the global options as fallback.
 
-The list lives in one file, `ancplua-fprog/Shared/Purity.cs`, and this section mirrors it.
+The list lives in one file, `ANcpLua.Fprog.Analyzers/Shared/Purity.cs`, and this section mirrors it.
 
 ## Rule catalog
 
@@ -270,7 +270,7 @@ For an integer conversion that can overflow, check the range and cast the value 
 - A **mutating call** writes its receiver: an instance method, or an extension method of
   `System.Collections.Generic.CollectionExtensions`, bound to `System.Array`, `StringBuilder`, `Span<T>`, or a
   `System.Collections*` type outside `.Immutable` and `.Frozen` (their nested `Builder` types count), whose name is
-  in the shared table of mutating members in `ancplua-fprog/Shared/Mutators.cs`. The static writers of
+  in the shared table of mutating members in `ANcpLua.Fprog.Analyzers/Shared/Mutators.cs`. The static writers of
   `System.Array`, `System.Buffer` and `System.MemoryExtensions` (`Sort`, `Reverse`, `Clear`, `Fill`, `Copy`,
   `BlockCopy`, …) and every `CopyTo` or `TryCopyTo` write their destination argument.
 - The record member `PrintMembers(StringBuilder)` appends to its parameter by contract and is exempt from FP0104.
@@ -322,16 +322,16 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
 
 ## Conventions
 
-- One analyzer per rule: `ancplua-fprog/Rules/Fp####<Name>Analyzer.cs`. Shared models live in
-  `ancplua-fprog/Shared/`: `CoreScope`, `Purity`, `EntryRule`, `UnionModel`, `Mutators`, `LocalAliases`,
+- One analyzer per rule: `ANcpLua.Fprog.Analyzers/Rules/Fp####<Name>Analyzer.cs`. Shared models live in
+  `ANcpLua.Fprog.Analyzers/Shared/`: `CoreScope`, `Purity`, `EntryRule`, `UnionModel`, `Mutators`, `LocalAliases`,
   `MutationRoots` and `PartialUseGuards`.
 - Descriptors come from `FpDescriptors.Create(id, title, messageFormat)`: category `Functional`, severity `Warning`,
   enabled by default. The message tells the reader what to write instead.
-- `AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` in `ancplua-fprog/` together list exactly the
+- `AnalyzerReleases.Shipped.md` and `AnalyzerReleases.Unshipped.md` in `ANcpLua.Fprog.Analyzers/` together list exactly the
   IDs of the catalog.
 - Analyzers run concurrently and skip generated code (`EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis`).
   A rule that needs the whole compilation builds its model once in `RegisterCompilationStartAction`.
-- Tests: `ancplua-fprog.Tests/Rules/Fp####Tests.cs`, one class per rule, methods named
+- Tests: `ANcpLua.Fprog.Analyzers.Tests/Rules/Fp####Tests.cs`, one class per rule, methods named
   `FP####_<What>_Reports` or `FP####_<What>_NoReport`, run through
   `FpAnalyzerTestHost.VerifyRuleAsync("FP####", source, cancellationToken)` with markup `{|FP####:span|}`. Each
   form in a catalog row has a `_Reports` test, and each exemption and each neighbouring correct form has a
@@ -345,10 +345,10 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
 
 ## Package and release
 
-- The product is the NuGet package `ANcpLua.Fprog.Analyzers`, packed from `ancplua-fprog/ancplua-fprog.csproj`. It
+- The product is the NuGet package `ANcpLua.Fprog.Analyzers`, packed from `ANcpLua.Fprog.Analyzers/ANcpLua.Fprog.Analyzers.csproj`. It
   holds the analyzer DLL under `analyzers/dotnet/cs`, the source file `contentFiles/cs/any/Fprog/FprogAttributes.cs`,
   `README.md` and `LICENSE`. It has no `lib/` folder and no dependencies, because the compiler provides Roslyn.
-- `ancplua-fprog/contentFiles/FprogAttributes.cs` compiles `Fprog.FunctionalCoreAttribute` into the consuming project
+- `ANcpLua.Fprog.Analyzers/contentFiles/FprogAttributes.cs` compiles `Fprog.FunctionalCoreAttribute` into the consuming project
   as an internal type; `FPROG_NO_ATTRIBUTES` leaves it out. It declares the same targets as
   `FpAnalyzerTestHost.AnnotationsSource` and `demo/Fprog.Annotations.cs`. Change the three together.
 - `ANcpLua.Fprog.Analyzers.Playground/` is the production NuGet acceptance gate. Run `make playground` to pack and test a local

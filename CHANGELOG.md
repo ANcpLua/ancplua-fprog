@@ -3,6 +3,12 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
+## 0.8.0
+
+* The analyzer assembly is now `ANcpLua.Fprog.Analyzers.dll`. A normal NuGet `PackageReference` loads
+  it automatically. Scripts and explicit analyzer references that use the old filename should switch
+  from `analyzers/dotnet/cs/ancplua-fprog.dll` to `analyzers/dotnet/cs/ANcpLua.Fprog.Analyzers.dll`.
+
 ## 0.7.0
 
 * FP0104 and FP0105 follow references in a tuple local through both its element names and its `ItemN` fields.
