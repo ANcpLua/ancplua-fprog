@@ -1,8 +1,9 @@
 # Publishing
 
-A release is the package **ANcpLua.Fprog.Analyzers** on nuget.org, the tag `v<version>` and a GitHub release with
-the changelog section of that version. Pushing the tag starts it: `.github/workflows/check.yml` in
-[`ANcpLua/ancplua-fprog`](https://github.com/ANcpLua/ancplua-fprog) runs `check`, then `pack`, then `publish`.
+A release consists of `ANcpLua.Fprog.Analyzers` on nuget.org, the immutable `v<version>` source tag and the
+GitHub release. [`check.yml`](../.github/workflows/check.yml) publishes deliberately marked commits on `main`.
+The [Playground](../ANcpLua.Fprog.Analyzers.Playground) tests the exact NuGet archive as a customer’s .NET 11
+project would consume it, with controls and expected diagnostics for every shipped rule.
 
 ## Set up once
 
@@ -32,30 +33,57 @@ key, so the repository stores no long-lived NuGet API key.
 
 ## Release a version
 
-1. **Version.** `VersionPrefix` in `ancplua-fprog/ancplua-fprog.csproj` is the version to release, and
-   `CHANGELOG.md` has its section. Each release needs a new version.
-2. **Rule tracking.** Move the rows of `ancplua-fprog/AnalyzerReleases.Unshipped.md` into a `## Release <version>`
-   section of `ancplua-fprog/AnalyzerReleases.Shipped.md`, and leave the header lines of the unshipped file.
-3. **Gates.** `make check`, `python3 demo/count.py` and `make pack` succeed. Commit on `main` and push; the `check`
-   workflow of that commit is green.
-4. **Try the product.** Reference `artifacts/package/ANcpLua.Fprog.Analyzers.<version>.nupkg` from a new `net11.0`
-   project through a local package source, build the examples of the README with it and see the findings the README
-   shows. A green CI run does not replace this check.
-5. **Publish.** Tag that commit and push the tag. The `publish` job rejects a tag that differs from `VersionPrefix`.
+1. Set the stable `VersionPrefix` in `ancplua-fprog/ancplua-fprog.csproj`, give `CHANGELOG.md` a released
+   `## <version>` section, and update the README installation example. Move new rule rows from
+   `AnalyzerReleases.Unshipped.md` to the named release in `AnalyzerReleases.Shipped.md`. A new or wider rule can
+   break warnings-as-errors builds, so use a minor version below 1.0 and a major version from 1.0 on.
+2. While editing, run `make check`, `python3 demo/count.py` and `make playground`. The Playground checks the packed
+   DLL, marker source, package version and compiler diagnostics; it removes its temporary projects, packages, and caches.
+3. Commit the intended release on local `main`. Use the exact stable version as a Git trailer, keeping a blank line
+   before it. From a clean checkout run `make release`. This tests the package for that committed SHA and pushes it to
+   the canonical `main` only if the consumer gate passes. For example, for the next patch after 0.7.0:
 
    ```sh
-   git tag v<version> && git push origin v<version>
-   gh run watch "$(gh run list --workflow check.yml --branch v<version> --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+   git commit -m "Release 0.7.1" -m "NuGet-Release: 0.7.1"
+   make release
    ```
-6. **Confirm.** The version appears in `https://api.nuget.org/v3-flatcontainer/ancplua.fprog.analyzers/index.json`.
-   NuGet validates and indexes a new package first, which can take several minutes.
-7. **GitHub release.** Publish the changelog section of the version as the release notes:
 
-   ```sh
-   gh release create v<version> --verify-tag --title "ANcpLua.Fprog.Analyzers <version>" --notes-file <file with the changelog section>
-   ```
-8. **Next version.** Raise `VersionPrefix` to the next version, so that packages built from `main` sort after the
-   release.
+4. Watch the `check` workflow for the pushed SHA. It runs repository checks, rebuilds the stable package on a clean runner,
+   and runs the Playground on **the same file it submits**. It creates the immutable tag without overwriting an existing
+   ref, uses the `nuget` environment and OIDC to submit the package, then records the changelog and a source/payload receipt
+   in the GitHub release. The green `publish` job confirms acceptance or a byte-verified existing publication.
+   Old-style `v<version>` tag pushes remain eligible if the tag matches the project version and points to a commit on main.
+5. Raise the development `VersionPrefix` when appropriate. Leave the release trailer out of development and housekeeping
+   commits. They run ordinary checks and the CI-prerelease Playground.
 
-A new or wider rule can break a build that treats warnings as errors: it is a minor version below 1.0 and a major
-version from 1.0 on.
+## Check the indexed package
+
+NuGet controls validation and indexing after submission. The read-only [Verify published package workflow](../.github/workflows/verify-published.yml)
+checks that the upstream run’s `publish` job succeeded, waits up to 20 minutes for index visibility and resolves the tag to
+its exact SHA. It runs the SDK and Playground from that release and checks the signed nuget.org payload against the accepted
+candidate digest. No copy of the local candidate is installed in the user’s global NuGet cache. CI and local consumer runs
+discard the private feed, restored candidate, build files and test project, including when a diagnostic assertion fails.
+
+To recheck a published version without a publish or tag operation:
+
+```sh
+gh workflow run verify-published.yml --ref main -f version=0.7.0
+```
+
+Manual checks validate the release tag and expected source commit. For historical tags that predate the Playground, such
+as `v0.7.0`, they use the compatible current-main Playground. To test an exact indexed version directly on your machine:
+
+```sh
+python3 -B ANcpLua.Fprog.Analyzers.Playground/verify.py --nuget 0.7.0 --expected-commit "$(git rev-parse 'v0.7.0^{commit}')"
+```
+
+## Recover a release
+
+- If a pre-publication gate fails, fix the failing source or fixture. An untagged superseded commit cannot reserve an old
+  version on top of newer `main` work. Never move a tag that identifies published or potentially submitted bytes.
+- If the submission outcome was uncertain, rerun the original failed jobs. A saved GitHub release receipt recognizes a
+  previous acceptance before indexing finishes. For an already indexed version the Playground verifies the official package
+  commit and payload before the release is accepted. A version collision with different bytes fails; prepare a new version.
+- If only the indexed check times out or its network access fails, rerun **Verify published package**. It has read-only
+  permissions. Check validation notices in the NuGet account if the package does not appear. Trusted Publishing supplies the
+  credentials; the index is confirmed by the clean public-feed build.

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ErrorLog>$(BaseIntermediateOutputPath)ReferencedTypes.sarif,version=2.1</ErrorLog>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../demo/ReferencedTypes/*.cs" />
+  </ItemGroup>
+</Project>

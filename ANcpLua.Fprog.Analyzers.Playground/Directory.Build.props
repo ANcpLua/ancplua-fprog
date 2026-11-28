@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestoreEnableAnalyzerAssets>true</RestoreEnableAnalyzerAssets>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Condition="'$(PlaygroundVersion)' != ''" Include="ANcpLua.Fprog.Analyzers" Version="[$(PlaygroundVersion)]" PrivateAssets="all" />
+  </ItemGroup>
+  <Target Name="RequireExactPlaygroundPackage" BeforeTargets="CollectPackageReferences;PrepareForBuild"
+          Condition="'$(PlaygroundVersion)' == ''">
+    <Error Text="Run ANcpLua.Fprog.Analyzers.Playground/verify.py with --package an-exact-candidate.nupkg or --nuget an-exact-version." />
+  </Target>
+</Project>

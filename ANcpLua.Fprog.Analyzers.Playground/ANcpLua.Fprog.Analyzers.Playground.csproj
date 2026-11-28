@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PlaygroundCase Condition="'$(PlaygroundCase)' == ''">HappyPath</PlaygroundCase>
+    <AllowUnsafeBlocks Condition="'$(PlaygroundCase)' == 'UnhappyPath'">true</AllowUnsafeBlocks>
+    <ErrorLog>$(BaseIntermediateOutputPath)$(PlaygroundCase).sarif,version=2.1</ErrorLog>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="ReferencedTypes/ReferencedTypes.csproj" />
+    <Compile Include="../demo/$(PlaygroundCase)/*.cs" />
+  </ItemGroup>
+</Project>

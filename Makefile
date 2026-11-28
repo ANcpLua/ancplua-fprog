@@ -52,3 +52,10 @@ manifest: ## Record commit, SDK and tool versions for this run
 	  date -u +"utc: %Y-%m-%dT%H:%M:%SZ"; \
 	  $(DOTNET) tool list --local; \
 	} > artifacts/run-manifest.txt; cat artifacts/run-manifest.txt
+
+.PHONY: playground release
+playground: ## Pack and run the analyzer package's production consumer tests locally
+	python3 -B scripts/release.py local
+
+release: ## Test a committed NuGet-Release on local main and push only if it passes
+	python3 -B scripts/release.py local --push
