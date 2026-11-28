@@ -392,5 +392,10 @@ What the rules leave to the author, stated so nobody mistakes it for coverage:
   assigning a new list to `p.Item1` anywhere in the block leaves writes through `p.Items` silent, while writes
   through `p.Other` still report. Give each fresh value a local of its own when the distinction matters.
 - FP0302 guards are syntactic. FP0303 (b) relies on nullable annotations.
+- Totality stops at the numeric limit. An operation that fails only at the edge of a numeric or representable
+  range is left to the author: `decimal` and `checked` arithmetic, `Math.Abs(int.MinValue)`, `int.MinValue / -1`,
+  a sum that overflows, a date beyond year 9999. Reporting these would flag every `decimal` sum in money code.
+- A value returned in place of a failure, such as `-1`, `0m` or `""`, looks like any other value. No rule tells
+  it from a real result.
 - A record's copy constructor is protected by the language (CS8878), so a record union can be copied by a subtype
   that FP0403 reports in its own project.
