@@ -3,7 +3,7 @@
 What each release changes for a project that references the package. The exact definition of every rule is the
 rule catalog in [AGENTS.md](AGENTS.md).
 
-## 0.7.0 (unreleased)
+## 0.7.0
 
 * FP0104 and FP0105 follow references in a tuple local through both its element names and its `ItemN` fields.
   If `pair.Items` holds a caller's list or a field's list, `pair.Items.Add(item)` is reported. Replacing that
