@@ -72,6 +72,8 @@ Observed with SDK 11.0.100, whose compiler is Roslyn 5.12.0, and with the 5.12.0
 | `make check` | All of the above. Work is done when this exits 0 |
 | `python3 demo/count.py` | Builds `demo/`, compares every diagnostic with the `// expect: <ID>` comments, ends with `RESULT: everything as expected` |
 | `make pack` | Packs `ANcpLua.Fprog.Analyzers` into `artifacts/package` |
+| `make playground` | Packs and tests the NuGet consumer happy and unhappy paths in temporary storage |
+| `make release` | Tests an intentional release commit on clean local main, then pushes the checked SHA to the canonical main |
 
 ## Scope
 
@@ -349,9 +351,17 @@ FP0601 reports `dynamic`, so a call bound at run time is already marked at its s
 - `ancplua-fprog/contentFiles/FprogAttributes.cs` compiles `Fprog.FunctionalCoreAttribute` into the consuming project
   as an internal type; `FPROG_NO_ATTRIBUTES` leaves it out. It declares the same targets as
   `FpAnalyzerTestHost.AnnotationsSource` and `demo/Fprog.Annotations.cs`. Change the three together.
-- CI (`.github/workflows/check.yml`) runs on every push: `check` with the steps of `make check` and the demo count,
-  then `pack` with a layout check. On a `v<version>` tag, `publish` pushes the package to nuget.org through NuGet
-  Trusted Publishing. `docs/PUBLISHING.md` is the release runbook; `CHANGELOG.md` says what each release changes.
+- `ANcpLua.Fprog.Analyzers.Playground/` is the production NuGet acceptance gate. Run `make playground` to pack and test a local
+  candidate. The Playground consumes the package reference and its marker source in isolated clean projects. Require a
+  clean happy path and the expected diagnostic ID, source location and count on the unhappy path for every shipped rule.
+  Preserve this coverage when adding or changing a rule. The demo and rule unit tests also run in CI.
+- For a release, prepare the exact stable `VersionPrefix`, released changelog heading, README version and rule tracking.
+  Commit that work to local `main` with the trailer `NuGet-Release: <version>`, then run `make release` from a clean checkout.
+  It tests that commit's packed analyzer and pushes the checked SHA to `origin/main` on success. The `check.yml` workflow
+  gates the exact stable candidate, reserves its immutable tag, uses NuGet Trusted Publishing and records the GitHub release.
+  Watch the successful `publish` job for submission. The read-only `Verify published package` workflow separately retries
+  indexing and then runs the release's Playground from nuget.org. Follow [the release and recovery runbook](docs/PUBLISHING.md)
+  on a failure. Ordinary commits, including the next development version bump, carry no release trailer.
 - `VersionPrefix` in the project file is the next version. A new or wider rule can break a build that treats
   warnings as errors, so it is a minor version below 1.0 and a major version from 1.0 on.
 - A new ID goes into `AnalyzerReleases.Unshipped.md`. At a release its rows move to a `## Release <version>`

@@ -1,0 +1,79 @@
+name: Verify published package
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact published analyzer version to verify in the current Playground
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    if: >-
+      github.repository == 'ANcpLua/ancplua-fprog' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Confirm the upstream run published an accepted release
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            echo "accepted=true" >> "$GITHUB_OUTPUT"
+          else
+            jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "publish" and .conclusion == "success") | .id')
+            if [[ -n "$jobs" ]]; then echo "accepted=true" >> "$GITHUB_OUTPUT"; fi
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.publication.outputs.accepted == 'true'
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve the verified tag, wait for nuget.org and select its Playground
+        id: indexed
+        if: steps.publication.outputs.accepted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ github.event.workflow_run.head_sha }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            python3 -B scripts/release.py prepare-indexed --version "$REQUESTED_VERSION"
+          else
+            python3 -B scripts/release.py prepare-indexed --sha "$SOURCE"
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.publication.outputs.accepted == 'true'
+        with:
+          global-json-file: global.json
+
+      - name: Compile both consumer paths against the signed published package
+        if: steps.publication.outputs.accepted == 'true'
+        env:
+          VERSION: ${{ steps.indexed.outputs.version }}
+          COMMIT: ${{ steps.indexed.outputs.commit }}
+          DIGEST: ${{ steps.indexed.outputs.digest }}
+        run: |
+          expected=()
+          if [[ -n "$DIGEST" ]]; then expected=(--expected-payload-sha256 "$DIGEST"); fi
+          python3 -B ANcpLua.Fprog.Analyzers.Playground/verify.py --nuget "$VERSION" --expected-commit "$COMMIT" "${expected[@]}"

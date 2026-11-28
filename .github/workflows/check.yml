@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: check-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: check-${{ github.event_name }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.sha || 'branch' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -21,12 +21,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      release_version: ${{ steps.intent.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+
+      - name: Identify release intent
+        id: intent
+        run: python3 -B scripts/release.py intent
+
+      - name: Check release orchestration
+        run: python3 -B scripts/test_release.py
 
       - name: Restore local tools
         run: make tools
@@ -61,111 +72,99 @@ jobs:
             artifacts/*.json
             artifacts/*.binlog
           if-no-files-found: ignore
+          retention-days: 1
 
   pack:
     needs: check
+    if: ${{ needs.check.outputs.release_version == '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
-      # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
-      - name: Pack
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version_args=("-p:Version=${GITHUB_REF_NAME#v}")
-          else
-            version_args=("-p:VersionSuffix=ci.${GITHUB_RUN_NUMBER}")
-          fi
-          dotnet pack ancplua-fprog/ancplua-fprog.csproj -c Release -warnaserror -o artifacts/package "${version_args[@]}"
-
-      - name: Check the package layout
-        shell: bash
+      - name: Exercise the CI package in the production Playground
+        id: playground
         run: |
           set -euo pipefail
-          listing=$(unzip -Z1 artifacts/package/*.nupkg)
-          echo "$listing"
-          for entry in analyzers/dotnet/cs/ancplua-fprog.dll contentFiles/cs/any/Fprog/FprogAttributes.cs README.md LICENSE; do
-            grep -qx "$entry" <<< "$listing" || { echo "missing: $entry"; exit 1; }
-          done
-          if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
+          version=$(dotnet msbuild ancplua-fprog/ancplua-fprog.csproj -getProperty:VersionPrefix -nologo)
+          python3 -B scripts/release.py pack --version "${version}-ci.${GITHUB_RUN_NUMBER}" --output "$RUNNER_TEMP/fprog-package"
 
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: nupkg
-          path: artifacts/package/*.nupkg
+          path: ${{ steps.playground.outputs.candidate }}
           if-no-files-found: error
+          retention-days: 1
 
-  # Packs and checks the tagged commit itself, so it does not depend on artifact storage.
+      - name: Remove temporary pack outputs
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/fprog-package"
+
   publish:
-    needs: pack
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: check
+    if: >-
+      github.repository == 'ANcpLua/ancplua-fprog' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      needs.check.outputs.release_version != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     environment: nuget
+    concurrency:
+      group: publish-analyzer-${{ needs.check.outputs.release_version }}
+      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.check.outputs.release_version }}
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
-      - name: Check release inputs
+      - name: Acceptance-test the exact stable package to submit
+        id: playground
+        run: python3 -B scripts/release.py pack --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/fprog-package"
+
+      - name: Reserve the release tag and check existing publication
+        id: plan
         env:
-          NUGET_USER: ${{ secrets.NUGET_USER }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "$NUGET_USER" ]]; then
-            echo "Set NUGET_USER in the nuget environment to the NuGet profile name."
-            exit 1
-          fi
-          project_version=$(dotnet msbuild ancplua-fprog/ancplua-fprog.csproj -getProperty:VersionPrefix -nologo)
-          if [[ "$project_version" != "${GITHUB_REF_NAME#v}" ]]; then
-            echo "The tag $GITHUB_REF_NAME must match VersionPrefix $project_version in ancplua-fprog.csproj."
-            exit 1
-          fi
+          GH_TOKEN: ${{ github.token }}
+          PAYLOAD: ${{ steps.playground.outputs.digest }}
+        run: python3 -B scripts/release.py preflight --version "$RELEASE_VERSION" --sha "$GITHUB_SHA" --digest "$PAYLOAD"
 
-      # A v* tag sets the version (v1.2.3 -> 1.2.3); any other push packs a CI prerelease.
-      - name: Pack
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version_args=("-p:Version=${GITHUB_REF_NAME#v}")
-          else
-            version_args=("-p:VersionSuffix=ci.${GITHUB_RUN_NUMBER}")
-          fi
-          dotnet pack ancplua-fprog/ancplua-fprog.csproj -c Release -warnaserror -o artifacts/package "${version_args[@]}"
-
-      - name: Check the package layout
-        shell: bash
-        run: |
-          set -euo pipefail
-          listing=$(unzip -Z1 artifacts/package/*.nupkg)
-          echo "$listing"
-          for entry in analyzers/dotnet/cs/ancplua-fprog.dll contentFiles/cs/any/Fprog/FprogAttributes.cs README.md LICENSE; do
-            grep -qx "$entry" <<< "$listing" || { echo "missing: $entry"; exit 1; }
-          done
-          if grep -q '^lib/' <<< "$listing"; then echo "unexpected lib/ folder"; exit 1; fi
-
-      # Trusted Publishing: NuGet exchanges this workflow's identity for a short-lived key, so no API key is stored.
       - name: NuGet login with OIDC
+        if: steps.plan.outputs.should_push == 'true'
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
           user: ${{ secrets.NUGET_USER }}
 
-      - name: Push to nuget.org
+      - name: Submit the tested archive to nuget.org
+        if: steps.plan.outputs.should_push == 'true'
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        shell: bash
-        run: dotnet nuget push artifacts/package/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          CANDIDATE: ${{ steps.playground.outputs.candidate }}
+          PAYLOAD: ${{ steps.playground.outputs.digest }}
+        run: python3 -B scripts/release.py push --candidate "$CANDIDATE" --version "$RELEASE_VERSION" --sha "$GITHUB_SHA" --digest "$PAYLOAD"
+
+      - name: Record acceptance in the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAYLOAD: ${{ steps.playground.outputs.digest }}
+        run: python3 -B scripts/release.py finish --version "$RELEASE_VERSION" --sha "$GITHUB_SHA" --digest "$PAYLOAD"
+
+      - name: Remove temporary pack outputs
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/fprog-package"
